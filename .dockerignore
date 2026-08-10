@@ -1,0 +1,12 @@
+node_modules
+.next
+dist
+.git
+.wrangler
+coverage
+*.log
+backend
+docker-compose.yml
+Dockerfile
+.env*
+!.env.example

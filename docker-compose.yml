@@ -1,0 +1,59 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: knowledge
+      POSTGRES_USER: knowledge
+      POSTGRES_PASSWORD: knowledge
+    ports:
+      - "5433:5432"
+    volumes:
+      - knowledge_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowledge -d knowledge"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://knowledge:knowledge@db:5432/knowledge
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local-transformers}
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL:-}
+      EMBEDDING_API_FORMAT: ${EMBEDDING_API_FORMAT:-openai}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+      RELATED_MIN_SCORE: ${RELATED_MIN_SCORE:-0.55}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      API_INTERNAL_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  knowledge_pgdata:
+  hf_cache:
