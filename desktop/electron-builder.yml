@@ -1,0 +1,23 @@
+appId: com.knowledgecard.cabinet
+productName: 知識卡冊
+directories:
+  app: desktop
+  output: release
+files:
+  - "**/*"
+afterPack: desktop/after-pack.cjs
+asar: true
+extraResources:
+  - from: dist
+    to: kcc-web/dist
+  - from: public
+    to: kcc-web/public
+  - from: backend/seed.json
+    to: kcc-data/seed.json
+win:
+  target:
+    - nsis
+  artifactName: "KnowledgeCardCabinet-${version}-Setup.${ext}"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

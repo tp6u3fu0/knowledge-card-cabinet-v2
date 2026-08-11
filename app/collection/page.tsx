@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent, type WheelEvent } from "react";
+import { SeededCoverArt, type CoverMotif } from "../cover-art";
 
 type KnowledgeCard = {
   id: string;
@@ -14,8 +15,24 @@ type KnowledgeCard = {
   source: string;
   accent: string;
   pattern: string;
+  cover?: CoverSpec;
   tags: string[];
   related: string[];
+};
+
+type CoverSpec = {
+  version: number;
+  seed: string;
+  pattern: string;
+  accent: string;
+  color: string;
+  soft_color: string;
+  background: string;
+  rotation: number;
+  scale: number;
+  density: number;
+  orbit: number;
+  motifs?: CoverMotif[];
 };
 
 type ApiCard = {
@@ -29,6 +46,7 @@ type ApiCard = {
   detail?: string;
   source?: string;
   tags?: string[];
+  cover?: CoverSpec | null;
 };
 
 type ApiRelation = {
@@ -72,6 +90,38 @@ type CardDraftResponse = {
 const visualAccents = ["coral", "sky", "lavender", "mint"] as const;
 const visualPatterns = ["orbit", "grid", "ladder", "shelf"] as const;
 
+type CollectionView = "cards" | "relations" | "table";
+
+function ViewIcon({ view }: { view: CollectionView }) {
+  if (view === "cards") {
+    return (
+      <svg className="view-icon" viewBox="0 0 18 18" fill="none" aria-hidden="true" focusable="false">
+        <rect x="4.5" y="2.5" width="9" height="11" rx="1.7" />
+        <path d="M3 5.5v8a2 2 0 0 0 2 2h6.5" />
+        <path d="M7 6h4M7 8.5h3" />
+      </svg>
+    );
+  }
+
+  if (view === "relations") {
+    return (
+      <svg className="view-icon" viewBox="0 0 18 18" fill="none" aria-hidden="true" focusable="false">
+        <path d="m5.2 5.2 7.6 2.5M5.2 12.8l7.6-2.5" />
+        <circle cx="4" cy="4.8" r="2" />
+        <circle cx="14" cy="8.9" r="2" />
+        <circle cx="4" cy="13.2" r="2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="view-icon" viewBox="0 0 18 18" fill="none" aria-hidden="true" focusable="false">
+      <rect x="2.5" y="3" width="13" height="12" rx="1.5" />
+      <path d="M2.5 7h13M2.5 11h13M7 3v12M11.5 3v12" />
+    </svg>
+  );
+}
+
 function createEmptyDraft(): CardDraft {
   return {
     id: "",
@@ -88,6 +138,7 @@ function createEmptyDraft(): CardDraft {
 }
 
 function mapApiCard(card: ApiCard, index: number, related: string[] = []): KnowledgeCard {
+  const cover = card.cover ?? undefined;
   return {
     id: card.id,
     number: card.number,
@@ -98,11 +149,27 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
     analogy: card.analogy ?? "",
     detail: card.detail ?? "",
     source: card.source ?? "",
-    accent: visualAccents[index % visualAccents.length],
-    pattern: visualPatterns[index % visualPatterns.length],
+    accent: cover?.accent ?? visualAccents[index % visualAccents.length],
+    pattern: cover?.pattern ?? visualPatterns[index % visualPatterns.length],
+    cover,
     tags: card.tags ?? [],
     related,
   };
+}
+
+function getCoverStyle(cover?: CoverSpec): CSSProperties | undefined {
+  if (!cover) return undefined;
+  return {
+    "--cover-color": cover.color,
+    "--cover-soft-color": cover.soft_color,
+    "--cover-background": cover.background,
+    "--cover-rotation": `${cover.rotation}deg`,
+    "--cover-scale": cover.scale,
+    "--cover-density": cover.density,
+    "--cover-orbit": cover.orbit,
+    "--cover-focus-x": `${26 + cover.orbit * 48}%`,
+    "--cover-focus-y": `${28 + cover.density * 34}%`,
+  } as CSSProperties;
 }
 
 const knowledgeCards: KnowledgeCard[] = [
@@ -230,6 +297,7 @@ function KnowledgeCardPreview({
       onPointerMove={tiltCard}
       onPointerLeave={resetTilt}
       onPointerCancel={resetTilt}
+      style={getCoverStyle(card.cover)}
       aria-pressed={active}
       aria-label={`${card.title}。${card.question}。標籤：${card.tags.join("、")}`}
     >
@@ -238,11 +306,12 @@ function KnowledgeCardPreview({
         <span>{card.number}</span>
         <span>{card.topic}</span>
       </span>
-      <span className={`collection-card__art collection-card__art--${card.pattern}`}>
-        <span className="art-orb" />
-        <span className="art-line art-line--one" />
-        <span className="art-line art-line--two" />
-      </span>
+      <SeededCoverArt
+        seed={card.cover?.seed ?? card.id}
+        density={card.cover?.density}
+        pattern={card.cover?.pattern ?? card.pattern}
+        motifs={card.cover?.motifs}
+      />
       <span className="collection-card__copy">
         <strong>{card.title}</strong>
         <span>{card.question}</span>
@@ -1006,7 +1075,7 @@ function CreateCardForm({
             <span className="create-card-ai-kicker">LOCAL AI ASSIST</span>
             <strong>先貼上筆記，讓本機模型幫你整理欄位</strong>
           </div>
-          <span>Qwen 0.5B · 不上傳內容</span>
+          <span>本機整理 · 不上傳內容</span>
         </div>
         <textarea
           className="create-card-ai-input"
@@ -1607,9 +1676,9 @@ export default function CollectionPage() {
           <div className="view-switcher" aria-label="切換資料庫視圖">
             <span>VIEW</span>
             {([
-              ["cards", "卡片"],
-              ["relations", "關聯"],
-              ["table", "資料表"],
+              ["cards", "卡片視圖"],
+              ["relations", "關聯圖視圖"],
+              ["table", "資料表視圖"],
             ] as const).map(([view, label]) => (
               <button
                 className={collectionView === view ? "is-active" : ""}
@@ -1617,8 +1686,10 @@ export default function CollectionPage() {
                 type="button"
                 onClick={() => setCollectionView(view)}
                 aria-pressed={collectionView === view}
+                aria-label={label}
+                title={label}
               >
-                {label}
+                <ViewIcon view={view} />
               </button>
             ))}
           </div>

@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 from fastapi import APIRouter, FastAPI, HTTPException, Query
@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .config import settings
+from .covers import build_cover
 from .embeddings import build_embedding_text, embed_text
 from .summarization import generate_card_draft
 
@@ -61,6 +62,35 @@ class SearchResult(BaseModel):
     source: str
     tags: list[str]
     score: float
+    cover: "CoverSpec | None" = None
+
+
+class CoverSpec(BaseModel):
+    version: int
+    seed: str
+    pattern: Literal["orbit", "grid", "ladder", "shelf"]
+    accent: Literal["coral", "sky", "lavender", "mint"]
+    color: str
+    soft_color: str
+    background: str
+    rotation: float
+    scale: float
+    density: float
+    orbit: float
+    motifs: list["CoverMotif"] = Field(default_factory=list)
+
+
+class CoverMotif(BaseModel):
+    shape: Literal["block", "stair", "corner", "zigzag", "stack", "window", "plus", "frame"]
+    x: float
+    y: float
+    size: float
+    rotation: float
+    opacity: float
+    weight: float
+
+
+SearchResult.model_rebuild()
 
 
 class RelationResult(BaseModel):
@@ -130,6 +160,9 @@ class HealthResponse(BaseModel):
 
 
 def compact_card(row: dict[str, Any]) -> dict[str, Any]:
+    cover = row.get("cover_data") or row.get("cover")
+    if not cover and row.get("embedding") is not None:
+        cover = build_cover(row["embedding"])
     return {
         "id": row["id"],
         "number": row["number"],
@@ -142,6 +175,7 @@ def compact_card(row: dict[str, Any]) -> dict[str, Any]:
         "source": row["source"],
         "tags": list(row.get("tags") or []),
         "score": float(row.get("score", 0.0)),
+        "cover": cover,
     }
 
 
@@ -156,6 +190,7 @@ async def initialize_database() -> None:
     for attempt in range(30):
         try:
             db.ensure_schema()
+            db.backfill_covers()
             return
         except psycopg.OperationalError:
             if attempt == 29:
@@ -221,7 +256,8 @@ def get_card(card_id: str) -> dict[str, Any]:
 async def create_or_update_card(card: CardInput) -> dict[str, Any]:
     payload = card.model_dump()
     embedding, embedding_model = await embed_text(build_embedding_text(payload))
-    row = db.upsert_card(payload, embedding, embedding_model)
+    cover = build_cover(embedding)
+    row = db.upsert_card(payload, embedding, embedding_model, cover)
     similar = db.find_similar_cards(card.id, embedding)
     db.save_suggested_relations(card.id, similar)
     return {
@@ -254,7 +290,8 @@ async def update_card(card_id: str, changes: CardUpdate) -> dict[str, Any]:
         "tags": updates.get("tags", list(existing.get("tags") or [])),
     }
     embedding, embedding_model = await embed_text(build_embedding_text(payload))
-    row = db.upsert_card(payload, embedding, embedding_model)
+    cover = build_cover(embedding)
+    row = db.upsert_card(payload, embedding, embedding_model, cover)
     similar = db.find_similar_cards(card_id, embedding)
     db.save_suggested_relations(card_id, similar)
     return {

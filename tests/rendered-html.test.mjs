@@ -1,91 +1,87 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { createServer } from "node:net";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      probe.close(() => resolve(port));
+    });
+  });
 }
 
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+async function startStandaloneServer() {
+  const port = await getFreePort();
+  const child = spawn(process.execPath, ["dist/standalone/server.js"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      API_INTERNAL_URL: "http://127.0.0.1:9",
+      HOST: "127.0.0.1",
+      NODE_ENV: "production",
+      PORT: String(port),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => { output += chunk; });
+  child.stderr.on("data", (chunk) => { output += chunk; });
 
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+      if (response.ok) return { child, port };
+    } catch {
+      // The standalone server is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  child.kill();
+  throw new Error(`standalone server did not start: ${output}`);
+}
+
+test("standalone server renders the knowledge card pages", async (context) => {
+  const runtime = await startStandaloneServer();
+  context.after(() => runtime.child.kill());
+
+  const health = await fetch(`http://127.0.0.1:${runtime.port}/api/health`);
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { status: "ok", service: "web" });
+
+  const home = await fetch(`http://127.0.0.1:${runtime.port}/`);
+  assert.equal(home.status, 200);
+  assert.match(await home.text(), /知識卡冊/);
+
+  const collection = await fetch(`http://127.0.0.1:${runtime.port}/collection`);
+  assert.equal(collection.status, 200);
+  const collectionHtml = await collection.text();
+  assert.match(collectionHtml, /收藏瀏覽/);
+  assert.match(collectionHtml, /卡片視圖/);
+  assert.match(collectionHtml, /關聯圖視圖/);
+  assert.match(collectionHtml, /資料表視圖/);
 });
 
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
-  ]);
+test("desktop packaging points to the local runtime", async () => {
+  const main = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  const builder = await readFile(new URL("../desktop/electron-builder.yml", import.meta.url), "utf8");
+  const localApi = new URL("../desktop/local-api.cjs", import.meta.url);
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
-
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
-
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
-
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+  await access(localApi);
+  assert.match(main, /startLocalApi/);
+  assert.match(main, /ELECTRON_RUN_AS_NODE/);
+  assert.doesNotMatch(main, /docker compose|Docker Desktop/);
+  assert.match(builder, /kcc-web\/dist/);
+  assert.match(builder, /kcc-data\/seed\.json/);
+  assert.doesNotMatch(builder, /kcc-runtime|docker-compose/);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { SeededCoverArt } from "./cover-art";
 
 type KnowledgeCard = {
   id: string;
@@ -176,11 +177,7 @@ function KnowledgeCardPreview({
         <span>{card.number}</span>
         <span>{card.topic}</span>
       </span>
-      <span className={`collection-card__art collection-card__art--${card.pattern}`}>
-        <span className="art-orb" />
-        <span className="art-line art-line--one" />
-        <span className="art-line art-line--two" />
-      </span>
+      <SeededCoverArt seed={card.id} pattern={card.pattern} />
       <span className="collection-card__copy">
         <strong>{card.title}</strong>
         <span>{card.question}</span>

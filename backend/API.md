@@ -57,6 +57,41 @@
 
 回傳的卡片可能額外包含 `score`。它只在搜尋或關聯結果中有意義，代表向量相似度；一般卡片讀取時為 `0`。
 
+每張卡也會包含由 embedding 自動產生的 `cover`。它是可重現的視覺指紋，不會把完整 embedding 暴露給前端：
+
+```json
+{
+  "cover": {
+    "version": 8,
+    "seed": "a8f3c91d2e6b70aa",
+    "pattern": "orbit",
+    "accent": "coral",
+    "color": "#c96f5f",
+    "soft_color": "#f0d5cc",
+    "background": "#fbf1eb",
+    "rotation": 8.4,
+    "scale": 1.02,
+    "density": 0.72,
+    "orbit": 0.41,
+    "motifs": [
+      {
+        "shape": "stair",
+        "x": 11.0,
+        "y": 11.0,
+        "size": 8.4,
+        "rotation": 0,
+        "opacity": 0.72,
+        "weight": 0.81
+      }
+    ]
+  }
+}
+```
+
+`motifs` 是由 embedding 分段後產生的圖案單元，每張卡固定有 12 個，沿內框四邊排列並包含四個角落位置。圖案採線框方式呈現，不填滿色彩，且每個單元使用統一尺寸；圖案包含 `block`、`stair`、`corner`、`zigzag`、`stack`、`window`、`plus`、`frame`。每個單元的形狀、明暗與視覺重量，分別受到該向量區段的數值影響，位置與尺寸則固定貼合內框，讓不同卡片仍維持整齊的邊界構圖。
+
+建立或編輯卡片完成後，API 會在同一次回應中提供新的 `cover`；既有卡片則會在 API 啟動時自動補齊。
+
 ## 1. API 資訊與健康檢查
 
 ### `GET /`
@@ -122,7 +157,7 @@ Response：
 }
 ```
 
-實際的 `card` 會包含完整卡片欄位。
+實際的 `card` 會包含完整卡片欄位與新的 `cover` 規格。
 
 ### `PATCH /cards/{card_id}`
 

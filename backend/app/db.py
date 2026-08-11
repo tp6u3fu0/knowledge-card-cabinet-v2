@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import psycopg
@@ -5,6 +6,7 @@ from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
 
 from .config import settings
+from .covers import COVER_VERSION, build_cover
 from .embeddings import vector_literal
 
 
@@ -38,6 +40,7 @@ def ensure_schema() -> None:
                 tags TEXT[] NOT NULL DEFAULT '{{}}',
                 embedding vector({dimension}),
                 embedding_model TEXT,
+                cover_data JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 deleted_at TIMESTAMPTZ
@@ -46,6 +49,9 @@ def ensure_schema() -> None:
         )
         connection.execute(
             "ALTER TABLE cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ"
+        )
+        connection.execute(
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS cover_data JSONB NOT NULL DEFAULT '{}'::jsonb"
         )
         connection.execute("ALTER TABLE cards DROP COLUMN IF EXISTS status")
         connection.execute(
@@ -65,18 +71,24 @@ def ensure_schema() -> None:
         )
 
 
-def upsert_card(card: dict[str, Any], embedding: list[float], embedding_model: str) -> dict[str, Any]:
+def upsert_card(
+    card: dict[str, Any],
+    embedding: list[float],
+    embedding_model: str,
+    cover_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cover_data = cover_data or build_cover(embedding)
     with get_connection() as connection:
         row = connection.execute(
             """
             INSERT INTO cards (
                 id, number, topic, title, question, summary, analogy, detail,
-                source, tags, embedding, embedding_model, updated_at
+                source, tags, embedding, embedding_model, cover_data, updated_at
             )
             VALUES (
                 %(id)s, %(number)s, %(topic)s, %(title)s, %(question)s, %(summary)s,
                 %(analogy)s, %(detail)s, %(source)s, %(tags)s,
-                %(embedding)s::vector, %(embedding_model)s, now()
+                %(embedding)s::vector, %(embedding_model)s, %(cover_data)s::jsonb, now()
             )
             ON CONFLICT (id) DO UPDATE SET
                 number = EXCLUDED.number,
@@ -90,17 +102,45 @@ def upsert_card(card: dict[str, Any], embedding: list[float], embedding_model: s
                 tags = EXCLUDED.tags,
                 embedding = EXCLUDED.embedding,
                 embedding_model = EXCLUDED.embedding_model,
+                cover_data = EXCLUDED.cover_data,
                 deleted_at = NULL,
                 updated_at = now()
             RETURNING *
             """,
-            {**card, "embedding": vector_literal(embedding), "embedding_model": embedding_model},
+            {
+                **card,
+                "embedding": vector_literal(embedding),
+                "embedding_model": embedding_model,
+                "cover_data": json.dumps(cover_data),
+            },
         ).fetchone()
         connection.execute(
             "DELETE FROM card_relations WHERE relation_type = 'semantic' AND (source_id = %s OR target_id = %s)",
             (card["id"], card["id"]),
         )
         return dict(row)
+
+
+def backfill_covers() -> None:
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, embedding
+            FROM cards
+            WHERE embedding IS NOT NULL
+              AND (
+                    cover_data IS NULL
+                    OR cover_data = '{}'::jsonb
+                    OR COALESCE((cover_data->>'version')::int, 0) < %s
+              )
+            """,
+            (COVER_VERSION,),
+        ).fetchall()
+        for row in rows:
+            connection.execute(
+                "UPDATE cards SET cover_data = %s::jsonb WHERE id = %s",
+                (json.dumps(build_cover(row["embedding"])), row["id"]),
+            )
 
 
 def find_similar_cards(card_id: str, embedding: list[float], limit: int = 6) -> list[dict[str, Any]]:
@@ -142,7 +182,7 @@ def search_cards(embedding: list[float], limit: int) -> list[dict[str, Any]]:
         rows = connection.execute(
             """
             SELECT id, number, topic, title, question, summary, analogy, detail,
-                   source, tags, embedding_model, created_at, updated_at,
+                   source, tags, embedding_model, cover_data, created_at, updated_at,
                    1 - (embedding <=> %s::vector) AS score
             FROM cards
             WHERE embedding IS NOT NULL
@@ -241,7 +281,7 @@ def get_related_cards(card_id: str) -> list[dict[str, Any]]:
             SELECT r.relation_type, r.score, r.status,
                    c.id, c.number, c.topic, c.title, c.question, c.summary,
                    c.analogy, c.detail, c.source, c.tags,
-                   c.embedding_model, c.created_at, c.updated_at
+                   c.embedding_model, c.cover_data, c.created_at, c.updated_at
             FROM card_relations r
             JOIN cards c ON c.id = CASE WHEN r.source_id = %s THEN r.target_id ELSE r.source_id END
             WHERE (r.source_id = %s OR r.target_id = %s)
