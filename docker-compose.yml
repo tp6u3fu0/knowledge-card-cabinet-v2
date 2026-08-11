@@ -26,6 +26,9 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
       RELATED_MIN_SCORE: ${RELATED_MIN_SCORE:-0.55}
+      SUMMARY_PROVIDER: ${SUMMARY_PROVIDER:-local-transformers}
+      SUMMARY_MODEL: ${SUMMARY_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      SUMMARY_MAX_NEW_TOKENS: ${SUMMARY_MAX_NEW_TOKENS:-192}
     volumes:
       - hf_cache:/root/.cache/huggingface
     ports:

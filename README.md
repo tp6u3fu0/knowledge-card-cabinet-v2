@@ -19,6 +19,8 @@ docker compose up --build -d
 - 前端 health：http://localhost:3000/api/health
 - 後端 Swagger：http://localhost:8000/docs
 
+首頁目前同時作為知識卡冊的公開產品入口，包含產品介紹、收藏預覽與桌面版下載區。桌面版安裝包準備好後，可在 `.env` 設定 `NEXT_PUBLIC_DOWNLOAD_URL`，首頁會自動顯示下載連結；未設定時會顯示「桌面版準備中」。
+
 This starter does not use `wrangler.jsonc`.
 
 ## 本地開發
@@ -37,10 +39,16 @@ Sites 或 Cloudflare runtime。
 docker compose exec -T api python seed.py
 ```
 
-## 後續整合
+## 卡片與本機 AI 整理
 
 前端預留 `NEXT_PUBLIC_API_URL`（瀏覽器端）與 `API_INTERNAL_URL`（container
-內部）設定，下一步可將目前展示資料替換為 FastAPI 的卡片、搜尋與關聯 API。
+內部）設定。收藏頁目前已連接 FastAPI 的卡片、搜尋與關聯資料流；新增卡片時可貼上
+筆記，讓本機 `Qwen/Qwen2.5-0.5B-Instruct` 先產生標題、問題、摘要與標籤草稿，
+確認後再寫入資料庫。模型第一次使用才會下載，內容不會送到外部 API。
+
+資料表也支援卡片編輯與垃圾桶：可以載入既有卡片修改，儲存時會重新建立 embedding；
+也可以將卡片移到垃圾桶，再從垃圾桶面板復原或永久刪除。軟刪除不會立即破壞卡片資料，
+永久刪除時資料庫會依外鍵級聯清除相關關聯。
 
 ## Workspace Auth Headers
 
