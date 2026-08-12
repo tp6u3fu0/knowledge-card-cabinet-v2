@@ -6,6 +6,9 @@ const path = require("node:path");
 const { startLocalApi } = require("./local-api.cjs");
 
 const STARTUP_TIMEOUT_MS = 180000;
+const isMcpProcess = process.argv.includes("--mcp");
+
+if (isMcpProcess) app.disableHardwareAcceleration();
 
 let mainWindow;
 let startupPromise;
@@ -23,6 +26,33 @@ function seedPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "kcc-data", "seed.json")
     : path.join(__dirname, "..", "backend", "seed.json");
+}
+
+function runtimeManifestPath() {
+  return path.join(app.getPath("appData"), "Knowledge Card Cabinet", "runtime.json");
+}
+
+function writeRuntimeManifest(runtime) {
+  const manifestPath = runtimeManifestPath();
+  const temporaryPath = `${manifestPath}.tmp`;
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  fs.writeFileSync(temporaryPath, `${JSON.stringify({
+    version: 1,
+    base_url: runtime.baseUrl,
+    api_base_url: `${runtime.baseUrl}/api/v1`,
+    token: runtime.authToken,
+    pid: process.pid,
+    started_at: new Date().toISOString(),
+  }, null, 2)}\n`, "utf8");
+  fs.renameSync(temporaryPath, manifestPath);
+}
+
+function removeRuntimeManifest() {
+  try {
+    fs.unlinkSync(runtimeManifestPath());
+  } catch (error) {
+    if (error?.code !== "ENOENT") console.warn("無法清理本機 AI runtime manifest：", error);
+  }
 }
 
 function sendStatus(status, detail = "") {
@@ -51,7 +81,7 @@ async function waitForHealth(healthUrl) {
       const response = await fetch(healthUrl, { cache: "no-store" });
       if (response.ok) return;
     } catch {
-      // The containers may still be starting; keep polling.
+      // The embedded standalone server may still be starting; keep polling.
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -111,6 +141,7 @@ async function stopServices() {
   }
   localApiRuntime = undefined;
   webBaseUrl = "";
+  removeRuntimeManifest();
 }
 
 async function startServices() {
@@ -118,12 +149,15 @@ async function startServices() {
 
   startupPromise = (async () => {
     sendStatus("checking", "正在準備本機資料空間…");
+    removeRuntimeManifest();
     const dataFile = path.join(app.getPath("userData"), "data", "cards.json");
     localApiRuntime = await startLocalApi({
       dataFile,
+      modelsDir: path.join(app.getPath("userData"), "models"),
       seedPath: seedPath(),
       migrateFromUrl: process.env.KCC_LEGACY_API_URL || "http://127.0.0.1:8000",
     });
+    writeRuntimeManifest(localApiRuntime);
 
     sendStatus("starting", "正在啟動本機前端服務…");
     webBaseUrl = await startWebServer(localApiRuntime.baseUrl);
@@ -165,19 +199,23 @@ function createWindow() {
 ipcMain.handle("desktop:retry", () => startServices());
 ipcMain.handle("desktop:open-docs", () => shell.openExternal(`${localApiRuntime?.baseUrl || "http://127.0.0.1:8000"}/docs`));
 
-app.whenReady().then(() => {
-  createWindow();
-  startServices();
+if (isMcpProcess) {
+  require("./mcp-server.cjs");
+} else {
+  app.whenReady().then(() => {
+    createWindow();
+    startServices();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
 
-app.on("before-quit", () => {
-  void stopServices();
-});
+  app.on("before-quit", () => {
+    void stopServices();
+  });
+}

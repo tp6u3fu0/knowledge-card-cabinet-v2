@@ -3,6 +3,10 @@
 知識卡冊的前端與語意搜尋後端。前端使用 vinext 的 Node standalone 輸出，
 可與 FastAPI、PostgreSQL/pgvector 一起由 Docker Compose 啟動。
 
+目前以 Docker 版作為主要開發環境；桌面版會在 Docker 的 API、共享前端與測試通過
+後再同步製作安裝包。同步規則與模型 runtime 差異請見
+[`DEVELOPMENT_SYNC.md`](DEVELOPMENT_SYNC.md)。
+
 ## Prerequisites
 
 - Docker Desktop
@@ -49,6 +53,15 @@ docker compose exec -T api python seed.py
 資料表也支援卡片編輯與垃圾桶：可以載入既有卡片修改，儲存時會重新建立 embedding；
 也可以將卡片移到垃圾桶，再從垃圾桶面板復原或永久刪除。軟刪除不會立即破壞卡片資料，
 永久刪除時資料庫會依外鍵級聯清除相關關聯。
+
+收藏頁的模型設定面板在 Docker 與桌面版都使用同一組模型接口：可以查看硬體建議、
+下載／預熱模型、切換摘要模型與 embedding。Docker 版使用 Python／Hugging Face
+模型，桌面版使用 Transformers.js／ONNX 模型，因此模型清單可以不同，但回應格式與
+切換行為一致。
+
+設定彈窗也支援自訂模型 API：摘要使用 OpenAI-compatible Chat Completions，embedding
+支援 OpenAI-compatible 或 TEI。API 金鑰只保存在本機 runtime，讀取設定時只回傳是否已
+設定；目前資料庫向量固定為 384 維，因此自訂 embedding 必須輸出 384 維。
 
 ## Workspace Auth Headers
 

@@ -16,6 +16,9 @@ class Settings:
     embedding_dimensions: int = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
     related_min_score: float = float(os.getenv("RELATED_MIN_SCORE", "0.55"))
     summary_provider: str = os.getenv("SUMMARY_PROVIDER", "local-transformers").strip().lower()
+    summary_api_url: str = os.getenv("SUMMARY_API_URL", "").strip()
+    summary_api_format: str = os.getenv("SUMMARY_API_FORMAT", "openai").strip().lower()
+    summary_api_key: str = os.getenv("SUMMARY_API_KEY", "").strip()
     summary_model: str = os.getenv("SUMMARY_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
     summary_max_new_tokens: int = int(os.getenv("SUMMARY_MAX_NEW_TOKENS", "192"))
     embedding_query_instruction: str = os.getenv(

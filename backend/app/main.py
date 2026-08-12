@@ -12,6 +12,8 @@ from . import db
 from .config import settings
 from .covers import build_cover
 from .embeddings import build_embedding_text, embed_text
+from .model_runtime import create_model_runtime
+from .model_state import snapshot as model_state_snapshot
 from .summarization import generate_card_draft
 
 
@@ -48,6 +50,35 @@ class CardDraftInput(BaseModel):
 class CardDraftOutput(BaseModel):
     draft: dict[str, Any]
     model: str
+
+
+class ModelSelectInput(BaseModel):
+    kind: Literal["summary", "embedding"]
+    model_id: str = Field(min_length=1, max_length=200)
+
+
+class ProviderSettingsInput(BaseModel):
+    source: Literal["local", "api"] = "local"
+    api_url: str = Field(default="", max_length=1000)
+    model: str = Field(default="", max_length=300)
+    api_format: Literal["openai", "tei"] = "openai"
+    api_key: str = Field(default="", max_length=1000)
+    clear_api_key: bool = False
+
+
+class RuntimeSettingsInput(BaseModel):
+    summary: ProviderSettingsInput
+    embedding: ProviderSettingsInput
+
+
+class DatabaseResetInput(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=40)
+
+
+class DatabaseImportInput(BaseModel):
+    format_version: int = Field(ge=1, le=1)
+    cards: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):
@@ -157,6 +188,8 @@ class HealthResponse(BaseModel):
     semantic_mode: bool
     summary_provider: str
     summary_model: str
+    summary_status: str = "available"
+    model_error: str = ""
 
 
 def compact_card(row: dict[str, Any]) -> dict[str, Any]:
@@ -198,10 +231,18 @@ async def initialize_database() -> None:
             await asyncio.sleep(2)
 
 
+model_runtime = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global model_runtime
     await initialize_database()
-    yield
+    model_runtime = create_model_runtime()
+    try:
+        yield
+    finally:
+        model_runtime = None
 
 
 app = FastAPI(
@@ -224,19 +265,144 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    if model_runtime is not None:
+        return {"status": "ok", **model_runtime.health()}
+    state = model_state_snapshot()
     return {
         "status": "ok",
-        "embedding_model": (
-            settings.embedding_model
-            if settings.embedding_provider == "local-transformers" or settings.embedding_api_url
-            else "local-hash-smoke"
-        ),
-        "embedding_provider": settings.embedding_provider,
+        "embedding_model": state["embedding_model"],
+        "embedding_provider": state["embedding_provider"],
         "embedding_dimensions": settings.embedding_dimensions,
-        "semantic_mode": settings.embedding_provider == "local-transformers" or bool(settings.embedding_api_url),
-        "summary_provider": settings.summary_provider,
-        "summary_model": settings.summary_model,
+        "semantic_mode": state["embedding_provider"] == "local-transformers" or bool(settings.embedding_api_url),
+        "summary_provider": state["summary_provider"],
+        "summary_model": state["summary_model"],
     }
+
+
+def current_model_runtime():
+    if model_runtime is None:
+        raise HTTPException(status_code=503, detail="模型 runtime 尚未完成初始化")
+    return model_runtime
+
+
+async def reindex_cards() -> int:
+    """Re-embed active cards and rebuild only semantic relations."""
+    cards_to_update = db.list_cards()
+    computed: list[tuple[str, list[float], str, dict[str, Any]]] = []
+    for card in cards_to_update:
+        embedding, embedding_model = await embed_text(build_embedding_text(card))
+        computed.append((card["id"], embedding, embedding_model, build_cover(embedding)))
+
+    for card_id, embedding, embedding_model, cover in computed:
+        db.update_card_embedding(card_id, embedding, embedding_model, cover)
+
+    db.clear_semantic_relations()
+    for card_id, embedding, _, _ in computed:
+        db.save_suggested_relations(card_id, db.find_similar_cards(card_id, embedding))
+    return len(computed)
+
+
+@app.get("/models", tags=["models"])
+def models() -> dict[str, Any]:
+    return current_model_runtime().catalog()
+
+
+@app.post("/models/select", tags=["models"])
+async def select_model(payload: ModelSelectInput) -> dict[str, Any]:
+    runtime = current_model_runtime()
+    previous = runtime.catalog()["active"][payload.kind]
+    selection = None
+    try:
+        selection = await runtime.select(payload.kind, payload.model_id)
+        reindexed = 0
+        if payload.kind == "embedding" and selection["changed"]:
+            reindexed = await reindex_cards()
+        return {
+            "status": "active",
+            "selection": selection,
+            "reindexed_cards": reindexed,
+            "models": runtime.catalog(),
+        }
+    except Exception as exc:
+        if selection and selection["changed"]:
+            try:
+                await runtime.select(payload.kind, previous, allow_uninstalled=True)
+            except Exception:
+                pass
+        if getattr(exc, "code", "") == "MODEL_NOT_INSTALLED":
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=f"切換模型失敗：{exc}") from exc
+
+
+@app.post("/models/{model_id}", status_code=202, tags=["models"])
+async def download_model(model_id: str) -> dict[str, Any]:
+    runtime = current_model_runtime()
+    model = next((item for item in runtime.catalog()["models"] if item["id"] == model_id), None)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    download_task = asyncio.create_task(runtime.download(model_id))
+    # The operation state is exposed through GET /models; consume failures here
+    # so a failed background download does not become an unhandled task warning.
+    download_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+    return {"status": "downloading", "model": model}
+
+
+@app.get("/settings", tags=["settings"])
+def runtime_settings() -> dict[str, Any]:
+    return current_model_runtime().settings()
+
+
+@app.put("/settings", tags=["settings"])
+async def update_runtime_settings(payload: RuntimeSettingsInput) -> dict[str, Any]:
+    runtime = current_model_runtime()
+    previous = runtime.settings_state()
+    try:
+        result = runtime.update_settings(payload.model_dump())
+        reindexed = 0
+        if result["embedding_changed"]:
+            reindexed = await reindex_cards()
+        return {
+            "status": "saved",
+            "settings": runtime.settings(),
+            "reindexed_cards": reindexed,
+        }
+    except ValueError as exc:
+        runtime.restore_settings_state(previous)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        runtime.restore_settings_state(previous)
+        raise HTTPException(status_code=502, detail=f"套用設定失敗：{exc}") from exc
+
+
+@app.get("/database/export", tags=["database"])
+def export_database() -> dict[str, Any]:
+    payload = db.export_database()
+    payload["exported_at"] = datetime.now().astimezone().isoformat()
+    return payload
+
+
+@app.post("/database/reset", tags=["database"])
+def reset_database(payload: DatabaseResetInput) -> dict[str, Any]:
+    if payload.confirmation != "RESET DATABASE":
+        raise HTTPException(
+            status_code=400,
+            detail="請輸入 RESET DATABASE 才能重置本機資料庫。",
+        )
+    removed = db.reset_database()
+    return {
+        "status": "reset",
+        "removed": removed,
+        "preserved": ["schema", "runtime_settings", "model_files"],
+    }
+
+
+@app.post("/database/import", tags=["database"])
+def import_database(payload: DatabaseImportInput) -> dict[str, Any]:
+    try:
+        imported = db.import_database(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "imported", "imported": imported}
 
 
 @app.get("/cards")
@@ -387,6 +553,14 @@ def api_info() -> dict[str, Any]:
         "authentication": "none",
         "intended_use": "local or trusted-network integrations",
         "capabilities": [
+            "models.read",
+            "models.download",
+            "models.select",
+            "settings.read",
+            "settings.write",
+            "database.export",
+            "database.reset",
+            "database.import",
             "cards.read",
             "cards.write",
             "cards.draft",
@@ -404,6 +578,46 @@ def api_info() -> dict[str, Any]:
 @api_v1.get("/health", response_model=HealthResponse, tags=["meta"])
 def health_v1() -> dict[str, Any]:
     return health()
+
+
+@api_v1.get("/models", tags=["models"])
+def models_v1() -> dict[str, Any]:
+    return models()
+
+
+@api_v1.post("/models/select", tags=["models"])
+async def select_model_v1(payload: ModelSelectInput) -> dict[str, Any]:
+    return await select_model(payload)
+
+
+@api_v1.post("/models/{model_id}", status_code=202, tags=["models"])
+async def download_model_v1(model_id: str) -> dict[str, Any]:
+    return await download_model(model_id)
+
+
+@api_v1.get("/settings", tags=["settings"])
+def runtime_settings_v1() -> dict[str, Any]:
+    return runtime_settings()
+
+
+@api_v1.put("/settings", tags=["settings"])
+async def update_runtime_settings_v1(payload: RuntimeSettingsInput) -> dict[str, Any]:
+    return await update_runtime_settings(payload)
+
+
+@api_v1.get("/database/export", tags=["database"])
+def export_database_v1() -> dict[str, Any]:
+    return export_database()
+
+
+@api_v1.post("/database/reset", tags=["database"])
+def reset_database_v1(payload: DatabaseResetInput) -> dict[str, Any]:
+    return reset_database(payload)
+
+
+@api_v1.post("/database/import", tags=["database"])
+def import_database_v1(payload: DatabaseImportInput) -> dict[str, Any]:
+    return import_database(payload)
 
 
 @api_v1.get("/cards", response_model=list[SearchResult], tags=["cards"])

@@ -7,6 +7,13 @@ files:
   - "**/*"
 afterPack: desktop/after-pack.cjs
 asar: true
+asarUnpack:
+  - "node_modules/@huggingface/transformers/**"
+  - "node_modules/@huggingface/jinja/**"
+  - "node_modules/@img/**"
+  - "node_modules/onnxruntime-node/**"
+  - "node_modules/onnxruntime-common/**"
+  - "node_modules/sharp/**"
 extraResources:
   - from: dist
     to: kcc-web/dist

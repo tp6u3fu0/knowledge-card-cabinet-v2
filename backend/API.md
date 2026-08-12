@@ -25,6 +25,14 @@
 | --- | --- | --- |
 | API 資訊與能力 | `GET` | `/` |
 | 健康檢查 | `GET` | `/health` |
+| 取得模型目錄與硬體建議 | `GET` | `/models` |
+| 下載／預熱模型 | `POST` | `/models/{model_id}` |
+| 啟用模型 | `POST` | `/models/select` |
+| 讀取目前模型／API 設定 | `GET` | `/settings` |
+| 儲存自訂模型／API 設定 | `PUT` | `/settings` |
+| 匯出本機資料備份 | `GET` | `/database/export` |
+| 重置本機資料庫資料 | `POST` | `/database/reset` |
+| 匯入本機資料備份 | `POST` | `/database/import` |
 | 列出所有啟用卡片 | `GET` | `/cards` |
 | 取得單張卡片 | `GET` | `/cards/{card_id}` |
 | 建立或完整更新卡片 | `POST` | `/cards` |
@@ -105,16 +113,112 @@
 ```json
 {
   "status": "ok",
-  "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+  "embedding_model": "embedding-qwen-0.6b",
   "embedding_provider": "local-transformers",
   "embedding_dimensions": 384,
   "semantic_mode": true,
   "summary_provider": "local-transformers",
-  "summary_model": "Qwen/Qwen2.5-0.5B-Instruct"
+  "summary_model": "summary-qwen-0.5b",
+  "summary_status": "available",
+  "model_error": ""
 }
 ```
 
-## 2. 卡片 CRUD
+`embedding_model` 與 `summary_model` 回傳的是模型目錄中的穩定 ID。Docker 版預設
+使用 `embedding-qwen-0.6b` 與 `summary-qwen-0.5b`；桌面版會使用自己的
+Transformers.js 模型目錄，但兩邊的模型管理回應格式相同。
+
+## 2. 模型設定與本機 AI
+
+### `GET /models`
+
+回傳硬體概況、目前啟用的 summary／embedding，以及可下載的模型。每個模型都包含：
+
+- `id`、`kind`、`label`：前端顯示與操作使用的穩定識別資訊。
+- `provider`、`model_id`、`task`：runtime 內部實際使用的模型資訊。
+- `installed`、`active`、`recommended`、`status`、`error`：下載與啟用狀態。
+
+Docker 與桌面版會各自提供適合該 runtime 的模型。Docker 版目前提供內建規則整理、
+Qwen2.5 0.5B 摘要，以及內建 Hash 384、Qwen3 Embedding 0.6B 向量模型。
+
+### `POST /models/{model_id}`
+
+啟動模型下載與預熱，回傳 `202`。前端應重新呼叫 `GET /models`，直到該模型的
+`status` 變成 `ready`，或讀取 `error`。模型檔案會放在 Docker 的 `hf_cache` volume，
+不會寫入 Git，也不會送出卡片內容。
+
+### `POST /models/select`
+
+下載完成後啟用模型：
+
+```json
+{
+  "kind": "embedding",
+  "model_id": "embedding-qwen-0.6b"
+}
+```
+
+摘要模型切換會影響下一次 `POST /cards/draft`。embedding 模型切換成功後，API 會
+重新建立所有啟用卡片的向量、封面與語意關聯；人工確認的 `manual` 關聯會保留。
+切換過程失敗時會回復原本的模型設定。
+
+### `GET /settings`
+
+回傳摘要與 embedding 的目前執行來源。`api_key` 永遠不會出現在回應中，只會以
+`api_key_set` 表示本機是否已保存金鑰。
+
+### `GET /database/export`
+
+下載目前本機資料的 JSON 結構。內容包含啟用卡片、垃圾桶卡片、embedding、封面資料、卡片關聯與不含 API 金鑰的 runtime 設定。這份格式目前用於備份，匯入功能尚未開放。
+
+### `POST /database/reset`
+
+清除卡片、垃圾桶與所有卡片關聯，但保留資料表結構、模型設定與已下載的模型檔案。請求必須包含精確確認文字：
+
+```json
+{
+  "confirmation": "RESET DATABASE"
+}
+```
+
+### `POST /database/import`
+
+以知識卡冊的 JSON 備份取代目前本機卡片資料、垃圾桶與關聯。匯入前會驗證卡片 ID、關聯引用與 embedding 維度；資料驗證失敗時不會清除現有資料。匯入目前只接受 `format_version: 1`，不會覆寫 runtime 設定或 API 金鑰。
+
+### `PUT /settings`
+
+設定可使用本機模型或自訂 API。摘要 API 使用 OpenAI-compatible Chat Completions；
+embedding API 支援 OpenAI-compatible 與 TEI：
+
+```json
+{
+  "summary": {
+    "source": "api",
+    "api_url": "https://api.example.com/v1/chat/completions",
+    "model": "gpt-4o-mini",
+    "api_format": "openai",
+    "api_key": "sk-example"
+  },
+  "embedding": {
+    "source": "api",
+    "api_url": "https://api.example.com/v1/embeddings",
+    "model": "text-embedding-3-small",
+    "api_format": "openai",
+    "api_key": "sk-example"
+  }
+}
+```
+
+`source` 為 `local` 時可保留 API 欄位，之後切回自訂 API 不必重新輸入；`api_key`
+留白會沿用已保存的金鑰，搭配 `clear_api_key: true` 才會清除。現有 PostgreSQL
+向量欄位固定為 384 維，因此自訂 embedding 必須回傳 384 個數值。儲存設定若改變
+embedding 來源、endpoint、模型、格式或金鑰，API 會重新建立所有啟用卡片的向量、
+封面與語意關聯；失敗時會回復原設定。
+
+API 金鑰只保存在本機 Docker runtime 的 `runtime_settings`，或桌面版使用者資料目錄
+的 `models/settings.json`；此 API 適合本機／可信任內網，不應直接暴露到公網。
+
+## 3. 卡片 CRUD
 
 ### `GET /cards`
 
@@ -150,7 +254,7 @@ Response：
 ```json
 {
   "card": { "id": "attention" },
-  "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+  "embedding_model": "embedding-qwen-0.6b",
   "suggested_relations": [
     { "id": "transformer", "score": 0.78 }
   ]
@@ -172,7 +276,7 @@ Response：
 
 更新同樣會重新建立 embedding 與語意關聯建議。
 
-## 3. AI 草稿整理
+## 4. AI 草稿整理
 
 ### `POST /cards/draft`
 
@@ -205,7 +309,7 @@ Response：
 
 模型無法使用時回傳 `503`，前端可以讓使用者改用手動輸入。
 
-## 4. 搜尋與關聯
+## 5. 搜尋與關聯
 
 ### `GET /search?q={query}&limit={limit}`
 
@@ -239,7 +343,7 @@ Response：
 
 將兩張不同的啟用卡片建立或更新為 `manual`／`confirmed` 關聯。這個動作是冪等的，重複呼叫不會建立重複關聯。
 
-## 5. 垃圾桶
+## 6. 垃圾桶
 
 ### `DELETE /cards/{card_id}`
 

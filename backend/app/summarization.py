@@ -3,28 +3,53 @@ import json
 import re
 from typing import Any
 
+import httpx
+
 from .config import settings
+from .model_state import (
+    get_summary_api_key,
+    get_summary_api_url,
+    get_summary_model,
+    get_summary_provider,
+)
 
 
 _local_model = None
 _local_tokenizer = None
+_local_model_id = None
 _local_model_lock = asyncio.Lock()
 
 
-def _load_local_model() -> tuple[Any, Any]:
-    global _local_model, _local_tokenizer
+def _load_local_model(model_id: str | None = None) -> tuple[Any, Any]:
+    global _local_model, _local_tokenizer, _local_model_id
 
-    if _local_model is None or _local_tokenizer is None:
+    selected_model = model_id or get_summary_model()
+
+    if (
+        _local_model is None
+        or _local_tokenizer is None
+        or _local_model_id != selected_model
+    ):
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        _local_tokenizer = AutoTokenizer.from_pretrained(settings.summary_model)
+        _local_tokenizer = AutoTokenizer.from_pretrained(selected_model)
         _local_model = AutoModelForCausalLM.from_pretrained(
-            settings.summary_model,
+            selected_model,
             torch_dtype="auto",
         )
         _local_model.eval()
+        _local_model_id = selected_model
 
     return _local_tokenizer, _local_model
+
+
+async def preload_summary_model(model_id: str | None = None) -> None:
+    """Download and initialize the selected Python summary model."""
+    selected_model = model_id or get_summary_model()
+    if selected_model == "summary-template":
+        return
+    async with _local_model_lock:
+        await asyncio.to_thread(_load_local_model, selected_model)
 
 
 def _build_prompt(content: str, source: str) -> list[dict[str, str]]:
@@ -129,13 +154,83 @@ def _generate_local_draft(content: str, source: str) -> dict[str, Any]:
     return _normalize_draft(_extract_json(generated_text))
 
 
+def _template_draft(content: str, source: str) -> dict[str, Any]:
+    """Small deterministic fallback that works without downloading a model."""
+    cleaned = " ".join(content.split())
+    title = cleaned[:48].rstrip("，。；：") or "未命名知識"
+    sentences = [part.strip() for part in re.split(r"[。！？!?]", cleaned) if part.strip()]
+    summary = sentences[0][:120] if sentences else title
+    keywords = re.findall(r"[\u4e00-\u9fff]{2,8}|[A-Za-z][A-Za-z0-9_-]{1,20}", cleaned)
+    tags = list(dict.fromkeys(keywords))[:3]
+    return {
+        "topic": tags[0] if tags else "待分類",
+        "title": title,
+        "question": f"如何理解「{title}」？",
+        "summary": summary,
+        "analogy": "先抓住核心概念，再用例子驗證它的運作方式。",
+        "detail": cleaned[:240],
+        "tags": tags,
+        "source": source.strip(),
+    }
+
+
+def _message_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(value or "")
+
+
+async def _generate_api_draft(content: str, source: str) -> dict[str, Any]:
+    api_url = get_summary_api_url()
+    if not api_url:
+        raise ValueError("尚未設定摘要 API 位址")
+
+    headers = {"Content-Type": "application/json"}
+    if get_summary_api_key():
+        headers["Authorization"] = f"Bearer {get_summary_api_key()}"
+    base_payload = {
+        "model": get_summary_model(),
+        "messages": _build_prompt(content, source),
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+    }
+
+    async with httpx.AsyncClient(timeout=90) as client:
+        response = await client.post(api_url, headers=headers, json=base_payload)
+        # Some OpenAI-compatible providers do not implement response_format.
+        if response.status_code == 400:
+            fallback_payload = {key: value for key, value in base_payload.items() if key != "response_format"}
+            response = await client.post(api_url, headers=headers, json=fallback_payload)
+        response.raise_for_status()
+        payload = response.json()
+
+    try:
+        message = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("摘要 API 回傳格式不是 OpenAI Chat Completions 格式") from exc
+    return _normalize_draft(_extract_json(_message_content(message)))
+
+
 async def generate_card_draft(content: str, source: str = "") -> tuple[dict[str, Any], str]:
-    if settings.summary_provider != "local-transformers":
+    if get_summary_provider() == "local-template" or get_summary_model() == "summary-template":
+        return _template_draft(content, source), "summary-template"
+
+    if get_summary_provider() != "local-transformers":
+        if get_summary_provider() == "api-openai":
+            return await _generate_api_draft(content, source), get_summary_model()
         raise ValueError(
-            "目前只支援 SUMMARY_PROVIDER=local-transformers，"
-            f"收到 {settings.summary_provider!r}"
+            "目前只支援 local-template、local-transformers 或 api-openai，"
+            f"收到 {get_summary_provider()!r}"
         )
 
     async with _local_model_lock:
         draft = await asyncio.to_thread(_generate_local_draft, content, source)
-    return draft, settings.summary_model
+    return draft, get_summary_model()

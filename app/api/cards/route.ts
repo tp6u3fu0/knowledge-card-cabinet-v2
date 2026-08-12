@@ -20,7 +20,7 @@ export async function GET(): Promise<Response> {
     return forwardResponse(response);
   } catch {
     return Response.json(
-      { detail: "無法連線到知識卡後端，請確認 API container 正在運作。" },
+      { detail: "無法連線到知識卡本機 API，請重新啟動應用程式。" },
       { status: 503 },
     );
   }
@@ -38,7 +38,7 @@ export async function POST(request: Request): Promise<Response> {
     return forwardResponse(response);
   } catch {
     return Response.json(
-      { detail: "無法連線到知識卡後端，請稍後再試。" },
+      { detail: "無法連線到知識卡本機 API，請稍後再試。" },
       { status: 503 },
     );
   }

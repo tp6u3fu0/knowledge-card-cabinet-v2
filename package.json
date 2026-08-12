@@ -12,13 +12,16 @@
     "dev": "node scripts/run-vinext.mjs dev",
     "build": "node scripts/run-vinext.mjs build",
     "start": "node scripts/run-vinext.mjs start",
-    "desktop:dev": "npm run build && electron desktop/main.cjs",
-    "desktop:dist": "npm run build && electron-builder --config desktop/electron-builder.yml",
+    "desktop:dev": "npm run build && npm run desktop:prepare && electron desktop/main.cjs",
+    "desktop:prepare": "npm install --prefix desktop --omit=dev",
+    "desktop:dist": "npm run build && npm run desktop:prepare && electron-builder --config desktop/electron-builder.yml",
+    "desktop:mcp": "node desktop/mcp-server.cjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "drizzle-orm": "0.45.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"

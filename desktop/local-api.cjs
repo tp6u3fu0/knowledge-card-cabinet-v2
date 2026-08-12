@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { URL } = require("node:url");
+const { createModelRuntime } = require("./model-runtime.cjs");
 
 const EMBEDDING_DIMENSIONS = 384;
 const COVER_VERSION = 8;
@@ -202,7 +203,10 @@ function rebuildSemanticRelations(store) {
 async function loadStore({ dataFile, seedPath, migrateFromUrl }) {
   if (fs.existsSync(dataFile)) {
     const existing = readJson(dataFile, null);
-    if (existing?.cards) return existing;
+    if (existing?.cards) {
+      existing.relations = Array.isArray(existing.relations) ? existing.relations : [];
+      return existing;
+    }
   }
 
   let sourceCards = [];
@@ -223,10 +227,23 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl }) {
     version: 1,
     cards: sourceCards.map((card) => normalizeCard(card)),
     relations: [],
+    embedding_model_id: "embedding-hash-384",
+    summary_model_id: "summary-template",
   };
   rebuildSemanticRelations(store);
   writeStore(dataFile, store);
   return store;
+}
+
+async function reindexStore(store, modelRuntime, { allowFallback = false } = {}) {
+  for (const card of store.cards) {
+    card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
+    card.cover = buildCover(card.embedding);
+    card.updated_at = now();
+  }
+  store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
+  store.summary_model_id = modelRuntime.activeSummaryModelId();
+  rebuildSemanticRelations(store);
 }
 
 function sendJson(response, status, payload) {
@@ -268,8 +285,12 @@ function draftFromContent(content, source) {
   };
 }
 
-function createApiServer(store, dataFile) {
-  const save = () => writeStore(dataFile, store);
+function createApiServer(store, dataFile, modelRuntime, { authToken = "" } = {}) {
+  const save = () => {
+    store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
+    store.summary_model_id = modelRuntime.activeSummaryModelId();
+    writeStore(dataFile, store);
+  };
   const getCard = (id, includeDeleted = false) => store.cards.find((card) => card.id === id && (includeDeleted || !card.deleted_at));
   const similarCards = (card) => store.cards
     .filter((candidate) => candidate.id !== card.id && !candidate.deleted_at)
@@ -285,23 +306,119 @@ function createApiServer(store, dataFile) {
     if (isVersioned) segments = segments.slice(2);
 
     if (request.method === "OPTIONS") {
-      response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" });
+      response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Authorization, Content-Type" });
       response.end();
       return;
     }
 
+    if (isVersioned && authToken) {
+      const authorization = String(request.headers.authorization || "");
+      const providedToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+      if (providedToken !== authToken) {
+        sendJson(response, 401, { detail: "需要本機 API 權杖" });
+        return;
+      }
+    }
+
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "none", intended_use: "local desktop runtime", docs: "/docs", openapi: "/openapi.json" });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local", intended_use: "local desktop runtime", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "settings"] });
       return;
     }
 
     if (request.method === "GET" && segments[0] === "health") {
-      sendJson(response, 200, { status: "ok", embedding_model: "local-runtime-hash-384", embedding_provider: "local-runtime", embedding_dimensions: EMBEDDING_DIMENSIONS, semantic_mode: false, summary_provider: "local-template", summary_model: "local-runtime-template" });
+      sendJson(response, 200, { status: "ok", ...modelRuntime.health() });
+      return;
+    }
+
+    if (request.method === "GET" && segments[0] === "settings" && segments.length === 1) {
+      sendJson(response, 200, modelRuntime.settings());
+      return;
+    }
+
+    if (request.method === "PUT" && segments[0] === "settings" && segments.length === 1) {
+      const body = await readBody(request);
+      const previous = modelRuntime.settingsState();
+      try {
+        const result = modelRuntime.updateSettings(body);
+        let reindexed = 0;
+        if (result.embedding_changed) {
+          await reindexStore(store, modelRuntime, { allowFallback: false });
+          reindexed = store.cards.filter((card) => !card.deleted_at).length;
+        }
+        save();
+        sendJson(response, 200, { status: "saved", settings: modelRuntime.settings(), reindexed_cards: reindexed });
+      } catch (error) {
+        modelRuntime.restoreSettingsState(previous);
+        const status = error instanceof Error && /必須|位址|格式/u.test(error.message) ? 400 : 502;
+        sendJson(response, status, { detail: error.message || "套用設定失敗" });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && segments[0] === "models" && segments.length === 1) {
+      sendJson(response, 200, modelRuntime.catalog());
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "models" && segments[1] && segments[1] !== "select" && segments.length === 2) {
+      const model = modelRuntime.catalog().models.find((candidate) => candidate.id === segments[1]);
+      if (!model) {
+        sendJson(response, 404, { detail: "Model not found" });
+        return;
+      }
+      void modelRuntime.download(segments[1]).catch(() => undefined);
+      sendJson(response, 202, { status: "downloading", model: modelRuntime.catalog().models.find((candidate) => candidate.id === segments[1]) });
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "models" && segments[1] === "select" && segments.length === 2) {
+      const body = await readBody(request);
+      const kind = String(body.kind || "");
+      const modelId = String(body.model_id || "");
+      const previousEmbedding = modelRuntime.activeEmbeddingModelId();
+      let selection;
+      try {
+        selection = await modelRuntime.select(kind, modelId);
+        if (kind === "embedding" && selection.changed) {
+          await reindexStore(store, modelRuntime, { allowFallback: false });
+        }
+        save();
+        sendJson(response, 200, { status: "active", selection, models: modelRuntime.catalog() });
+      } catch (error) {
+        if (kind === "embedding" && selection?.changed) {
+          try {
+            await modelRuntime.select("embedding", previousEmbedding);
+            store.embedding_model_id = previousEmbedding;
+          } catch {
+            // Keep the last persisted vector set if a rollback cannot be completed.
+          }
+        }
+        const status = error?.code === "MODEL_NOT_INSTALLED" ? 409 : 500;
+        sendJson(response, status, { detail: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
 
     if (request.method === "GET" && segments[0] === "openapi.json") {
-      sendJson(response, 200, { openapi: "3.0.0", info: { title: "Knowledge Card Cabinet Local API", version: "0.2.0" }, paths: { "/cards": { get: {}, post: {} }, "/search": { get: {} }, "/trash": { get: {} } } });
+      sendJson(response, 200, {
+        openapi: "3.0.0",
+        info: { title: "Knowledge Card Cabinet Local API", version: "0.4.0" },
+        security: [{ bearerLocal: [] }],
+        components: { securitySchemes: { bearerLocal: { type: "http", scheme: "bearer", description: "由正在執行的桌面版 runtime manifest 提供，只限本機使用。" } } },
+        paths: {
+          "/cards": { get: {}, post: {} },
+          "/cards/{id}": { get: {}, patch: {}, delete: {} },
+          "/cards/{id}/related": { get: {} },
+          "/cards/{id}/restore": { post: {} },
+          "/cards/{id}/relations/{target_id}/confirm": { post: {} },
+          "/search": { get: {} },
+          "/trash": { get: {} },
+          "/models": { get: {} },
+          "/models/{id}": { post: {} },
+          "/models/select": { post: {} },
+          "/settings": { get: {}, put: {} }
+        }
+      });
       return;
     }
 
@@ -321,7 +438,7 @@ function createApiServer(store, dataFile) {
     }
 
     if (request.method === "GET" && segments[0] === "search") {
-      const queryVector = hashEmbedding(requestUrl.searchParams.get("q") || "");
+      const queryVector = await modelRuntime.embed(requestUrl.searchParams.get("q") || "");
       const limit = Math.min(50, Math.max(1, Number(requestUrl.searchParams.get("limit") || 10)));
       const results = store.cards.filter((card) => !card.deleted_at).map((card) => ({ card, score: cosine(queryVector, card.embedding) })).sort((first, second) => second.score - first.score).slice(0, limit);
       sendJson(response, 200, results.map(({ card, score }) => publicCard(card, score)));
@@ -334,7 +451,8 @@ function createApiServer(store, dataFile) {
         sendJson(response, 422, { detail: "請先貼上至少 20 個字的筆記內容。" });
         return;
       }
-      sendJson(response, 200, { draft: draftFromContent(body.content, body.source), model: "local-runtime-template" });
+      const result = await modelRuntime.draft(body.content, body.source);
+      sendJson(response, 200, result);
       return;
     }
 
@@ -390,11 +508,13 @@ function createApiServer(store, dataFile) {
       }
       const existing = store.cards.find((card) => card.id === String(body.id).trim());
       const card = normalizeCard(body, existing);
+      card.embedding = await modelRuntime.embed(embeddingText(card));
+      card.cover = buildCover(card.embedding);
       if (existing) Object.assign(existing, card);
       else store.cards.push(card);
       rebuildSemanticRelations(store);
       save();
-      sendJson(response, 200, { card: publicCard(card), embedding_model: "local-runtime-hash-384", suggested_relations: similarCards(card) });
+      sendJson(response, 200, { card: publicCard(card), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(card) });
       return;
     }
 
@@ -413,10 +533,12 @@ function createApiServer(store, dataFile) {
       }
       const changes = await readBody(request);
       const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing);
+      card.embedding = await modelRuntime.embed(embeddingText(card));
+      card.cover = buildCover(card.embedding);
       Object.assign(existing, card);
       rebuildSemanticRelations(store);
       save();
-      sendJson(response, 200, { card: publicCard(card), embedding_model: "local-runtime-hash-384", suggested_relations: similarCards(card) });
+      sendJson(response, 200, { card: publicCard(card), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(card) });
       return;
     }
 
@@ -456,9 +578,19 @@ function createApiServer(store, dataFile) {
   });
 }
 
-async function startLocalApi({ dataFile, seedPath, migrateFromUrl, port = 0 }) {
+async function startLocalApi({ dataFile, seedPath, migrateFromUrl, modelsDir, port = 0, authToken = "" }) {
+  const modelRuntime = createModelRuntime({
+    modelsDir: modelsDir || path.join(path.dirname(dataFile), "models"),
+    hashEmbedding,
+    templateDraft: draftFromContent,
+  });
   const store = await loadStore({ dataFile, seedPath, migrateFromUrl });
-  const server = createApiServer(store, dataFile);
+  if (store.embedding_model_id !== modelRuntime.activeEmbeddingModelId()) {
+    await reindexStore(store, modelRuntime, { allowFallback: false });
+    writeStore(dataFile, store);
+  }
+  const resolvedAuthToken = authToken || crypto.randomBytes(32).toString("hex");
+  const server = createApiServer(store, dataFile, modelRuntime, { authToken: resolvedAuthToken });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
@@ -469,6 +601,8 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, port = 0 }) {
     server,
     port: actualPort,
     baseUrl: `http://127.0.0.1:${actualPort}`,
+    authToken: resolvedAuthToken,
+    modelRuntime,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }

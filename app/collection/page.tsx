@@ -87,6 +87,82 @@ type CardDraftResponse = {
   };
 };
 
+type ModelKind = "summary" | "embedding";
+
+type ModelOption = {
+  id: string;
+  kind: ModelKind;
+  label: string;
+  short_label: string;
+  provider: string;
+  model_id: string | null;
+  task: string;
+  dimensions?: number;
+  size_label: string;
+  min_memory_gb: number;
+  tier: string;
+  languages: string;
+  description: string;
+  builtin: boolean;
+  active: boolean;
+  installed: boolean;
+  recommended: boolean;
+  status: "available" | "downloading" | "ready";
+  error?: string;
+};
+
+type ModelCatalog = {
+  hardware: {
+    tier: string;
+    label: string;
+    memory_gb: number;
+    cpu_cores: number;
+    recommended_summary: string;
+    recommended_embedding: string;
+    note: string;
+  };
+  active: {
+    summary: string;
+    embedding: string;
+  };
+  active_source?: {
+    summary: "local" | "api";
+    embedding: "local" | "api";
+  };
+  models: ModelOption[];
+};
+
+type ProviderSetting = {
+  source: "local" | "api";
+  provider: string;
+  api_url: string;
+  api_format: "openai" | "tei";
+  model: string;
+  api_key_set: boolean;
+  dimensions?: number;
+};
+
+type RuntimeSettings = {
+  summary: ProviderSetting;
+  embedding: ProviderSetting;
+};
+
+type ProviderSettingsDraft = {
+  source: "local" | "api";
+  api_url: string;
+  model: string;
+  api_format: "openai" | "tei";
+  api_key: string;
+  clear_api_key: boolean;
+};
+
+type SettingsDraft = {
+  summary: ProviderSettingsDraft;
+  embedding: ProviderSettingsDraft;
+};
+
+type SettingsTab = "local" | "api" | "data";
+
 const visualAccents = ["coral", "sky", "lavender", "mint"] as const;
 const visualPatterns = ["orbit", "grid", "ladder", "shelf"] as const;
 
@@ -122,6 +198,33 @@ function ViewIcon({ view }: { view: CollectionView }) {
   );
 }
 
+function DatabaseActionIcon({ kind }: { kind: "add" | "trash" }) {
+  if (kind === "add") {
+    return (
+      <svg className="database-action-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+        <path d="M8 3v10M3 8h10" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="database-action-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.2c0 .72.58 1.3 1.3 1.3h3.4c.72 0 1.3-.58 1.3-1.3V6.5M6.8 7.5v3.5M9.2 7.5v3.5" />
+    </svg>
+  );
+}
+
+function ModelSettingsIcon() {
+  return (
+    <svg className="database-action-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <path d="M3 4h10M3 8h10M3 12h10" />
+      <circle cx="6" cy="4" r="1.3" />
+      <circle cx="10" cy="8" r="1.3" />
+      <circle cx="7.5" cy="12" r="1.3" />
+    </svg>
+  );
+}
+
 function createEmptyDraft(): CardDraft {
   return {
     id: "",
@@ -135,6 +238,22 @@ function createEmptyDraft(): CardDraft {
     source: "",
     tags: "",
   };
+}
+
+function createSettingsDraft(settings?: RuntimeSettings | null): SettingsDraft {
+  const providerDraft = (kind: ModelKind): ProviderSettingsDraft => {
+    const value = settings?.[kind];
+    return {
+      source: value?.source ?? "local",
+      api_url: value?.api_url ?? "",
+      model: value?.model ?? "",
+      api_format: value?.api_format ?? "openai",
+      api_key: "",
+      clear_api_key: false,
+    };
+  };
+
+  return { summary: providerDraft("summary"), embedding: providerDraft("embedding") };
 }
 
 function mapApiCard(card: ApiCard, index: number, related: string[] = []): KnowledgeCard {
@@ -1032,6 +1151,400 @@ function TrashPanel({
   );
 }
 
+function ModelOptionCard({
+  model,
+  actionId,
+  onDownload,
+  onSelect,
+}: {
+  model: ModelOption;
+  actionId: string;
+  onDownload: (id: string) => void;
+  onSelect: (kind: ModelKind, id: string) => void;
+}) {
+  const isBusy = actionId === model.id;
+  return (
+    <article className={`model-option${model.active ? " is-active" : ""}`}>
+      <div className="model-option__topline">
+        <span>{model.short_label}</span>
+        {model.recommended ? <b>依硬體推薦</b> : null}
+      </div>
+      <h3>{model.label}</h3>
+      <p>{model.description}</p>
+      <div className="model-option__meta">
+        <span>{model.size_label}</span>
+        <span>{model.tier}</span>
+        <span>{model.languages}</span>
+      </div>
+      {model.error ? <small className="model-option__error">上次載入失敗：{model.error}</small> : null}
+      <div className="model-option__actions">
+        {model.active ? (
+          <span className="model-option__active">目前使用中</span>
+        ) : model.status === "downloading" || isBusy ? (
+          <span className="model-option__pending">下載／準備中…</span>
+        ) : model.installed ? (
+          <button type="button" onClick={() => onSelect(model.kind, model.id)}>
+            啟用這個模型
+          </button>
+        ) : (
+          <button type="button" onClick={() => onDownload(model.id)}>
+            下載模型
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function DataManagementPanel({
+  isExporting,
+  isImporting,
+  isResetting,
+  hasBackup,
+  backupAcknowledged,
+  resetConfirmation,
+  onExport,
+  onImport,
+  onBackupAcknowledgedChange,
+  onResetConfirmationChange,
+  onReset,
+}: {
+  isExporting: boolean;
+  isImporting: boolean;
+  isResetting: boolean;
+  hasBackup: boolean;
+  backupAcknowledged: boolean;
+  resetConfirmation: string;
+  onExport: () => void;
+  onImport: (file: File) => void;
+  onBackupAcknowledgedChange: (value: boolean) => void;
+  onResetConfirmationChange: (value: string) => void;
+  onReset: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const canReset = hasBackup && backupAcknowledged && resetConfirmation === "RESET DATABASE";
+
+  return (
+    <div className="settings-data-form">
+      <div className="settings-api-intro settings-api-intro--data">
+        <span className="model-settings-kicker">LOCAL DATA / SAFETY</span>
+        <strong>先備份，再整理本機資料</strong>
+        <p>資料會留在這台電腦的 Docker PostgreSQL。匯出會下載一份 JSON 備份；重置只會清除卡片、垃圾桶與關聯，不會刪除模型檔案或資料表結構。</p>
+      </div>
+
+      <section className="settings-data-card">
+        <div>
+          <span className="model-settings-kicker">01 / BACKUP</span>
+          <h3>匯出本機資料</h3>
+          <p>包含卡片內容、封面資料、embedding、垃圾桶內容與卡片關聯。API 金鑰不會寫入備份檔。匯入會取代目前本機資料。</p>
+        </div>
+        <div className="settings-data-actions">
+          <button className="settings-secondary-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting || isExporting || isResetting}>
+            {isImporting ? "匯入中…" : "匯入 JSON 備份"}
+          </button>
+          <button className="create-card-submit" type="button" onClick={onExport} disabled={isExporting || isImporting || isResetting}>
+            {isExporting ? "準備備份中…" : "下載 JSON 備份"}
+          </button>
+          <input
+            ref={fileInputRef}
+            className="settings-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) onImport(file);
+            }}
+          />
+        </div>
+      </section>
+
+      <section className="settings-danger-zone">
+        <div>
+          <span className="model-settings-kicker">02 / RESET</span>
+          <h3>重置本機資料庫</h3>
+          <p>這會清除目前所有啟用卡片、垃圾桶卡片與關聯。模型設定、模型下載檔與資料表結構會保留。</p>
+        </div>
+        <label className="settings-data-check">
+          <input
+            type="checkbox"
+            checked={backupAcknowledged}
+            disabled={!hasBackup || isResetting}
+            onChange={(event) => onBackupAcknowledgedChange(event.target.checked)}
+          />
+          <span>我已下載並保存剛才的 JSON 備份</span>
+        </label>
+        <label className="settings-confirm-field">
+          <span>輸入確認文字</span>
+          <input
+            value={resetConfirmation}
+            onChange={(event) => onResetConfirmationChange(event.target.value)}
+            placeholder="RESET DATABASE"
+            autoComplete="off"
+            spellCheck={false}
+            disabled={isResetting}
+          />
+        </label>
+        <button className="settings-danger-button" type="button" onClick={onReset} disabled={!canReset || isResetting || isExporting}>
+          {isResetting ? "重置中…" : "重置本機資料庫"}
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function ModelSettingsPanel({
+  catalog,
+  runtimeSettings,
+  settingsDraft,
+  settingsTab,
+  isLoading,
+  isSettingsSaving,
+  isDatabaseExporting,
+  isDatabaseImporting,
+  isDatabaseResetting,
+  hasDatabaseBackup,
+  databaseBackupAcknowledged,
+  databaseResetConfirmation,
+  error,
+  actionId,
+  onClose,
+  onDownload,
+  onSelect,
+  onSettingsTabChange,
+  onDraftChange,
+  onSaveSettings,
+  onExportDatabase,
+  onImportDatabase,
+  onDatabaseBackupAcknowledgedChange,
+  onDatabaseResetConfirmationChange,
+  onResetDatabase,
+}: {
+  catalog: ModelCatalog | null;
+  runtimeSettings: RuntimeSettings | null;
+  settingsDraft: SettingsDraft;
+  settingsTab: SettingsTab;
+  isLoading: boolean;
+  isSettingsSaving: boolean;
+  isDatabaseExporting: boolean;
+  isDatabaseImporting: boolean;
+  isDatabaseResetting: boolean;
+  hasDatabaseBackup: boolean;
+  databaseBackupAcknowledged: boolean;
+  databaseResetConfirmation: string;
+  error: string;
+  actionId: string;
+  onClose: () => void;
+  onDownload: (id: string) => void;
+  onSelect: (kind: ModelKind, id: string) => void;
+  onSettingsTabChange: (tab: SettingsTab) => void;
+  onDraftChange: (kind: ModelKind, field: keyof ProviderSettingsDraft, value: string | boolean) => void;
+  onSaveSettings: (event: FormEvent<HTMLFormElement>) => void;
+  onExportDatabase: () => void;
+  onImportDatabase: (file: File) => void;
+  onDatabaseBackupAcknowledgedChange: (value: boolean) => void;
+  onDatabaseResetConfirmationChange: (value: string) => void;
+  onResetDatabase: () => void;
+}) {
+  const summaryModels = catalog?.models.filter((model) => model.kind === "summary") ?? [];
+  const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
+
+  const providerFields = (kind: ModelKind, label: string, description: string) => {
+    const setting = runtimeSettings?.[kind];
+    const draft = settingsDraft[kind];
+    const isApi = draft.source === "api";
+    return (
+      <div className="settings-provider-card">
+        <div className="settings-provider-card__heading">
+          <div>
+            <span className="model-settings-kicker">{kind === "summary" ? "01 / SUMMARY" : "02 / EMBEDDING"}</span>
+            <h3>{label}</h3>
+          </div>
+          <p>{description}</p>
+        </div>
+        <div className="settings-provider-card__mode">
+          <label>
+            <span>執行方式</span>
+            <select
+              value={draft.source}
+              onChange={(event) => onDraftChange(kind, "source", event.target.value)}
+            >
+              <option value="local">本機模型</option>
+              <option value="api">自訂 API</option>
+            </select>
+          </label>
+          <div className={`settings-provider-status${setting?.source === "api" ? " is-api" : ""}`}>
+            <span>{setting?.source === "api" ? "目前使用自訂 API" : "目前使用本機模型"}</span>
+            {setting?.model ? <strong>{setting.model}</strong> : null}
+          </div>
+        </div>
+        {isApi ? (
+          <div className="settings-provider-fields">
+            <label>
+              <span>API endpoint</span>
+              <input
+                type="url"
+                value={draft.api_url}
+                onChange={(event) => onDraftChange(kind, "api_url", event.target.value)}
+                placeholder={kind === "summary" ? "https://api.example.com/v1/chat/completions" : "https://api.example.com/v1/embeddings"}
+                required
+              />
+            </label>
+            <label>
+              <span>模型名稱</span>
+              <input
+                type="text"
+                value={draft.model}
+                onChange={(event) => onDraftChange(kind, "model", event.target.value)}
+                placeholder={kind === "summary" ? "例如：gpt-4o-mini" : "例如：text-embedding-3-small"}
+                required
+              />
+            </label>
+            {kind === "embedding" ? (
+              <label>
+                <span>回傳格式</span>
+                <select
+                  value={draft.api_format}
+                  onChange={(event) => onDraftChange(kind, "api_format", event.target.value)}
+                >
+                  <option value="openai">OpenAI-compatible</option>
+                  <option value="tei">Text Embeddings Inference</option>
+                </select>
+              </label>
+            ) : null}
+            <label>
+              <span>API 金鑰 <em>{setting?.api_key_set ? "已儲存，留白會沿用" : "選填"}</em></span>
+              <input
+                type="password"
+                value={draft.api_key}
+                onChange={(event) => onDraftChange(kind, "api_key", event.target.value)}
+                placeholder={setting?.api_key_set ? "已設定，輸入新金鑰可覆蓋" : "sk-…"}
+                autoComplete="new-password"
+              />
+            </label>
+            {setting?.api_key_set ? (
+              <label className="settings-provider-fields__checkbox">
+                <input
+                  type="checkbox"
+                  checked={draft.clear_api_key}
+                  onChange={(event) => onDraftChange(kind, "clear_api_key", event.target.checked)}
+                />
+                <span>清除已儲存的 API 金鑰</span>
+              </label>
+            ) : null}
+          </div>
+        ) : null}
+        {kind === "embedding" ? <p className="settings-provider-card__note">目前資料庫向量固定為 {setting?.dimensions ?? 384} 維；自訂 embedding 必須回傳這個維度，才可以重新建立關聯。</p> : null}
+      </div>
+    );
+  };
+
+  return (
+    <section className="model-settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div className="model-settings-header">
+        <div>
+          <p className="eyebrow">WORKSPACE SETTINGS</p>
+          <h2 id="settings-title">設定</h2>
+          <p>把模型來源、API 連線與本機資源集中管理。設定儲存在這個知識卡櫃，不會上傳到外部服務。</p>
+        </div>
+        <button className="create-card-close" type="button" onClick={onClose}>
+          關閉
+        </button>
+      </div>
+
+      <div className="settings-tabs" role="tablist" aria-label="設定分類">
+        <button className={settingsTab === "local" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "local"} onClick={() => onSettingsTabChange("local")}>
+          <span>01</span>
+          本機模型
+        </button>
+        <button className={settingsTab === "api" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "api"} onClick={() => onSettingsTabChange("api")}>
+          <span>02</span>
+          自訂 API
+        </button>
+        <button className={settingsTab === "data" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "data"} onClick={() => onSettingsTabChange("data")}>
+          <span>03</span>
+          資料管理
+        </button>
+      </div>
+
+      {error ? <p className="create-card-error" role="alert">{error}</p> : null}
+      {settingsTab === "data" ? (
+        <DataManagementPanel
+          isExporting={isDatabaseExporting}
+          isImporting={isDatabaseImporting}
+          isResetting={isDatabaseResetting}
+          hasBackup={hasDatabaseBackup}
+          backupAcknowledged={databaseBackupAcknowledged}
+          resetConfirmation={databaseResetConfirmation}
+          onExport={onExportDatabase}
+          onImport={onImportDatabase}
+          onBackupAcknowledgedChange={onDatabaseBackupAcknowledgedChange}
+          onResetConfirmationChange={onDatabaseResetConfirmationChange}
+          onReset={onResetDatabase}
+        />
+      ) : settingsTab === "api" ? (
+        <form className="settings-api-form" onSubmit={onSaveSettings}>
+          <div className="settings-api-intro">
+            <span className="model-settings-kicker">BRING YOUR OWN MODEL</span>
+            <strong>接入你熟悉的模型供應商</strong>
+            <p>摘要使用 OpenAI-compatible Chat Completions；embedding 支援 OpenAI-compatible 或 TEI。只要填入 endpoint、模型名稱與金鑰，就能在本機流程中使用。</p>
+          </div>
+          {providerFields("summary", "摘要與欄位整理", "用來把筆記整理成可檢查的知識卡草稿。")}
+          {providerFields("embedding", "語意向量與關聯圖", "用來計算卡片相似度、搜尋結果與關聯圖連線。")}
+          <div className="settings-api-actions">
+            <p>儲存後若 embedding 設定有變更，系統會重新建立現有卡片的向量與關聯。</p>
+            <button className="create-card-submit" type="submit" disabled={isSettingsSaving}>
+              {isSettingsSaving ? "儲存並重建中…" : "儲存並套用"}
+            </button>
+          </div>
+        </form>
+      ) : isLoading && !catalog ? (
+        <div className="model-settings-empty">正在讀取本機硬體與模型狀態…</div>
+      ) : catalog ? (
+        <>
+          <div className="model-hardware-note">
+            <div>
+              <span className="model-settings-kicker">YOUR HARDWARE</span>
+              <strong>{catalog.hardware.label}</strong>
+            </div>
+            <span>{catalog.hardware.memory_gb} GB RAM · {catalog.hardware.cpu_cores} CPU cores</span>
+            <p>{catalog.hardware.note}</p>
+          </div>
+          <div className="model-settings-group">
+            <div className="model-settings-group__heading">
+              <div>
+                <span className="model-settings-kicker">01 / SUMMARY</span>
+                <h3>摘要與欄位整理</h3>
+              </div>
+              <p>決定「先貼上筆記」時，模型如何幫你整理卡片。</p>
+            </div>
+            <div className="model-options-grid">
+              {summaryModels.map((model) => (
+                <ModelOptionCard key={model.id} model={model} actionId={actionId} onDownload={onDownload} onSelect={onSelect} />
+              ))}
+            </div>
+          </div>
+          <div className="model-settings-group model-settings-group--embedding">
+            <div className="model-settings-group__heading">
+              <div>
+                <span className="model-settings-kicker">02 / EMBEDDING</span>
+                <h3>語意向量與關聯圖</h3>
+              </div>
+              <p>決定卡片之間的語意距離與搜尋結果。</p>
+            </div>
+            <div className="model-options-grid">
+              {embeddingModels.map((model) => (
+                <ModelOptionCard key={model.id} model={model} actionId={actionId} onDownload={onDownload} onSelect={onSelect} />
+              ))}
+            </div>
+          </div>
+          <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function CreateCardForm({
   draft,
   sourceText,
@@ -1230,11 +1743,29 @@ export default function CollectionPage() {
   const [trashError, setTrashError] = useState("");
   const [restoringId, setRestoringId] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [isModelsOpen, setIsModelsOpen] = useState(false);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
+  const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => createSettingsDraft());
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("local");
+  const [isModelsLoading, setIsModelsLoading] = useState(false);
+  const [isSettingsSaving, setIsSettingsSaving] = useState(false);
+  const [isDatabaseExporting, setIsDatabaseExporting] = useState(false);
+  const [isDatabaseImporting, setIsDatabaseImporting] = useState(false);
+  const [isDatabaseResetting, setIsDatabaseResetting] = useState(false);
+  const [hasDatabaseBackup, setHasDatabaseBackup] = useState(false);
+  const [databaseBackupAcknowledged, setDatabaseBackupAcknowledged] = useState(false);
+  const [databaseResetConfirmation, setDatabaseResetConfirmation] = useState("");
+  const [modelError, setModelError] = useState("");
+  const [modelActionId, setModelActionId] = useState("");
+  const [cardsRefreshKey, setCardsRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadCards() {
+      setIsLoading(true);
+      setLoadError("");
       try {
         const response = await fetch("/api/cards", { cache: "no-store" });
         if (!response.ok) throw new Error("cards request failed");
@@ -1301,7 +1832,7 @@ export default function CollectionPage() {
         setRelationPairsState(relationLoadFailed ? relationPairs : nextPairs);
         setSelectedId(loadedCards[0]?.id ?? "");
       } catch {
-        if (!cancelled) setLoadError("目前無法載入後端資料，先顯示示範卡片。請確認 API container 正在運作。");
+        if (!cancelled) setLoadError("目前無法載入本機資料，先顯示示範卡片。請重新啟動本機 API。");
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -1311,7 +1842,7 @@ export default function CollectionPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cardsRefreshKey]);
 
   const topics = ["全部", ...Array.from(new Set(cards.map((card) => card.topic)))];
   const filteredCards = cards.filter((card) => {
@@ -1345,6 +1876,35 @@ export default function CollectionPage() {
     };
   }, [viewerCardId]);
 
+  useEffect(() => {
+    if (!isModelsOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !modelActionId && !isSettingsSaving && !isDatabaseExporting && !isDatabaseImporting && !isDatabaseResetting) {
+        setIsModelsOpen(false);
+        setModelError("");
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isDatabaseExporting, isDatabaseImporting, isDatabaseResetting, isModelsOpen, isSettingsSaving, modelActionId]);
+
+  useEffect(() => {
+    if (!createSuccess) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setCreateSuccess("");
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [createSuccess]);
+
   const updateCardDraft = (field: keyof CardDraft, value: string) => {
     setCardDraft((current) => ({ ...current, [field]: value }));
   };
@@ -1356,6 +1916,7 @@ export default function CollectionPage() {
     setCardDraft(createEmptyDraft());
     setSourceText("");
     setIsTrashOpen(false);
+    setIsModelsOpen(false);
     setIsCreateCardOpen(true);
   };
 
@@ -1377,6 +1938,7 @@ export default function CollectionPage() {
     });
     setSourceText("");
     setIsTrashOpen(false);
+    setIsModelsOpen(false);
     setIsCreateCardOpen(true);
   };
 
@@ -1405,8 +1967,257 @@ export default function CollectionPage() {
   };
 
   const openTrash = () => {
+    setIsModelsOpen(false);
     setIsTrashOpen(true);
     void loadTrash();
+  };
+
+  const loadModels = async (showLoading = true): Promise<ModelCatalog | null> => {
+    if (showLoading) setIsModelsLoading(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/models", { cache: "no-store" });
+      const result = (await response.json()) as ModelCatalog | { detail?: string };
+      if (!response.ok || !("models" in result)) {
+        throw new Error("detail" in result ? result.detail ?? "模型狀態載入失敗。" : "模型狀態載入失敗。");
+      }
+      setModelCatalog(result);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "模型狀態載入失敗，請稍後再試。";
+      setModelError(message);
+      return null;
+    } finally {
+      if (showLoading) setIsModelsLoading(false);
+    }
+  };
+
+  const loadRuntimeSettings = async (): Promise<RuntimeSettings | null> => {
+    try {
+      const response = await fetch("/api/settings", { cache: "no-store" });
+      const result = (await response.json()) as RuntimeSettings | { detail?: string };
+      if (!response.ok || !("summary" in result) || !("embedding" in result)) {
+        throw new Error("detail" in result ? result.detail ?? "設定載入失敗。" : "設定載入失敗。");
+      }
+      setRuntimeSettings(result);
+      setSettingsDraft(createSettingsDraft(result));
+      return result;
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "設定載入失敗，請稍後再試。");
+      return null;
+    }
+  };
+
+  const openModels = () => {
+    setIsModelsOpen(true);
+    setIsCreateCardOpen(false);
+    setIsTrashOpen(false);
+    setSettingsTab("local");
+    setHasDatabaseBackup(false);
+    setDatabaseBackupAcknowledged(false);
+    setDatabaseResetConfirmation("");
+    void Promise.all([loadModels(), loadRuntimeSettings()]);
+  };
+
+  const closeModels = () => {
+    if (modelActionId || isSettingsSaving || isDatabaseExporting || isDatabaseImporting || isDatabaseResetting) return;
+    setIsModelsOpen(false);
+    setModelError("");
+  };
+
+  const updateSettingsDraft = (kind: ModelKind, field: keyof ProviderSettingsDraft, value: string | boolean) => {
+    setSettingsDraft((current) => ({
+      ...current,
+      [kind]: { ...current[kind], [field]: value },
+    }));
+  };
+
+  const handleSaveSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSettingsSaving(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settingsDraft),
+      });
+      const result = (await response.json()) as { detail?: string; settings?: RuntimeSettings; reindexed_cards?: number };
+      if (!response.ok || !result.settings) throw new Error(result.detail ?? "設定套用失敗。");
+      setRuntimeSettings(result.settings);
+      setSettingsDraft(createSettingsDraft(result.settings));
+      setCreateSuccess(
+        result.reindexed_cards
+          ? `設定已套用，並重新建立 ${result.reindexed_cards} 張卡片的語意關聯。`
+          : "設定已套用。",
+      );
+      if (settingsDraft.embedding.source === "api" || result.reindexed_cards) {
+        setCardsRefreshKey((current) => current + 1);
+      }
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "設定套用失敗，請稍後再試。");
+    } finally {
+      setIsSettingsSaving(false);
+    }
+  };
+
+  const handleExportDatabase = async () => {
+    setIsDatabaseExporting(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/database/export", { cache: "no-store" });
+      const result = (await response.json()) as {
+        detail?: string;
+        exported_at?: string;
+      };
+      if (!response.ok || !result.exported_at) {
+        throw new Error(result.detail ?? "資料匯出失敗。");
+      }
+
+      const stamp = new Date().toISOString().replace(/[.:]/g, "-");
+      const download = document.createElement("a");
+      const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+      download.href = URL.createObjectURL(blob);
+      download.download = `knowledge-card-cabinet-${stamp}.json`;
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+      URL.revokeObjectURL(download.href);
+      setHasDatabaseBackup(true);
+      setDatabaseBackupAcknowledged(false);
+      setDatabaseResetConfirmation("");
+      setCreateSuccess("已匯出本機資料備份，請確認檔案已保存後再進行重置。");
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "資料匯出失敗，請稍後再試。");
+    } finally {
+      setIsDatabaseExporting(false);
+    }
+  };
+
+  const handleResetDatabase = async () => {
+    if (!hasDatabaseBackup || !databaseBackupAcknowledged || databaseResetConfirmation !== "RESET DATABASE") return;
+
+    setIsDatabaseResetting(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/database/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: databaseResetConfirmation }),
+      });
+      const result = (await response.json()) as { detail?: string; removed?: { cards?: number; relations?: number } };
+      if (!response.ok || !result.removed) {
+        throw new Error(result.detail ?? "資料庫重置失敗。");
+      }
+
+      setCards([]);
+      setTrashCards([]);
+      setRelationPairsState([]);
+      setSelectedId("");
+      setViewerCardId("");
+      setCollectionQuery("");
+      setActiveTopic("全部");
+      setHasDatabaseBackup(false);
+      setDatabaseBackupAcknowledged(false);
+      setDatabaseResetConfirmation("");
+      setIsModelsOpen(false);
+      setCreateSuccess(`本機資料庫已重置，清除了 ${result.removed.cards ?? 0} 張卡片與 ${result.removed.relations ?? 0} 條關聯。`);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "資料庫重置失敗，請稍後再試。");
+    } finally {
+      setIsDatabaseResetting(false);
+    }
+  };
+
+  const handleImportDatabase = async (file: File) => {
+    if (!window.confirm("匯入備份會取代目前本機的卡片、垃圾桶與關聯，確定要繼續嗎？")) return;
+
+    setIsDatabaseImporting(true);
+    setModelError("");
+    try {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(await file.text());
+      } catch {
+        throw new Error("這不是有效的 JSON 備份檔。");
+      }
+
+      if (!payload || typeof payload !== "object" || !("format_version" in payload) || !("cards" in payload)) {
+        throw new Error("這份檔案不是知識卡冊的備份格式。");
+      }
+
+      const response = await fetch("/api/database/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json()) as {
+        detail?: string;
+        imported?: { cards?: number; deleted_cards?: number; relations?: number };
+      };
+      if (!response.ok || !result.imported) {
+        throw new Error(result.detail ?? "資料匯入失敗。");
+      }
+
+      setTrashCards([]);
+      setSelectedId("");
+      setViewerCardId("");
+      setIsModelsOpen(false);
+      setCardsRefreshKey((current) => current + 1);
+      setCreateSuccess(`已匯入 ${result.imported.cards ?? 0} 張卡片與 ${result.imported.relations ?? 0} 條關聯。`);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "資料匯入失敗，請稍後再試。");
+    } finally {
+      setIsDatabaseImporting(false);
+    }
+  };
+
+  const handleDownloadModel = async (modelId: string) => {
+    setModelActionId(modelId);
+    setModelError("");
+    try {
+      const response = await fetch(`/api/models/${encodeURIComponent(modelId)}/download`, { method: "POST" });
+      const result = (await response.json()) as { detail?: string };
+      if (!response.ok) throw new Error(result.detail ?? "模型下載無法開始。");
+
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const latest = await loadModels(false);
+        const model = latest?.models.find((candidate) => candidate.id === modelId);
+        if (model?.status === "ready") {
+          setCreateSuccess(`已下載「${model.label}」，現在可以啟用它。`);
+          return;
+        }
+        if (model?.error) throw new Error(model.error);
+      }
+      throw new Error("模型下載時間較長，請稍後重新開啟模型設定查看狀態。");
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "模型下載失敗，請稍後再試。");
+    } finally {
+      setModelActionId("");
+      void loadModels(false);
+    }
+  };
+
+  const handleSelectModel = async (kind: ModelKind, modelId: string) => {
+    setModelActionId(modelId);
+    setModelError("");
+    try {
+      const response = await fetch("/api/models/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, model_id: modelId }),
+      });
+      const result = (await response.json()) as { detail?: string; selection?: { model?: ModelOption }; models?: ModelCatalog };
+      if (!response.ok) throw new Error(result.detail ?? "模型啟用失敗。");
+      if (result.models) setModelCatalog(result.models);
+      setCreateSuccess(`已啟用「${result.selection?.model?.label ?? "本機模型"}」。${kind === "embedding" ? "卡片關聯正在使用新的語意索引。" : ""}`);
+      if (kind === "embedding") setCardsRefreshKey((current) => current + 1);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "模型啟用失敗，請稍後再試。");
+    } finally {
+      setModelActionId("");
+    }
   };
 
   const handleDeleteCard = async (id: string) => {
@@ -1668,10 +2479,16 @@ export default function CollectionPage() {
             ))}
           </div>
           <button className="database-add-button" type="button" onClick={openCreateCard}>
-            ＋ 新增卡片
+            <DatabaseActionIcon kind="add" />
+            <span>新增卡片</span>
           </button>
           <button className="database-trash-button" type="button" onClick={openTrash}>
-            垃圾桶{trashCards.length > 0 ? ` ${trashCards.length}` : ""}
+            <DatabaseActionIcon kind="trash" />
+            <span>垃圾桶{trashCards.length > 0 ? ` ${trashCards.length}` : ""}</span>
+          </button>
+          <button className="database-model-button" type="button" onClick={openModels}>
+            <ModelSettingsIcon />
+            <span>設定</span>
           </button>
           <div className="view-switcher" aria-label="切換資料庫視圖">
             <span>VIEW</span>
@@ -1723,6 +2540,37 @@ export default function CollectionPage() {
             onRestore={(id) => void handleRestoreCard(id)}
             onDelete={(id) => void handlePermanentlyDeleteCard(id)}
           />
+        ) : null}
+        {isModelsOpen ? (
+          <div className="settings-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModels(); }}>
+            <ModelSettingsPanel
+              catalog={modelCatalog}
+              runtimeSettings={runtimeSettings}
+              settingsDraft={settingsDraft}
+              settingsTab={settingsTab}
+              isLoading={isModelsLoading}
+              isSettingsSaving={isSettingsSaving}
+              isDatabaseExporting={isDatabaseExporting}
+              isDatabaseImporting={isDatabaseImporting}
+              isDatabaseResetting={isDatabaseResetting}
+              hasDatabaseBackup={hasDatabaseBackup}
+              databaseBackupAcknowledged={databaseBackupAcknowledged}
+              databaseResetConfirmation={databaseResetConfirmation}
+              error={modelError}
+              actionId={modelActionId}
+              onClose={closeModels}
+              onDownload={(id) => void handleDownloadModel(id)}
+              onSelect={(kind, id) => void handleSelectModel(kind, id)}
+              onSettingsTabChange={setSettingsTab}
+              onDraftChange={updateSettingsDraft}
+              onSaveSettings={handleSaveSettings}
+              onExportDatabase={() => void handleExportDatabase()}
+              onImportDatabase={(file) => void handleImportDatabase(file)}
+              onDatabaseBackupAcknowledgedChange={setDatabaseBackupAcknowledged}
+              onDatabaseResetConfirmationChange={setDatabaseResetConfirmation}
+              onResetDatabase={() => void handleResetDatabase()}
+            />
+          </div>
         ) : null}
 
         {isLoading ? (

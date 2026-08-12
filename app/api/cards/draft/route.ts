@@ -20,7 +20,7 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch {
     return Response.json(
-      { detail: "無法連線到本機整理模型，請確認 API container 正在運作。" },
+      { detail: "無法連線到本機整理模型，請重新啟動應用程式。" },
       { status: 503 },
     );
   }

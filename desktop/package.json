@@ -3,5 +3,10 @@
   "version": "0.1.0",
   "description": "知識卡冊桌面應用程式",
   "author": "Knowledge Card Cabinet",
-  "main": "main.cjs"
+  "main": "main.cjs",
+  "dependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "@modelcontextprotocol/sdk": "1.25.0",
+    "zod": "4.4.3"
+  }
 }
