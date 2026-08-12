@@ -1,17 +1,27 @@
 # 知識卡冊
 
-知識卡冊的前端與語意搜尋後端。前端使用 vinext 的 Node standalone 輸出，
-可與 FastAPI、PostgreSQL/pgvector 一起由 Docker Compose 啟動。
+知識卡冊是一個將零散筆記整理成知識卡、建立本機 embedding、搜尋與探索卡片關聯的應用程式。
 
-目前以 Docker 版作為主要開發環境；桌面版會在 Docker 的 API、共享前端與測試通過
-後再同步製作安裝包。同步規則與模型 runtime 差異請見
-[`DEVELOPMENT_SYNC.md`](DEVELOPMENT_SYNC.md)。
+目前以 Docker 版作為主要開發環境；桌面版使用相同的前端互動與 API 契約，但資料保存於本機 JSON，不依賴 Docker 或 PostgreSQL。兩種 runtime 的開發與同步規則請見 [`DEVELOPMENT_SYNC.md`](DEVELOPMENT_SYNC.md)。
 
-## Prerequisites
+## 功能概覽
+
+- 新增、編輯、搜尋與瀏覽知識卡
+- 透過 embedding 建立語意關聯圖
+- 自動產生與 embedding 對應的抽象卡片封面
+- 卡片垃圾桶、還原與永久刪除
+- 資料庫 JSON 匯出、匯入與重置
+- Docker 與桌面版的本機模型設定
+- 支援自訂 OpenAI-compatible 摘要 API，以及 OpenAI-compatible／TEI embedding API
+- 透過 MCP 讓 AI 協作管理桌面版卡片
+
+## Docker 版快速開始
+
+需求：
 
 - Docker Desktop
 
-## Quick Start
+啟動完整開發環境：
 
 ```powershell
 docker compose up --build -d
@@ -23,114 +33,103 @@ docker compose up --build -d
 - 前端 health：http://localhost:3000/api/health
 - 後端 Swagger：http://localhost:8000/docs
 
-首頁目前同時作為知識卡冊的公開產品入口，包含產品介紹、收藏預覽與桌面版下載區。桌面版安裝包準備好後，可在 `.env` 設定 `NEXT_PUBLIC_DOWNLOAD_URL`，首頁會自動顯示下載連結；未設定時會顯示「桌面版準備中」。
-
-This starter does not use `wrangler.jsonc`.
-
-## 本地開發
-
-```powershell
-npm install
-npm run dev
-```
-
-Docker production build 使用 `Dockerfile`，輸出位於 `dist/standalone`，不依賴
-Sites 或 Cloudflare runtime。
-
-## 後端初始化
+若需要重新載入 starter cards：
 
 ```powershell
 docker compose exec -T api python seed.py
 ```
 
-## 卡片與本機 AI 整理
+Docker 版使用 Python、FastAPI、PostgreSQL／pgvector 與 Hugging Face 模型。模型第一次使用時才會下載，卡片內容預設留在本機 Docker volume 中。
 
-前端預留 `NEXT_PUBLIC_API_URL`（瀏覽器端）與 `API_INTERNAL_URL`（container
-內部）設定。收藏頁目前已連接 FastAPI 的卡片、搜尋與關聯資料流；新增卡片時可貼上
-筆記，讓本機 `Qwen/Qwen2.5-0.5B-Instruct` 先產生標題、問題、摘要與標籤草稿，
-確認後再寫入資料庫。模型第一次使用才會下載，內容不會送到外部 API。
+首頁同時作為公開產品介紹頁，包含收藏預覽與桌面版下載區。設定 `.env` 的 `NEXT_PUBLIC_DOWNLOAD_URL` 後，首頁會顯示下載連結；未設定時會顯示「桌面版準備中」。
 
-資料表也支援卡片編輯與垃圾桶：可以載入既有卡片修改，儲存時會重新建立 embedding；
-也可以將卡片移到垃圾桶，再從垃圾桶面板復原或永久刪除。軟刪除不會立即破壞卡片資料，
-永久刪除時資料庫會依外鍵級聯清除相關關聯。
+## 桌面版
 
-收藏頁的模型設定面板在 Docker 與桌面版都使用同一組模型接口：可以查看硬體建議、
-下載／預熱模型、切換摘要模型與 embedding。Docker 版使用 Python／Hugging Face
-模型，桌面版使用 Transformers.js／ONNX 模型，因此模型清單可以不同，但回應格式與
-切換行為一致。
+桌面版使用 Electron 啟動內嵌的本機 API 與前端 standalone server。卡片資料與模型檔案會保存於 Electron `userData`，可離線使用。
 
-設定彈窗也支援自訂模型 API：摘要使用 OpenAI-compatible Chat Completions，embedding
-支援 OpenAI-compatible 或 TEI。API 金鑰只保存在本機 runtime，讀取設定時只回傳是否已
-設定；目前資料庫向量固定為 384 維，因此自訂 embedding 必須輸出 384 維。
+```powershell
+npm install
+npm run desktop:dev
+```
 
-## Workspace Auth Headers
+建立 Windows 安裝包：
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+```powershell
+npm run desktop:dist
+```
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+安裝包會輸出到 `release/`。桌面版預設使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型及自訂 API 設定。
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+## 本機 AI 與模型
 
-Treat the full name as optional and fall back to email when it is absent:
+新增卡片時，可以貼上筆記，讓摘要模型產生標題、問題、摘要與標籤草稿，確認後再寫入資料庫。embedding 會在新增或編輯卡片後重新建立，並更新語意關聯與封面。
 
-```tsx
-import { headers } from "next/headers";
+桌面版目前提供輕量的本機模型選項，包括 Hash 384、all-MiniLM-L6-v2、Multilingual MiniLM，以及數種摘要模型。Docker 版則使用 Python runtime 與較完整的模型環境。兩者的模型清單可以不同，但 API 回應格式與切換行為保持一致。
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+自訂 embedding 必須輸出 384 維向量，才能與目前資料庫 schema 相容。API key 只保存在本機 runtime，設定讀取時只回傳是否已設定，不會回傳金鑰內容。
 
-  const displayName = fullName ?? email;
-  // ...
+## 資料管理
+
+收藏頁的「資料管理」可以：
+
+1. 匯出目前卡片、embedding、封面與關聯資料。
+2. 匯入先前的 JSON 備份，取代目前本機資料。
+3. 重置卡片資料，保留資料庫 schema、模型檔案與模型設定。
+
+匯入前請保留一份匯出檔；匯入與重置都會影響目前收藏庫內容。
+
+## AI 協作與 MCP
+
+桌面版提供僅限本機的 MCP Bridge。桌面程式執行時會產生隨機 API port 與 Bearer token，並將短期 runtime manifest 寫入目前 Windows 使用者的 AppData。MCP Bridge 只呼叫 `127.0.0.1`，不會把 API 開放到區域網路，也不會把卡片內容送到外部服務。
+
+開發模式：先開啟桌面版，再將以下設定加入支援 MCP 的 AI 工具：
+
+```json
+{
+  "mcpServers": {
+    "knowledge-card-cabinet": {
+      "command": "node",
+      "args": ["C:\\path\\to\\knowledge-card-cabinet\\desktop\\mcp-server.cjs"]
+    }
+  }
 }
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+也可以在專案根目錄執行：
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+```powershell
+npm run desktop:mcp
+```
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+安裝版不需要另外安裝 Node，可直接使用：
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+```json
+{
+  "mcpServers": {
+    "knowledge-card-cabinet": {
+      "command": "C:\\Program Files\\知識卡冊\\知識卡冊.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+目前 MCP 工具可以列出、搜尋、讀取、新增、編輯、確認關聯、列出垃圾桶、移入垃圾桶與還原卡片。永久刪除、資料庫重置、匯入匯出與 API key 設定暫時不開放給 AI。
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+## 常用指令
 
-## Useful Commands
+```powershell
+npm run dev              # 前端開發伺服器
+npm run build            # 建立前端 standalone build
+npm test                 # 建置並執行測試
+npm run lint             # ESLint
+npm run desktop:dev      # 啟動桌面開發版
+npm run desktop:dist     # 建立桌面安裝包
+npm run desktop:mcp      # 啟動桌面 MCP Bridge
+```
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## 專案文件
 
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- [`DEVELOPMENT_SYNC.md`](DEVELOPMENT_SYNC.md)：Docker 版與桌面版的同步規則
+- [`backend/API.md`](backend/API.md)：Docker／FastAPI API 說明
+- [`desktop/README.md`](desktop/README.md)：桌面版模型、安裝包與 MCP 詳細說明
