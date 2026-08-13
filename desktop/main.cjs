@@ -107,6 +107,7 @@ async function startWebServer(apiBaseUrl) {
       ELECTRON_RUN_AS_NODE: "1",
       NODE_ENV: "production",
       API_INTERNAL_URL: apiBaseUrl,
+      API_INTERNAL_TOKEN: localApiRuntime.authToken,
       PORT: String(port),
       HOST: "127.0.0.1",
     },
@@ -156,6 +157,7 @@ async function startServices() {
       modelsDir: path.join(app.getPath("userData"), "models"),
       seedPath: seedPath(),
       migrateFromUrl: process.env.KCC_LEGACY_API_URL || "http://127.0.0.1:8000",
+      migrateFromToken: process.env.KCC_LEGACY_API_TOKEN || process.env.KCC_API_TOKEN || "",
     });
     writeRuntimeManifest(localApiRuntime);
 

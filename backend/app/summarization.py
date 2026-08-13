@@ -60,9 +60,9 @@ def _build_prompt(content: str, source: str) -> list[dict[str, str]]:
             "content": (
                 "你是知識卡編輯助手。請只根據使用者提供的內容整理，不要捏造內容或來源。"
                 "請直接輸出一個 JSON 物件，不要 Markdown、不要說明文字。"
-                "JSON 必須包含 topic、title、question、summary、analogy、detail、tags。"
+                "JSON 必須包含 category、topic、title、question、summary、analogy、detail、tags。"
                 "所有欄位都必須是字串，只有 tags 是字串陣列。"
-                "topic、title、question、summary 必須填寫；summary 只寫一句話；"
+                "category、topic、title、question、summary 必須填寫；summary 只寫一句話；"
                 "analogy 只寫一句話，detail 最多兩句話，tags 只要 1 到 3 個短字串。"
             ),
         },
@@ -89,7 +89,7 @@ def _extract_json(text: str) -> dict[str, Any]:
         # Tiny local models sometimes stop before closing a long JSON object.
         # Recover the required string fields so the user can still review them.
         payload = {}
-        for field in ("topic", "title", "question", "summary", "analogy", "detail"):
+        for field in ("category", "topic", "title", "question", "summary", "analogy", "detail"):
             match = re.search(
                 rf'"{field}"\s*:\s*"((?:\\.|[^"\\])*)"',
                 cleaned,
@@ -110,13 +110,15 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 def _normalize_draft(payload: dict[str, Any]) -> dict[str, Any]:
-    text_fields = ("topic", "title", "question", "summary", "analogy", "detail")
+    text_fields = ("category", "topic", "title", "question", "summary", "analogy", "detail")
     draft = {}
     for field in text_fields:
         value = payload.get(field, "")
         if isinstance(value, list):
             value = value[0] if value else ""
         draft[field] = str(value).strip()
+    if not draft["category"]:
+        draft["category"] = draft["topic"] or "待分類"
     tags = payload.get("tags", [])
     if isinstance(tags, str):
         tags = [tag.strip() for tag in tags.split(",")]
@@ -163,6 +165,7 @@ def _template_draft(content: str, source: str) -> dict[str, Any]:
     keywords = re.findall(r"[\u4e00-\u9fff]{2,8}|[A-Za-z][A-Za-z0-9_-]{1,20}", cleaned)
     tags = list(dict.fromkeys(keywords))[:3]
     return {
+        "category": "待分類",
         "topic": tags[0] if tags else "待分類",
         "title": title,
         "question": f"如何理解「{title}」？",

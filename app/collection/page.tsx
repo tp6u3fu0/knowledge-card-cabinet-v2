@@ -1,172 +1,43 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent, type WheelEvent } from "react";
-import { SeededCoverArt, type CoverMotif } from "../cover-art";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { visualAccents, visualPatterns } from "./types";
+import { RelationView } from "./relation-view";
+import {
+  CreateCardForm,
+  ModelSettingsPanel,
+  TrashPanel,
+} from "./panels";
+import { defaultRelationEdges, relationEdgeKey, relationKey } from "./relations";
+import type {
+  ApiCard,
+  ApiRelation,
+  BackgroundTask,
+  BatchOrganizeResult,
+  CardDraft,
+  CardDraftResponse,
+  CategoryRecord,
+  CollectionView,
+  KnowledgeCard,
+  ModelCatalog,
+  ModelKind,
+  ModelOption,
+  ModelStorage,
+  ProviderSettingsDraft,
+  RelationEdge,
+  RuntimeSettings,
+  SettingsDraft,
+  SettingsTab,
+  TrashCard,
+} from "./types";
+import {
+  FlipCard,
+  KnowledgeCardBack,
+  KnowledgeCardFront,
+  cornerGlyphFor,
+  getCoverStyle,
+} from "../card-face";
 
-type KnowledgeCard = {
-  id: string;
-  number: string;
-  topic: string;
-  title: string;
-  question: string;
-  summary: string;
-  analogy: string;
-  detail: string;
-  source: string;
-  accent: string;
-  pattern: string;
-  cover?: CoverSpec;
-  tags: string[];
-  related: string[];
-};
-
-type CoverSpec = {
-  version: number;
-  seed: string;
-  pattern: string;
-  accent: string;
-  color: string;
-  soft_color: string;
-  background: string;
-  rotation: number;
-  scale: number;
-  density: number;
-  orbit: number;
-  motifs?: CoverMotif[];
-};
-
-type ApiCard = {
-  id: string;
-  number: string;
-  topic: string;
-  title: string;
-  question?: string;
-  summary?: string;
-  analogy?: string;
-  detail?: string;
-  source?: string;
-  tags?: string[];
-  cover?: CoverSpec | null;
-};
-
-type ApiRelation = {
-  relation_type: string;
-  score: number;
-  status: string;
-  card: ApiCard;
-};
-
-type TrashCard = ApiCard & {
-  deleted_at?: string | null;
-};
-
-type CardDraft = {
-  id: string;
-  number: string;
-  topic: string;
-  title: string;
-  question: string;
-  summary: string;
-  analogy: string;
-  detail: string;
-  source: string;
-  tags: string;
-};
-
-type CardDraftResponse = {
-  detail?: string;
-  model?: string;
-  draft?: {
-    topic?: string;
-    title?: string;
-    question?: string;
-    summary?: string;
-    analogy?: string;
-    detail?: string;
-    tags?: string[];
-  };
-};
-
-type ModelKind = "summary" | "embedding";
-
-type ModelOption = {
-  id: string;
-  kind: ModelKind;
-  label: string;
-  short_label: string;
-  provider: string;
-  model_id: string | null;
-  task: string;
-  dimensions?: number;
-  size_label: string;
-  min_memory_gb: number;
-  tier: string;
-  languages: string;
-  description: string;
-  builtin: boolean;
-  active: boolean;
-  installed: boolean;
-  recommended: boolean;
-  status: "available" | "downloading" | "ready";
-  error?: string;
-};
-
-type ModelCatalog = {
-  hardware: {
-    tier: string;
-    label: string;
-    memory_gb: number;
-    cpu_cores: number;
-    recommended_summary: string;
-    recommended_embedding: string;
-    note: string;
-  };
-  active: {
-    summary: string;
-    embedding: string;
-  };
-  active_source?: {
-    summary: "local" | "api";
-    embedding: "local" | "api";
-  };
-  models: ModelOption[];
-};
-
-type ProviderSetting = {
-  source: "local" | "api";
-  provider: string;
-  api_url: string;
-  api_format: "openai" | "tei";
-  model: string;
-  api_key_set: boolean;
-  dimensions?: number;
-};
-
-type RuntimeSettings = {
-  summary: ProviderSetting;
-  embedding: ProviderSetting;
-};
-
-type ProviderSettingsDraft = {
-  source: "local" | "api";
-  api_url: string;
-  model: string;
-  api_format: "openai" | "tei";
-  api_key: string;
-  clear_api_key: boolean;
-};
-
-type SettingsDraft = {
-  summary: ProviderSettingsDraft;
-  embedding: ProviderSettingsDraft;
-};
-
-type SettingsTab = "local" | "api" | "data";
-
-const visualAccents = ["coral", "sky", "lavender", "mint"] as const;
-const visualPatterns = ["orbit", "grid", "ladder", "shelf"] as const;
-
-type CollectionView = "cards" | "relations" | "table";
 
 function ViewIcon({ view }: { view: CollectionView }) {
   if (view === "cards") {
@@ -230,6 +101,7 @@ function createEmptyDraft(): CardDraft {
     id: "",
     number: "",
     topic: "",
+    category: "待分類",
     title: "",
     question: "",
     summary: "",
@@ -262,6 +134,7 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
     id: card.id,
     number: card.number,
     topic: card.topic,
+    category: card.category ?? card.topic,
     title: card.title,
     question: card.question ?? "",
     summary: card.summary ?? "",
@@ -273,22 +146,9 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
     cover,
     tags: card.tags ?? [],
     related,
+    created_at: card.created_at,
+    updated_at: card.updated_at,
   };
-}
-
-function getCoverStyle(cover?: CoverSpec): CSSProperties | undefined {
-  if (!cover) return undefined;
-  return {
-    "--cover-color": cover.color,
-    "--cover-soft-color": cover.soft_color,
-    "--cover-background": cover.background,
-    "--cover-rotation": `${cover.rotation}deg`,
-    "--cover-scale": cover.scale,
-    "--cover-density": cover.density,
-    "--cover-orbit": cover.orbit,
-    "--cover-focus-x": `${26 + cover.orbit * 48}%`,
-    "--cover-focus-y": `${28 + cover.density * 34}%`,
-  } as CSSProperties;
 }
 
 const knowledgeCards: KnowledgeCard[] = [
@@ -296,6 +156,7 @@ const knowledgeCards: KnowledgeCard[] = [
     id: "attention",
     number: "AI-001",
     topic: "人工智慧",
+    category: "人工智慧",
     title: "Attention 是什麼？",
     question: "AI 如何判斷哪些資訊比較重要？",
     summary:
@@ -314,6 +175,7 @@ const knowledgeCards: KnowledgeCard[] = [
     id: "qkv",
     number: "AI-002",
     topic: "人工智慧",
+    category: "人工智慧",
     title: "Query、Key、Value",
     question: "Attention 到底在比較什麼？",
     summary:
@@ -332,6 +194,7 @@ const knowledgeCards: KnowledgeCard[] = [
     id: "transformer",
     number: "AI-003",
     topic: "人工智慧",
+    category: "人工智慧",
     title: "Transformer",
     question: "為什麼現在很多模型都以它為基礎？",
     summary:
@@ -350,6 +213,7 @@ const knowledgeCards: KnowledgeCard[] = [
     id: "rag",
     number: "AI-004",
     topic: "生成式 AI",
+    category: "生成式 AI",
     title: "RAG 為什麼需要檢索？",
     question: "模型不知道的事，能不能先去查資料？",
     summary:
@@ -366,555 +230,72 @@ const knowledgeCards: KnowledgeCard[] = [
   },
 ];
 
-const relationPairs = [
-  ["attention", "qkv"],
-  ["attention", "transformer"],
-  ["qkv", "transformer"],
-  ["transformer", "rag"],
-] as const;
 
-const relationLabels: Record<string, string> = {
-  "attention-qkv": "拆解機制",
-  "attention-transformer": "延伸架構",
-  "qkv-transformer": "組成關係",
-  "rag-transformer": "應用方法",
-};
-
-function relationKey(first: string, second: string) {
-  return [first, second].sort().join("-");
-}
-
-function tiltCard(event: PointerEvent<HTMLElement>) {
-  const card = event.currentTarget;
-  const bounds = card.getBoundingClientRect();
-  const x = (event.clientX - bounds.left) / bounds.width - 0.5;
-  const y = (event.clientY - bounds.top) / bounds.height - 0.5;
-
-  card.style.setProperty("--tilt-x", `${y * -11}deg`);
-  card.style.setProperty("--tilt-y", `${x * 13}deg`);
-}
-
-function resetTilt(event: PointerEvent<HTMLElement>) {
-  event.currentTarget.style.setProperty("--tilt-x", "0deg");
-  event.currentTarget.style.setProperty("--tilt-y", "0deg");
-}
-
-function KnowledgeCardPreview({
-  card,
-  active,
-  onClick,
-}: {
-  card: KnowledgeCard;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`collection-card collection-card--${card.accent} ${active ? "is-active" : ""}`}
-      type="button"
-      onClick={onClick}
-      onPointerMove={tiltCard}
-      onPointerLeave={resetTilt}
-      onPointerCancel={resetTilt}
-      style={getCoverStyle(card.cover)}
-      aria-pressed={active}
-      aria-label={`${card.title}。${card.question}。標籤：${card.tags.join("、")}`}
-    >
-      <span className="collection-card__accent" aria-hidden="true" />
-      <span className="collection-card__topline">
-        <span>{card.number}</span>
-        <span>{card.topic}</span>
-      </span>
-      <SeededCoverArt
-        seed={card.cover?.seed ?? card.id}
-        density={card.cover?.density}
-        pattern={card.cover?.pattern ?? card.pattern}
-        motifs={card.cover?.motifs}
-      />
-      <span className="collection-card__copy">
-        <strong>{card.title}</strong>
-        <span>{card.question}</span>
-      </span>
-      <span className="collection-card__tags">
-        {card.tags.map((tag) => (
-          <span key={tag}>{tag}</span>
-        ))}
-      </span>
-    </button>
-  );
-}
-
-function groupCardsByTopic(cards: KnowledgeCard[]) {
+function groupCardsByCategory(cards: KnowledgeCard[]) {
   const groups = new Map<string, KnowledgeCard[]>();
 
   cards.forEach((card) => {
-    const group = groups.get(card.topic) ?? [];
+    const group = groups.get(card.category) ?? [];
     group.push(card);
-    groups.set(card.topic, group);
+    groups.set(card.category, group);
   });
 
-  return Array.from(groups, ([topic, groupedCards]) => ({ topic, cards: groupedCards }));
+  return Array.from(groups, ([category, groupedCards]) => ({ category, cards: groupedCards }));
 }
 
-function KnowledgeCardStack({
-  topic,
+/**
+ * A category is a labelled section of flat cards, not a stack. Every cover
+ * fingerprint stays visible and one click opens the card.
+ */
+function KnowledgeCardSection({
+  category,
   cards,
   selectedId,
   onSelect,
   onOpen,
+  searchReasons,
 }: {
-  topic: string;
+  category: string;
   cards: KnowledgeCard[];
   selectedId: string;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
+  searchReasons?: Map<string, string[]>;
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const stackSignature = cards.map((card) => card.id).join("|");
-
-  useEffect(() => {
-    setIsExpanded(false);
-  }, [stackSignature]);
-
-  const handleCardClick = (card: KnowledgeCard) => {
-    if (cards.length > 1 && !isExpanded) {
-      setIsExpanded(true);
-      return;
-    }
-    onSelect(card.id);
-    onOpen(card.id);
-  };
-
   return (
-    <div
-      className={`collection-card-stack ${cards.length > 1 ? "is-stack" : "is-single"} ${isExpanded ? "is-expanded" : ""}`}
-      role="group"
-      aria-label={`${topic}，${cards.length} 張卡片`}
+    <section
+      className="collection-category"
+      // A category is only as wide as its cards need, so small ones sit side by
+      // side instead of each owning a mostly-empty row.
+      style={{ "--cards": Math.min(cards.length, 5) } as CSSProperties}
+      aria-label={`${category}，${cards.length} 張卡片`}
     >
-      {isExpanded ? (
-        <div className="collection-card-stack__header">
-          <div className="collection-card-stack__heading">
-            <span>TOPIC</span>
-            <strong>{topic}</strong>
-            <small>{cards.length} 張卡片</small>
-          </div>
-          <button
-            className="collection-card-stack__toggle"
-            type="button"
-            aria-expanded={isExpanded}
-            onClick={() => setIsExpanded(false)}
-          >
-            收起
-          </button>
-        </div>
-      ) : null}
-      <div className="collection-card-stack__items">
+      <div className="collection-category__head">
+        <span className="collection-category__label">CATEGORY</span>
+        <strong>{category}</strong>
+        <small>{cards.length} 張</small>
+        <span className="collection-category__rule" aria-hidden="true" />
+      </div>
+      <div className="collection-category__grid">
         {cards.map((card) => (
-          <div className="collection-card-stack__item" key={card.id}>
-            <KnowledgeCardPreview
+          <div className="collection-category__item" key={card.id}>
+            <KnowledgeCardFront
               card={card}
               active={card.id === selectedId}
-              onClick={() => handleCardClick(card)}
+              onClick={() => {
+                onSelect(card.id);
+                onOpen(card.id);
+              }}
             />
+            {searchReasons?.get(card.id)?.length ? (
+              <small className="collection-category__reason">
+                命中：{searchReasons.get(card.id)!.join(" · ")}
+              </small>
+            ) : null}
           </div>
         ))}
       </div>
-      {!isExpanded && cards.length > 1 ? (
-        <span className="collection-card-stack__count" aria-hidden="true">
-          {cards.length} 張
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-type NodePosition = { x: number; y: number };
-
-type ConnectionStyle = {
-  left: number;
-  top: number;
-  transform: string;
-  width: number;
-};
-
-const initialNodePositions: Record<string, NodePosition> = {
-  attention: { x: 49, y: 50 },
-  qkv: { x: 18, y: 24 },
-  transformer: { x: 75, y: 24 },
-  rag: { x: 78, y: 76 },
-};
-
-function createNodePositions(cards: KnowledgeCard[]): Record<string, NodePosition> {
-  const usesDemoLayout = cards.length <= 4 && cards.every((card) => initialNodePositions[card.id]);
-  if (usesDemoLayout) {
-    return Object.fromEntries(cards.map((card) => [card.id, initialNodePositions[card.id]]));
-  }
-
-  const fallbackPositions: NodePosition[] = [
-    { x: 22, y: 46 },
-    { x: 51, y: 20 },
-    { x: 78, y: 48 },
-    { x: 48, y: 80 },
-  ];
-  if (cards.length <= fallbackPositions.length) {
-    return Object.fromEntries(cards.map((card, index) => [card.id, fallbackPositions[index]]));
-  }
-
-  const ringRadiusX = 34;
-  const ringRadiusY = 31;
-  return Object.fromEntries(cards.map((card, index) => {
-    const angle = -Math.PI / 2 + 0.18 + (index * Math.PI * 2) / cards.length;
-    const radialVariation = 1 + ((index % 3) - 1) * 0.055;
-    return [card.id, {
-      x: 50 + Math.cos(angle) * ringRadiusX * radialVariation,
-      y: 50 + Math.sin(angle) * ringRadiusY * (index % 2 === 0 ? 1.04 : 0.98),
-    }];
-  }));
-}
-
-function RelationView({
-  cards,
-  pairs,
-  selectedId,
-  onSelect,
-  onOpen,
-}: {
-  cards: KnowledgeCard[];
-  pairs: ReadonlyArray<readonly [string, string]>;
-  selectedId: string;
-  onSelect: (id: string) => void;
-  onOpen: (id: string) => void;
-}) {
-  const visibleIds = new Set(cards.map((card) => card.id));
-  const visiblePairs = pairs.filter(
-    ([first, second]) => visibleIds.has(first) && visibleIds.has(second),
-  );
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{
-    id: string;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    offsetX: number;
-    offsetY: number;
-    moved: boolean;
-  } | null>(null);
-  const panRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-  } | null>(null);
-  const suppressClickRef = useRef(false);
-  const nodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const [positions, setPositions] = useState(() => createNodePositions(cards));
-  const [lineStyles, setLineStyles] = useState<Record<string, ConnectionStyle>>({});
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const zoomRef = useRef(zoom);
-  zoomRef.current = zoom;
-  const showNodeLabels = zoom >= 1;
-  const cardSignature = cards.map((card) => card.id).join("|");
-  const visiblePairKey = visiblePairs.map(([first, second]) => `${first}-${second}`).join("|");
-
-  useEffect(() => {
-    setPositions(createNodePositions(cards));
-    setPan({ x: 0, y: 0 });
-  }, [cardSignature]);
-
-  const startDrag = (event: PointerEvent<HTMLElement>, id: string) => {
-    if (event.button !== 0) return;
-    suppressClickRef.current = false;
-    const nodeBounds = event.currentTarget.getBoundingClientRect();
-    const sceneBounds = sceneRef.current?.getBoundingClientRect();
-    const sceneScale = zoom;
-    dragRef.current = {
-      id,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      offsetX: sceneBounds
-        ? (event.clientX - (nodeBounds.left + nodeBounds.width / 2)) / sceneScale
-        : event.clientX - (nodeBounds.left + nodeBounds.width / 2),
-      offsetY: sceneBounds
-        ? (event.clientY - (nodeBounds.top + nodeBounds.height / 2)) / sceneScale
-        : event.clientY - (nodeBounds.top + nodeBounds.height / 2),
-      moved: false,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const moveDrag = (event: PointerEvent<HTMLElement>) => {
-    tiltCard(event);
-    const drag = dragRef.current;
-    const sceneBounds = sceneRef.current?.getBoundingClientRect();
-    if (!drag || !sceneBounds) return;
-    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
-    drag.moved = true;
-    suppressClickRef.current = true;
-
-    const sceneScale = zoom;
-    const sceneWidth = sceneBounds.width / sceneScale;
-    const sceneHeight = sceneBounds.height / sceneScale;
-    const nextX = (((event.clientX - sceneBounds.left) / sceneScale - drag.offsetX) / sceneWidth) * 100;
-    const nextY = (((event.clientY - sceneBounds.top) / sceneScale - drag.offsetY) / sceneHeight) * 100;
-    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-    setPositions((current) => ({
-      ...current,
-      [drag.id]: {
-        x: clamp(nextX, 10, 90),
-        y: clamp(nextY, 12, 88),
-      },
-    }));
-  };
-
-  const stopDrag = (event: PointerEvent<HTMLElement>) => {
-    resetTilt(event);
-    if (dragRef.current?.pointerId === event.pointerId) {
-      dragRef.current = null;
-    }
-  };
-
-  const getPanBounds = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || zoom <= 1) return { x: 0, y: 0 };
-    return {
-      x: (canvas.clientWidth * (zoom - 1)) / 2,
-      y: (canvas.clientHeight * (zoom - 1)) / 2,
-    };
-  };
-
-  const clampPanOffset = (offset: { x: number; y: number }) => {
-    const bounds = getPanBounds();
-    return {
-      x: Math.min(bounds.x, Math.max(-bounds.x, offset.x)),
-      y: Math.min(bounds.y, Math.max(-bounds.y, offset.y)),
-    };
-  };
-
-  const startPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 2) return;
-    event.preventDefault();
-    const origin = clampPanOffset(pan);
-    panRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: origin.x,
-      originY: origin.y,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setIsPanning(true);
-  };
-
-  const movePan = (event: PointerEvent<HTMLDivElement>) => {
-    const currentPan = panRef.current;
-    if (!currentPan) return;
-    setPan(clampPanOffset({
-      x: currentPan.originX + event.clientX - currentPan.startX,
-      y: currentPan.originY + event.clientY - currentPan.startY,
-    }));
-  };
-
-  const stopPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (panRef.current?.pointerId !== event.pointerId) return;
-    panRef.current = null;
-    setIsPanning(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  const clampZoom = (value: number) => Math.min(1.6, Math.max(0.7, value));
-  const adjustZoom = (amount: number) => {
-    setZoom((current) => clampZoom(Number((current + amount).toFixed(2))));
-  };
-  const handleCanvasWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
-    adjustZoom(event.deltaY > 0 ? -0.08 : 0.08);
-  };
-
-  useEffect(() => {
-    setPan((current) => clampPanOffset(current));
-  }, [zoom]);
-
-  const handleNodeClick = (id: string) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
-    onSelect(id);
-    onOpen(id);
-  };
-
-  useLayoutEffect(() => {
-    const updateLines = () => {
-      const canvas = canvasRef.current;
-      const scene = sceneRef.current;
-      if (!canvas || !scene) return;
-      const sceneScale = zoomRef.current;
-      const sceneBounds = scene.getBoundingClientRect();
-      const nextStyles: Record<string, ConnectionStyle> = {};
-
-      visiblePairs.forEach(([first, second]) => {
-        const startNode = nodeRefs.current[first];
-        const endNode = nodeRefs.current[second];
-        if (!startNode || !endNode) return;
-
-        const startBounds = startNode.getBoundingClientRect();
-        const endBounds = endNode.getBoundingClientRect();
-        const start = {
-          x: (startBounds.left - sceneBounds.left + startBounds.width / 2) / sceneScale,
-          y: (startBounds.top - sceneBounds.top + startBounds.height / 2) / sceneScale,
-        };
-        const end = {
-          x: (endBounds.left - sceneBounds.left + endBounds.width / 2) / sceneScale,
-          y: (endBounds.top - sceneBounds.top + endBounds.height / 2) / sceneScale,
-        };
-        const deltaX = end.x - start.x;
-        const deltaY = end.y - start.y;
-        const distance = Math.hypot(deltaX, deltaY);
-        if (distance < 1) return;
-
-        const edgeDistance = (bounds: DOMRect) => {
-          const width = bounds.width / sceneScale;
-          const height = bounds.height / sceneScale;
-          const horizontal = deltaX === 0 ? Number.POSITIVE_INFINITY : (width / 2) / Math.abs(deltaX);
-          const vertical = deltaY === 0 ? Number.POSITIVE_INFINITY : (height / 2) / Math.abs(deltaY);
-          return Math.min(horizontal, vertical);
-        };
-
-        const startEdge = edgeDistance(startBounds);
-        const endEdge = edgeDistance(endBounds);
-        const startPoint = {
-          x: start.x + deltaX * startEdge,
-          y: start.y + deltaY * startEdge,
-        };
-        const endPoint = {
-          x: end.x - deltaX * endEdge,
-          y: end.y - deltaY * endEdge,
-        };
-
-        nextStyles[relationKey(first, second)] = {
-          left: startPoint.x,
-          top: startPoint.y,
-          transform: `rotate(${Math.atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x) * (180 / Math.PI)}deg)`,
-          width: Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y),
-        };
-      });
-
-      setLineStyles((current) => {
-        const currentValue = JSON.stringify(current);
-        const nextValue = JSON.stringify(nextStyles);
-        return currentValue === nextValue ? current : nextStyles;
-      });
-    };
-
-    updateLines();
-    const observer = new ResizeObserver(updateLines);
-    if (canvasRef.current) observer.observe(canvasRef.current);
-    return () => observer.disconnect();
-  }, [visiblePairKey, positions]);
-
-  return (
-    <div className="relation-workspace">
-      <div className="relation-toolbar">
-        <span className="relation-toolbar__label">VIEW SCALE</span>
-        <div className="relation-zoom" aria-label="調整關聯圖縮放">
-          <button type="button" aria-label="縮小關聯圖" onClick={() => adjustZoom(-0.1)} disabled={zoom <= 0.7}>
-            −
-          </button>
-          <output>{Math.round(zoom * 100)}%</output>
-          <button type="button" aria-label="放大關聯圖" onClick={() => adjustZoom(0.1)} disabled={zoom >= 1.6}>
-            ＋
-          </button>
-          <button className="relation-zoom__reset" type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>
-            重設
-          </button>
-        </div>
-      </div>
-      <div
-        className={`relation-canvas ${showNodeLabels ? "" : "relation-canvas--compact"} ${isPanning ? "is-panning" : ""}`}
-        ref={canvasRef}
-        onPointerDown={startPan}
-        onPointerMove={movePan}
-        onPointerUp={stopPan}
-        onPointerCancel={stopPan}
-        onContextMenu={(event) => event.preventDefault()}
-        onWheel={handleCanvasWheel}
-        aria-label="知識卡片關聯圖"
-      >
-        <div
-          className="relation-canvas__scene"
-          ref={sceneRef}
-          style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
-        >
-          <span className="relation-canvas__grid" aria-hidden="true" />
-          {visiblePairs.map(([first, second]) => (
-            <span
-              className={`relation-line relation-line--${relationKey(first, second)}`}
-              key={`${first}-${second}`}
-              style={lineStyles[relationKey(first, second)]}
-              aria-hidden="true"
-            />
-          ))}
-          {cards.map((card, index) => {
-          const position = positions[card.id] ?? {
-            x: 18 + ((index * 29) % 64),
-            y: 18 + ((index * 37) % 64),
-          };
-          const relatedCount = visiblePairs.filter(
-            ([first, second]) => first === card.id || second === card.id,
-          ).length;
-          const previewPlacement = position.y > 55 ? "relation-node--preview-above" : "relation-node--preview-below";
-          const floatClass = `relation-node--float-${index % 4}`;
-
-            return (
-            <button
-              className={`relation-node relation-node--${card.id} ${previewPlacement} ${floatClass} ${selectedId === card.id ? "is-selected" : ""}`}
-              key={card.id}
-              type="button"
-              onClick={() => handleNodeClick(card.id)}
-              onPointerDown={(event) => startDrag(event, card.id)}
-              onPointerMove={moveDrag}
-              onPointerUp={stopDrag}
-              onPointerLeave={stopDrag}
-              onPointerCancel={stopDrag}
-              ref={(node) => {
-                nodeRefs.current[card.id] = node;
-              }}
-              style={{ left: `${position.x}%`, top: `${position.y}%` }}
-              aria-pressed={selectedId === card.id}
-              aria-label={`${card.title}，${card.topic}，${relatedCount} 個關聯`}
-            >
-              <span className="relation-node__label" aria-hidden="true">{card.title}</span>
-              <span className="relation-node__dot" aria-hidden="true" />
-              <span className="relation-node__preview" aria-hidden="true">
-                <span className="relation-node__number">{card.number}</span>
-                <strong>{card.title}</strong>
-                <span className="relation-node__topic">{card.topic}</span>
-                <small>{relatedCount} 個關聯</small>
-              </span>
-            </button>
-            );
-          })}
-        </div>
-      </div>
-      <p className="relation-hint">靠近節點查看摘要 · 點擊節點開啟內容 · 拖曳節點調整位置 · 右鍵拖曳平移畫布 · Ctrl/Cmd + 滾輪縮放</p>
-      <div className="relation-legend">
-        {visiblePairs.map(([first, second]) => (
-          <span key={`legend-${first}-${second}`}>
-            <i className={`relation-legend__sample relation-legend__sample--${relationKey(first, second)}`} aria-hidden="true" />
-            {relationLabels[relationKey(first, second)] ?? "語意關聯"}
-          </span>
-        ))}
-      </div>
-    </div>
+    </section>
   );
 }
 
@@ -936,14 +317,21 @@ function CollectionCardViewer({
   }, [card.id]);
 
   return (
-    <div className="card-viewer" onClick={onClose}>
+    // The backdrop is presentational: dismissal also lives on the close button
+    // and the Escape handler, so it needs no role or key handling of its own.
+    <div
+      className="card-viewer"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div
         className="card-viewer__panel"
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="collection-card-viewer-title"
-        onClick={(event) => event.stopPropagation()}
       >
         <div className="card-viewer__topline">
           <span>OPEN KNOWLEDGE CARD</span>
@@ -953,11 +341,26 @@ function CollectionCardViewer({
         </div>
 
         <div className="card-viewer__content">
-          <div className="card-viewer__card relation-card-viewer__card">
-            <KnowledgeCardPreview card={card} active onClick={() => undefined} />
-          </div>
+          <FlipCard
+            key={card.id}
+            front={<KnowledgeCardFront card={card} active onClick={() => undefined} />}
+            back={
+              <KnowledgeCardBack
+                accent={card.accent}
+                number={card.number}
+                lead={card.summary}
+                body={card.analogy || card.detail}
+                tags={card.tags}
+                neighbours={relatedCards}
+                cornerShape={cornerGlyphFor(card.cover?.motifs)}
+                style={getCoverStyle(card.cover)}
+                onOpenNeighbour={onOpenRelated}
+              />
+            }
+          />
           <article className="card-viewer__reading">
             <div className="reading-meta">
+              <span>{card.category}</span>
               <span>{card.topic}</span>
               <span>{card.tags.join(" · ")}</span>
             </div>
@@ -1031,7 +434,7 @@ function TableView({
         <thead>
           <tr>
             <th>卡片</th>
-            <th>領域</th>
+            <th>分類</th>
             <th>關聯</th>
             <th>來源</th>
             <th>操作</th>
@@ -1050,7 +453,7 @@ function TableView({
                   <strong>{card.title}</strong>
                 </button>
               </td>
-              <td>{card.topic}</td>
+              <td>{card.category}</td>
               <td>{card.related.length} 張卡片</td>
               <td className="table-source">{card.source}</td>
               <td>
@@ -1077,656 +480,30 @@ function TableView({
   );
 }
 
-function TrashPanel({
-  cards,
-  isLoading,
-  error,
-  restoringId,
-  deletingId,
-  onClose,
-  onRestore,
-  onDelete,
-}: {
-  cards: TrashCard[];
-  isLoading: boolean;
-  error: string;
-  restoringId: string;
-  deletingId: string;
-  onClose: () => void;
-  onRestore: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  return (
-    <section className="trash-panel">
-      <div className="trash-panel__header">
-        <div>
-          <p className="eyebrow">CARD TRASH</p>
-          <h2>垃圾桶</h2>
-          <span>移入垃圾桶的卡片仍可復原。</span>
-        </div>
-        <button className="create-card-close" type="button" onClick={onClose}>
-          關閉
-        </button>
-      </div>
-
-      {error ? <p className="create-card-error" role="alert">{error}</p> : null}
-      {isLoading ? (
-        <div className="trash-panel__empty">正在載入垃圾桶…</div>
-      ) : cards.length === 0 ? (
-        <div className="trash-panel__empty">垃圾桶目前是空的。</div>
-      ) : (
-        <div className="trash-list">
-          {cards.map((card) => (
-            <div className="trash-list__item" key={card.id}>
-              <div>
-                <span>{card.number} · {card.topic}</span>
-                <strong>{card.title}</strong>
-                <small>
-                  {card.deleted_at ? new Date(card.deleted_at).toLocaleString("zh-TW") : "已移除"}
-                </small>
-              </div>
-              <div className="trash-list__actions">
-                <button
-                  className="trash-restore-button"
-                  type="button"
-                  onClick={() => onRestore(card.id)}
-                  disabled={restoringId === card.id || deletingId === card.id}
-                >
-                  {restoringId === card.id ? "復原中…" : "復原"}
-                </button>
-                <button
-                  className="trash-delete-button"
-                  type="button"
-                  onClick={() => onDelete(card.id)}
-                  disabled={restoringId === card.id || deletingId === card.id}
-                >
-                  {deletingId === card.id ? "刪除中…" : "永久刪除"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ModelOptionCard({
-  model,
-  actionId,
-  onDownload,
-  onSelect,
-}: {
-  model: ModelOption;
-  actionId: string;
-  onDownload: (id: string) => void;
-  onSelect: (kind: ModelKind, id: string) => void;
-}) {
-  const isBusy = actionId === model.id;
-  return (
-    <article className={`model-option${model.active ? " is-active" : ""}`}>
-      <div className="model-option__topline">
-        <span>{model.short_label}</span>
-        {model.recommended ? <b>依硬體推薦</b> : null}
-      </div>
-      <h3>{model.label}</h3>
-      <p>{model.description}</p>
-      <div className="model-option__meta">
-        <span>{model.size_label}</span>
-        <span>{model.tier}</span>
-        <span>{model.languages}</span>
-      </div>
-      {model.error ? <small className="model-option__error">上次載入失敗：{model.error}</small> : null}
-      <div className="model-option__actions">
-        {model.active ? (
-          <span className="model-option__active">目前使用中</span>
-        ) : model.status === "downloading" || isBusy ? (
-          <span className="model-option__pending">下載／準備中…</span>
-        ) : model.installed ? (
-          <button type="button" onClick={() => onSelect(model.kind, model.id)}>
-            啟用這個模型
-          </button>
-        ) : (
-          <button type="button" onClick={() => onDownload(model.id)}>
-            下載模型
-          </button>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function DataManagementPanel({
-  isExporting,
-  isImporting,
-  isResetting,
-  hasBackup,
-  backupAcknowledged,
-  resetConfirmation,
-  onExport,
-  onImport,
-  onBackupAcknowledgedChange,
-  onResetConfirmationChange,
-  onReset,
-}: {
-  isExporting: boolean;
-  isImporting: boolean;
-  isResetting: boolean;
-  hasBackup: boolean;
-  backupAcknowledged: boolean;
-  resetConfirmation: string;
-  onExport: () => void;
-  onImport: (file: File) => void;
-  onBackupAcknowledgedChange: (value: boolean) => void;
-  onResetConfirmationChange: (value: string) => void;
-  onReset: () => void;
-}) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const canReset = hasBackup && backupAcknowledged && resetConfirmation === "RESET DATABASE";
-
-  return (
-    <div className="settings-data-form">
-      <div className="settings-api-intro settings-api-intro--data">
-        <span className="model-settings-kicker">LOCAL DATA / SAFETY</span>
-        <strong>先備份，再整理本機資料</strong>
-        <p>資料會留在這台電腦的 Docker PostgreSQL。匯出會下載一份 JSON 備份；重置只會清除卡片、垃圾桶與關聯，不會刪除模型檔案或資料表結構。</p>
-      </div>
-
-      <section className="settings-data-card">
-        <div>
-          <span className="model-settings-kicker">01 / BACKUP</span>
-          <h3>匯出本機資料</h3>
-          <p>包含卡片內容、封面資料、embedding、垃圾桶內容與卡片關聯。API 金鑰不會寫入備份檔。匯入會取代目前本機資料。</p>
-        </div>
-        <div className="settings-data-actions">
-          <button className="settings-secondary-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting || isExporting || isResetting}>
-            {isImporting ? "匯入中…" : "匯入 JSON 備份"}
-          </button>
-          <button className="create-card-submit" type="button" onClick={onExport} disabled={isExporting || isImporting || isResetting}>
-            {isExporting ? "準備備份中…" : "下載 JSON 備份"}
-          </button>
-          <input
-            ref={fileInputRef}
-            className="settings-file-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) onImport(file);
-            }}
-          />
-        </div>
-      </section>
-
-      <section className="settings-danger-zone">
-        <div>
-          <span className="model-settings-kicker">02 / RESET</span>
-          <h3>重置本機資料庫</h3>
-          <p>這會清除目前所有啟用卡片、垃圾桶卡片與關聯。模型設定、模型下載檔與資料表結構會保留。</p>
-        </div>
-        <label className="settings-data-check">
-          <input
-            type="checkbox"
-            checked={backupAcknowledged}
-            disabled={!hasBackup || isResetting}
-            onChange={(event) => onBackupAcknowledgedChange(event.target.checked)}
-          />
-          <span>我已下載並保存剛才的 JSON 備份</span>
-        </label>
-        <label className="settings-confirm-field">
-          <span>輸入確認文字</span>
-          <input
-            value={resetConfirmation}
-            onChange={(event) => onResetConfirmationChange(event.target.value)}
-            placeholder="RESET DATABASE"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={isResetting}
-          />
-        </label>
-        <button className="settings-danger-button" type="button" onClick={onReset} disabled={!canReset || isResetting || isExporting}>
-          {isResetting ? "重置中…" : "重置本機資料庫"}
-        </button>
-      </section>
-    </div>
-  );
-}
-
-function ModelSettingsPanel({
-  catalog,
-  runtimeSettings,
-  settingsDraft,
-  settingsTab,
-  isLoading,
-  isSettingsSaving,
-  isDatabaseExporting,
-  isDatabaseImporting,
-  isDatabaseResetting,
-  hasDatabaseBackup,
-  databaseBackupAcknowledged,
-  databaseResetConfirmation,
-  error,
-  actionId,
-  onClose,
-  onDownload,
-  onSelect,
-  onSettingsTabChange,
-  onDraftChange,
-  onSaveSettings,
-  onExportDatabase,
-  onImportDatabase,
-  onDatabaseBackupAcknowledgedChange,
-  onDatabaseResetConfirmationChange,
-  onResetDatabase,
-}: {
-  catalog: ModelCatalog | null;
-  runtimeSettings: RuntimeSettings | null;
-  settingsDraft: SettingsDraft;
-  settingsTab: SettingsTab;
-  isLoading: boolean;
-  isSettingsSaving: boolean;
-  isDatabaseExporting: boolean;
-  isDatabaseImporting: boolean;
-  isDatabaseResetting: boolean;
-  hasDatabaseBackup: boolean;
-  databaseBackupAcknowledged: boolean;
-  databaseResetConfirmation: string;
-  error: string;
-  actionId: string;
-  onClose: () => void;
-  onDownload: (id: string) => void;
-  onSelect: (kind: ModelKind, id: string) => void;
-  onSettingsTabChange: (tab: SettingsTab) => void;
-  onDraftChange: (kind: ModelKind, field: keyof ProviderSettingsDraft, value: string | boolean) => void;
-  onSaveSettings: (event: FormEvent<HTMLFormElement>) => void;
-  onExportDatabase: () => void;
-  onImportDatabase: (file: File) => void;
-  onDatabaseBackupAcknowledgedChange: (value: boolean) => void;
-  onDatabaseResetConfirmationChange: (value: string) => void;
-  onResetDatabase: () => void;
-}) {
-  const summaryModels = catalog?.models.filter((model) => model.kind === "summary") ?? [];
-  const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
-
-  const providerFields = (kind: ModelKind, label: string, description: string) => {
-    const setting = runtimeSettings?.[kind];
-    const draft = settingsDraft[kind];
-    const isApi = draft.source === "api";
-    return (
-      <div className="settings-provider-card">
-        <div className="settings-provider-card__heading">
-          <div>
-            <span className="model-settings-kicker">{kind === "summary" ? "01 / SUMMARY" : "02 / EMBEDDING"}</span>
-            <h3>{label}</h3>
-          </div>
-          <p>{description}</p>
-        </div>
-        <div className="settings-provider-card__mode">
-          <label>
-            <span>執行方式</span>
-            <select
-              value={draft.source}
-              onChange={(event) => onDraftChange(kind, "source", event.target.value)}
-            >
-              <option value="local">本機模型</option>
-              <option value="api">自訂 API</option>
-            </select>
-          </label>
-          <div className={`settings-provider-status${setting?.source === "api" ? " is-api" : ""}`}>
-            <span>{setting?.source === "api" ? "目前使用自訂 API" : "目前使用本機模型"}</span>
-            {setting?.model ? <strong>{setting.model}</strong> : null}
-          </div>
-        </div>
-        {isApi ? (
-          <div className="settings-provider-fields">
-            <label>
-              <span>API endpoint</span>
-              <input
-                type="url"
-                value={draft.api_url}
-                onChange={(event) => onDraftChange(kind, "api_url", event.target.value)}
-                placeholder={kind === "summary" ? "https://api.example.com/v1/chat/completions" : "https://api.example.com/v1/embeddings"}
-                required
-              />
-            </label>
-            <label>
-              <span>模型名稱</span>
-              <input
-                type="text"
-                value={draft.model}
-                onChange={(event) => onDraftChange(kind, "model", event.target.value)}
-                placeholder={kind === "summary" ? "例如：gpt-4o-mini" : "例如：text-embedding-3-small"}
-                required
-              />
-            </label>
-            {kind === "embedding" ? (
-              <label>
-                <span>回傳格式</span>
-                <select
-                  value={draft.api_format}
-                  onChange={(event) => onDraftChange(kind, "api_format", event.target.value)}
-                >
-                  <option value="openai">OpenAI-compatible</option>
-                  <option value="tei">Text Embeddings Inference</option>
-                </select>
-              </label>
-            ) : null}
-            <label>
-              <span>API 金鑰 <em>{setting?.api_key_set ? "已儲存，留白會沿用" : "選填"}</em></span>
-              <input
-                type="password"
-                value={draft.api_key}
-                onChange={(event) => onDraftChange(kind, "api_key", event.target.value)}
-                placeholder={setting?.api_key_set ? "已設定，輸入新金鑰可覆蓋" : "sk-…"}
-                autoComplete="new-password"
-              />
-            </label>
-            {setting?.api_key_set ? (
-              <label className="settings-provider-fields__checkbox">
-                <input
-                  type="checkbox"
-                  checked={draft.clear_api_key}
-                  onChange={(event) => onDraftChange(kind, "clear_api_key", event.target.checked)}
-                />
-                <span>清除已儲存的 API 金鑰</span>
-              </label>
-            ) : null}
-          </div>
-        ) : null}
-        {kind === "embedding" ? <p className="settings-provider-card__note">目前資料庫向量固定為 {setting?.dimensions ?? 384} 維；自訂 embedding 必須回傳這個維度，才可以重新建立關聯。</p> : null}
-      </div>
-    );
-  };
-
-  return (
-    <section className="model-settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div className="model-settings-header">
-        <div>
-          <p className="eyebrow">WORKSPACE SETTINGS</p>
-          <h2 id="settings-title">設定</h2>
-          <p>把模型來源、API 連線與本機資源集中管理。設定儲存在這個知識卡櫃，不會上傳到外部服務。</p>
-        </div>
-        <button className="create-card-close" type="button" onClick={onClose}>
-          關閉
-        </button>
-      </div>
-
-      <div className="settings-tabs" role="tablist" aria-label="設定分類">
-        <button className={settingsTab === "local" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "local"} onClick={() => onSettingsTabChange("local")}>
-          <span>01</span>
-          本機模型
-        </button>
-        <button className={settingsTab === "api" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "api"} onClick={() => onSettingsTabChange("api")}>
-          <span>02</span>
-          自訂 API
-        </button>
-        <button className={settingsTab === "data" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "data"} onClick={() => onSettingsTabChange("data")}>
-          <span>03</span>
-          資料管理
-        </button>
-      </div>
-
-      {error ? <p className="create-card-error" role="alert">{error}</p> : null}
-      {settingsTab === "data" ? (
-        <DataManagementPanel
-          isExporting={isDatabaseExporting}
-          isImporting={isDatabaseImporting}
-          isResetting={isDatabaseResetting}
-          hasBackup={hasDatabaseBackup}
-          backupAcknowledged={databaseBackupAcknowledged}
-          resetConfirmation={databaseResetConfirmation}
-          onExport={onExportDatabase}
-          onImport={onImportDatabase}
-          onBackupAcknowledgedChange={onDatabaseBackupAcknowledgedChange}
-          onResetConfirmationChange={onDatabaseResetConfirmationChange}
-          onReset={onResetDatabase}
-        />
-      ) : settingsTab === "api" ? (
-        <form className="settings-api-form" onSubmit={onSaveSettings}>
-          <div className="settings-api-intro">
-            <span className="model-settings-kicker">BRING YOUR OWN MODEL</span>
-            <strong>接入你熟悉的模型供應商</strong>
-            <p>摘要使用 OpenAI-compatible Chat Completions；embedding 支援 OpenAI-compatible 或 TEI。只要填入 endpoint、模型名稱與金鑰，就能在本機流程中使用。</p>
-          </div>
-          {providerFields("summary", "摘要與欄位整理", "用來把筆記整理成可檢查的知識卡草稿。")}
-          {providerFields("embedding", "語意向量與關聯圖", "用來計算卡片相似度、搜尋結果與關聯圖連線。")}
-          <div className="settings-api-actions">
-            <p>儲存後若 embedding 設定有變更，系統會重新建立現有卡片的向量與關聯。</p>
-            <button className="create-card-submit" type="submit" disabled={isSettingsSaving}>
-              {isSettingsSaving ? "儲存並重建中…" : "儲存並套用"}
-            </button>
-          </div>
-        </form>
-      ) : isLoading && !catalog ? (
-        <div className="model-settings-empty">正在讀取本機硬體與模型狀態…</div>
-      ) : catalog ? (
-        <>
-          <div className="model-hardware-note">
-            <div>
-              <span className="model-settings-kicker">YOUR HARDWARE</span>
-              <strong>{catalog.hardware.label}</strong>
-            </div>
-            <span>{catalog.hardware.memory_gb} GB RAM · {catalog.hardware.cpu_cores} CPU cores</span>
-            <p>{catalog.hardware.note}</p>
-          </div>
-          <div className="model-settings-group">
-            <div className="model-settings-group__heading">
-              <div>
-                <span className="model-settings-kicker">01 / SUMMARY</span>
-                <h3>摘要與欄位整理</h3>
-              </div>
-              <p>決定「先貼上筆記」時，模型如何幫你整理卡片。</p>
-            </div>
-            <div className="model-options-grid">
-              {summaryModels.map((model) => (
-                <ModelOptionCard key={model.id} model={model} actionId={actionId} onDownload={onDownload} onSelect={onSelect} />
-              ))}
-            </div>
-          </div>
-          <div className="model-settings-group model-settings-group--embedding">
-            <div className="model-settings-group__heading">
-              <div>
-                <span className="model-settings-kicker">02 / EMBEDDING</span>
-                <h3>語意向量與關聯圖</h3>
-              </div>
-              <p>決定卡片之間的語意距離與搜尋結果。</p>
-            </div>
-            <div className="model-options-grid">
-              {embeddingModels.map((model) => (
-                <ModelOptionCard key={model.id} model={model} actionId={actionId} onDownload={onDownload} onSelect={onSelect} />
-              ))}
-            </div>
-          </div>
-          <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
-        </>
-      ) : null}
-    </section>
-  );
-}
-
-function CreateCardForm({
-  draft,
-  sourceText,
-  isEditing,
-  isSaving,
-  isDrafting,
-  error,
-  onSourceChange,
-  onGenerate,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  draft: CardDraft;
-  sourceText: string;
-  isEditing: boolean;
-  isSaving: boolean;
-  isDrafting: boolean;
-  error: string;
-  onSourceChange: (value: string) => void;
-  onGenerate: () => void;
-  onChange: (field: keyof CardDraft, value: string) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  return (
-    <form className="create-card-panel" onSubmit={onSubmit}>
-      <div className="create-card-header">
-        <div>
-          <p className="eyebrow">{isEditing ? "EDIT KNOWLEDGE CARD" : "NEW KNOWLEDGE CARD"}</p>
-          <h2>{isEditing ? "把這張卡片重新整理。" : "把下一個理解留下來。"}</h2>
-        </div>
-        <button className="create-card-close" type="button" onClick={onClose}>
-          關閉
-        </button>
-      </div>
-
-      <div className="create-card-ai-box">
-        <div className="create-card-ai-heading">
-          <div>
-            <span className="create-card-ai-kicker">LOCAL AI ASSIST</span>
-            <strong>先貼上筆記，讓本機模型幫你整理欄位</strong>
-          </div>
-          <span>本機整理 · 不上傳內容</span>
-        </div>
-        <textarea
-          className="create-card-ai-input"
-          rows={6}
-          value={sourceText}
-          onChange={(event) => onSourceChange(event.target.value)}
-          placeholder="貼上文章摘錄、讀書筆記或你的零散想法（至少 20 個字）"
-        />
-        <div className="create-card-ai-actions">
-          <span>只產生摘要與欄位草稿，仍可在下方修改後再儲存。</span>
-          <button
-            className="create-card-ai-button"
-            type="button"
-            onClick={onGenerate}
-            disabled={isDrafting || isSaving || sourceText.trim().length < 20}
-          >
-            {isDrafting ? "本機整理中…" : "✦ AI 整理欄位"}
-          </button>
-        </div>
-      </div>
-
-      <div className="create-card-grid">
-        <label className="create-card-field">
-          <span>卡片 ID</span>
-          <input
-            required
-            disabled={isEditing}
-            value={draft.id}
-            onChange={(event) => onChange("id", event.target.value)}
-            placeholder="attention-v2"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>編號</span>
-          <input
-            required
-            value={draft.number}
-            onChange={(event) => onChange("number", event.target.value)}
-            placeholder="AI-005"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>主題</span>
-          <input
-            required
-            value={draft.topic}
-            onChange={(event) => onChange("topic", event.target.value)}
-            placeholder="人工智慧"
-          />
-        </label>
-        <label className="create-card-field create-card-field--wide">
-          <span>標題</span>
-          <input
-            required
-            value={draft.title}
-            onChange={(event) => onChange("title", event.target.value)}
-            placeholder="例如：向量資料庫是什麼？"
-          />
-        </label>
-        <label className="create-card-field create-card-field--wide">
-          <span>想回答的問題</span>
-          <input
-            required
-            value={draft.question}
-            onChange={(event) => onChange("question", event.target.value)}
-            placeholder="我想用自己的話回答什麼？"
-          />
-        </label>
-        <label className="create-card-field create-card-field--wide">
-          <span>一句話摘要</span>
-          <textarea
-            required
-            rows={3}
-            value={draft.summary}
-            onChange={(event) => onChange("summary", event.target.value)}
-            placeholder="先用一句話說清楚這張卡的核心。"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>生活比喻</span>
-          <textarea
-            rows={4}
-            value={draft.analogy}
-            onChange={(event) => onChange("analogy", event.target.value)}
-            placeholder="它像生活中的什麼？"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>再往裡面看</span>
-          <textarea
-            rows={4}
-            value={draft.detail}
-            onChange={(event) => onChange("detail", event.target.value)}
-            placeholder="補充機制、細節或限制。"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>來源</span>
-          <input
-            value={draft.source}
-            onChange={(event) => onChange("source", event.target.value)}
-            placeholder="論文、書籍或研究筆記"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>標籤</span>
-          <input
-            value={draft.tags}
-            onChange={(event) => onChange("tags", event.target.value)}
-            placeholder="入門, 核心概念"
-          />
-        </label>
-      </div>
-
-      {error ? <p className="create-card-error" role="alert">{error}</p> : null}
-      <div className="create-card-actions">
-        <span>儲存時會同步建立本地語意 embedding。</span>
-        <div>
-          <button className="create-card-cancel" type="button" onClick={onClose}>
-            取消
-          </button>
-          <button className="create-card-submit" type="submit" disabled={isSaving || isDrafting}>
-            {isSaving ? "更新 embedding 中…" : isEditing ? "儲存變更" : "儲存知識卡"}
-          </button>
-        </div>
-      </div>
-    </form>
-  );
-}
 
 export default function CollectionPage() {
   const [selectedId, setSelectedId] = useState("attention");
   const [viewerCardId, setViewerCardId] = useState("");
   const [collectionView, setCollectionView] = useState<"cards" | "relations" | "table">("cards");
   const [collectionQuery, setCollectionQuery] = useState("");
-  const [activeTopic, setActiveTopic] = useState("全部");
+  const [activeCategory, setActiveCategory] = useState("全部");
+  const [activeTag, setActiveTag] = useState("全部");
+  const [searchSort, setSearchSort] = useState<"relevance" | "updated" | "title">("relevance");
+  const [semanticSearchResult, setSemanticSearchResult] = useState<{ query: string; matches: Map<string, { score: number; reasons: string[] }> } | null>(null);
+  const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [selectedCategoryName, setSelectedCategoryName] = useState("");
+  const [renamedCategoryName, setRenamedCategoryName] = useState("");
+  const [mergeTargetCategory, setMergeTargetCategory] = useState("");
+  const [categoryManagerError, setCategoryManagerError] = useState("");
+  const [isCategorySaving, setIsCategorySaving] = useState(false);
+  const [isBatchPanelOpen, setIsBatchPanelOpen] = useState(false);
+  const [batchSelectedIds, setBatchSelectedIds] = useState<string[]>([]);
+  const [batchResult, setBatchResult] = useState<BatchOrganizeResult | null>(null);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [cards, setCards] = useState<KnowledgeCard[]>(knowledgeCards);
-  const [relationPairsState, setRelationPairsState] = useState<ReadonlyArray<readonly [string, string]>>(relationPairs);
+  const [relationEdgesState, setRelationEdgesState] = useState<ReadonlyArray<RelationEdge>>(defaultRelationEdges);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [isCreateCardOpen, setIsCreateCardOpen] = useState(false);
@@ -1758,7 +535,10 @@ export default function CollectionPage() {
   const [databaseResetConfirmation, setDatabaseResetConfirmation] = useState("");
   const [modelError, setModelError] = useState("");
   const [modelActionId, setModelActionId] = useState("");
+  const [backgroundTask, setBackgroundTask] = useState<BackgroundTask | null>(null);
   const [cardsRefreshKey, setCardsRefreshKey] = useState(0);
+
+  const isBackgroundTaskRunning = backgroundTask?.status === "queued" || backgroundTask?.status === "running";
 
   useEffect(() => {
     let cancelled = false;
@@ -1771,6 +551,15 @@ export default function CollectionPage() {
         if (!response.ok) throw new Error("cards request failed");
         const payload = (await response.json()) as ApiCard[];
         if (!Array.isArray(payload)) throw new Error("invalid cards response");
+        try {
+          const categoryResponse = await fetch("/api/categories", { cache: "no-store" });
+          if (categoryResponse.ok) {
+            const categoryPayload = (await categoryResponse.json()) as unknown;
+            if (Array.isArray(categoryPayload)) setCategoryRecords(categoryPayload as CategoryRecord[]);
+          }
+        } catch {
+          // The card list remains usable when an older runtime has no category endpoint.
+        }
 
         const relationSnapshots = await Promise.all(
           payload.map(async (card) => {
@@ -1796,8 +585,8 @@ export default function CollectionPage() {
 
         const activeIds = new Set(payload.map((card) => card.id));
         const relatedByCard = new Map<string, Set<string>>();
-        const nextPairs: Array<readonly [string, string]> = [];
-        const knownPairs = new Set<string>();
+        const nextEdges: RelationEdge[] = [];
+        const knownEdges = new Set<string>();
         const relationLoadFailed = relationSnapshots.some((snapshot) => snapshot.failed);
 
         relationSnapshots.forEach(({ cardId, relations }) => {
@@ -1813,10 +602,20 @@ export default function CollectionPage() {
             targetRelations.add(cardId);
             relatedByCard.set(targetId, targetRelations);
 
-            const pairId = relationKey(cardId, targetId);
-            if (!knownPairs.has(pairId)) {
-              knownPairs.add(pairId);
-              nextPairs.push([cardId, targetId]);
+            const edge: RelationEdge = {
+              source_id: cardId,
+              target_id: targetId,
+              relation_type: relation.relation_type === "manual" ? "manual" : "semantic",
+              score: Number(relation.score ?? 0),
+              status: relation.status,
+              reason: relation.reason,
+              created_at: relation.created_at,
+              updated_at: relation.updated_at,
+            };
+            const edgeId = relationEdgeKey(edge);
+            if (!knownEdges.has(edgeId)) {
+              knownEdges.add(edgeId);
+              nextEdges.push(edge);
             }
           });
         });
@@ -1829,7 +628,7 @@ export default function CollectionPage() {
         ));
         if (cancelled) return;
         setCards(loadedCards);
-        setRelationPairsState(relationLoadFailed ? relationPairs : nextPairs);
+        setRelationEdgesState(relationLoadFailed ? defaultRelationEdges : nextEdges);
         setSelectedId(loadedCards[0]?.id ?? "");
       } catch {
         if (!cancelled) setLoadError("目前無法載入本機資料，先顯示示範卡片。請重新啟動本機 API。");
@@ -1844,14 +643,63 @@ export default function CollectionPage() {
     };
   }, [cardsRefreshKey]);
 
-  const topics = ["全部", ...Array.from(new Set(cards.map((card) => card.topic)))];
+  useEffect(() => {
+    const query = collectionQuery.trim();
+    if (!query) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: query, limit: "50", sort: searchSort });
+        if (activeCategory !== "全部") params.set("category", activeCategory);
+        if (activeTag !== "全部") params.set("tag", activeTag);
+        const response = await fetch(`/api/search?${params.toString()}`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("semantic search failed");
+        const result = (await response.json()) as Array<ApiCard & { score?: number; search_reasons?: string[] }>;
+        if (!Array.isArray(result)) throw new Error("invalid semantic search response");
+        setSemanticSearchResult({
+          query,
+          matches: new Map(result.map((card) => [card.id, { score: Number(card.score ?? 0), reasons: card.search_reasons ?? [] }])),
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeCategory, activeTag, collectionQuery, searchSort]);
+
+  const semanticSearchMatches = semanticSearchResult?.query === collectionQuery.trim()
+    ? semanticSearchResult.matches
+    : null;
+
+  const categories = ["全部", ...Array.from(new Set([
+    ...categoryRecords.map((category) => category.name),
+    ...cards.map((card) => card.category || "待分類"),
+  ]))];
+  const tags = ["全部", ...Array.from(new Set(cards.flatMap((card) => card.tags)))];
   const filteredCards = cards.filter((card) => {
-    const searchText = `${card.title} ${card.question} ${card.source} ${card.tags.join(" ")}`.toLowerCase();
+    const searchText = `${card.title} ${card.topic} ${card.category} ${card.question} ${card.summary} ${card.analogy} ${card.detail} ${card.source} ${card.tags.join(" ")}`.toLowerCase();
     const matchesQuery = searchText.includes(collectionQuery.trim().toLowerCase());
-    const matchesTopic = activeTopic === "全部" || card.topic === activeTopic;
-    return matchesQuery && matchesTopic;
-  });
-  const cardGroups = groupCardsByTopic(filteredCards);
+    const matchesCategory = activeCategory === "全部" || card.category === activeCategory;
+    const matchesTag = activeTag === "全部" || card.tags.some((tag) => tag.toLocaleLowerCase() === activeTag.toLocaleLowerCase());
+    const matchesSemanticSearch = !collectionQuery.trim() || !semanticSearchMatches || semanticSearchMatches.has(card.id);
+    return matchesQuery && matchesCategory && matchesTag && matchesSemanticSearch;
+  }).sort((first, second) => searchSort === "updated" ? String(second.updated_at ?? second.number).localeCompare(String(first.updated_at ?? first.number)) : searchSort === "title" ? first.title.localeCompare(second.title) : semanticSearchMatches ? (semanticSearchMatches.get(second.id)?.score ?? 0) - (semanticSearchMatches.get(first.id)?.score ?? 0) : first.number.localeCompare(second.number));
+  const getSearchReasons = (card: KnowledgeCard) => {
+    const reasons: string[] = [];
+    const query = collectionQuery.trim().toLocaleLowerCase();
+    const remoteReasons = semanticSearchMatches?.get(card.id)?.reasons ?? [];
+    if (remoteReasons.length) reasons.push(...remoteReasons);
+    else if (query && `${card.title} ${card.topic} ${card.category} ${card.question} ${card.summary} ${card.analogy} ${card.detail} ${card.source} ${card.tags.join(" ")}`.toLocaleLowerCase().includes(query)) reasons.push("關鍵字命中");
+    if (activeCategory !== "全部" && card.category === activeCategory) reasons.push("同分類");
+    if (activeTag !== "全部" && card.tags.some((tag) => tag.toLocaleLowerCase() === activeTag.toLocaleLowerCase())) reasons.push("共享標籤");
+    return Array.from(new Set(reasons));
+  };
+  const cardGroups = groupCardsByCategory(filteredCards);
+  const searchReasonsById = new Map(filteredCards.map((card) => [card.id, getSearchReasons(card)]));
+  const batchChangedCount = batchResult?.cards?.filter((item) => item.changed).length ?? 0;
   const viewerCard = cards.find((card) => card.id === viewerCardId);
   const viewerRelatedCards = viewerCard
     ? viewerCard.related
@@ -1881,7 +729,7 @@ export default function CollectionPage() {
 
     const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !modelActionId && !isSettingsSaving && !isDatabaseExporting && !isDatabaseImporting && !isDatabaseResetting) {
+      if (event.key === "Escape" && !modelActionId && !isSettingsSaving && !isDatabaseExporting && !isDatabaseImporting && !isDatabaseResetting && !isBackgroundTaskRunning) {
         setIsModelsOpen(false);
         setModelError("");
       }
@@ -1893,7 +741,7 @@ export default function CollectionPage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isDatabaseExporting, isDatabaseImporting, isDatabaseResetting, isModelsOpen, isSettingsSaving, modelActionId]);
+  }, [isBackgroundTaskRunning, isDatabaseExporting, isDatabaseImporting, isDatabaseResetting, isModelsOpen, isSettingsSaving, modelActionId]);
 
   useEffect(() => {
     if (!createSuccess) return;
@@ -1928,6 +776,7 @@ export default function CollectionPage() {
       id: card.id,
       number: card.number,
       topic: card.topic,
+      category: card.category,
       title: card.title,
       question: card.question,
       summary: card.summary,
@@ -1992,6 +841,47 @@ export default function CollectionPage() {
     }
   };
 
+  const waitForBackgroundTask = async (taskId: string): Promise<BackgroundTask> => {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+      const task = (await response.json()) as BackgroundTask | { detail?: string };
+      if (!response.ok || !("task_id" in task)) {
+        throw new Error("detail" in task ? task.detail ?? "背景任務狀態讀取失敗。" : "背景任務狀態讀取失敗。");
+      }
+      setBackgroundTask(task);
+      if (task.status === "succeeded") return task;
+      if (task.status === "failed" || task.status === "cancelled") {
+        throw new Error(task.error || task.message || "背景任務未完成。");
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    throw new Error("背景任務執行時間較長，請稍後重新查看狀態。");
+  };
+
+  const loadBackgroundTasks = async () => {
+    try {
+      const response = await fetch("/api/tasks?limit=20", { cache: "no-store" });
+      const result = (await response.json()) as BackgroundTask[] | { detail?: string };
+      if (!response.ok || !Array.isArray(result)) return;
+      const latest = result.find((task) => task.status === "queued" || task.status === "running") ?? null;
+      setBackgroundTask(latest);
+      if (latest?.status === "queued" || latest?.status === "running") {
+        void waitForBackgroundTask(latest.task_id).catch(() => undefined);
+      }
+    } catch {
+      // Model settings remain usable when task history is temporarily unavailable.
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadBackgroundTasks();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // Background task recovery intentionally runs once when the collection page mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const loadRuntimeSettings = async (): Promise<RuntimeSettings | null> => {
     try {
       const response = await fetch("/api/settings", { cache: "no-store" });
@@ -2016,13 +906,14 @@ export default function CollectionPage() {
     setHasDatabaseBackup(false);
     setDatabaseBackupAcknowledged(false);
     setDatabaseResetConfirmation("");
-    void Promise.all([loadModels(), loadRuntimeSettings()]);
+    void Promise.all([loadModels(), loadRuntimeSettings(), loadBackgroundTasks()]);
   };
 
   const closeModels = () => {
-    if (modelActionId || isSettingsSaving || isDatabaseExporting || isDatabaseImporting || isDatabaseResetting) return;
+    if (modelActionId || isSettingsSaving || isDatabaseExporting || isDatabaseImporting || isDatabaseResetting || isBackgroundTaskRunning) return;
     setIsModelsOpen(false);
     setModelError("");
+    setBackgroundTask(null);
   };
 
   const updateSettingsDraft = (kind: ModelKind, field: keyof ProviderSettingsDraft, value: string | boolean) => {
@@ -2032,9 +923,73 @@ export default function CollectionPage() {
     }));
   };
 
+  const handleCancelTask = async () => {
+    if (!backgroundTask || !isBackgroundTaskRunning) return;
+    try {
+      const response = await fetch(`/api/tasks/${encodeURIComponent(backgroundTask.task_id)}/cancel`, { method: "POST" });
+      const result = (await response.json()) as BackgroundTask | { detail?: string };
+      if (!response.ok || !("task_id" in result)) throw new Error("detail" in result ? result.detail ?? "背景任務取消失敗。" : "背景任務取消失敗。");
+      setBackgroundTask(result);
+      setModelActionId("");
+      setModelError("");
+      void loadModels(false);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "背景任務取消失敗，請稍後再試。");
+    }
+  };
+
+  const handleRetryTask = async () => {
+    if (!backgroundTask || isBackgroundTaskRunning || !backgroundTask.can_retry) return;
+    setModelError("");
+    try {
+      const response = await fetch(`/api/tasks/${encodeURIComponent(backgroundTask.task_id)}/retry`, { method: "POST" });
+      const result = (await response.json()) as BackgroundTask | { detail?: string };
+      if (!response.ok || !("task_id" in result)) throw new Error("detail" in result ? result.detail ?? "背景任務重試失敗。" : "背景任務重試失敗。");
+      setBackgroundTask(result);
+      const completed = await waitForBackgroundTask(result.task_id);
+      setCreateSuccess(`${completed.label || "背景任務"}已重試完成。`);
+      setModelError("");
+      void loadModels(false);
+      if (completed.operation === "model_select") setCardsRefreshKey((current) => current + 1);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "背景任務重試失敗，請稍後再試。");
+    }
+  };
+
+  const handleInspectModel = async (modelId: string) => {
+    try {
+      const response = await fetch(`/api/models/${encodeURIComponent(modelId)}/inspect`, { cache: "no-store" });
+      const result = (await response.json()) as ModelStorage | { detail?: string };
+      if (!response.ok || !("status" in result)) throw new Error("detail" in result ? result.detail ?? "模型檔案檢查失敗。" : "模型檔案檢查失敗。");
+      setModelCatalog((current) => current ? { ...current, models: current.models.map((model) => model.id === modelId ? { ...model, storage: result } : model) } : current);
+      setCreateSuccess(`已檢查「${modelId}」：${result.size_label}，${result.status === "partial" ? "可續傳下載。" : result.status === "ready" ? "檔案完整。" : "尚未建立快取。"}`);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "模型檔案檢查失敗，請稍後再試。");
+    }
+  };
+
+  const handleRemoveModel = async (modelId: string) => {
+    if (!window.confirm("確定要清理這個模型的本機檔案嗎？之後仍可重新下載，既有卡片資料不會被刪除。")) return;
+    setModelActionId(modelId);
+    setModelError("");
+    try {
+      const response = await fetch(`/api/models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
+      const result = (await response.json()) as { detail?: string; model?: ModelStorage };
+      if (!response.ok || !result.model) throw new Error(result.detail ?? "模型檔案清理失敗。");
+      setModelCatalog((current) => current ? { ...current, models: current.models.map((model) => model.id === modelId ? { ...model, installed: false, status: "available", storage: result.model, error: "" } : model) } : current);
+      setCreateSuccess(`已清理「${modelId}」的本機模型檔案。`);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "模型檔案清理失敗，請稍後再試。");
+    } finally {
+      setModelActionId("");
+    }
+  };
+
   const handleSaveSettings = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isBackgroundTaskRunning) return;
     setIsSettingsSaving(true);
+    setBackgroundTask(null);
     setModelError("");
     try {
       const response = await fetch("/api/settings", {
@@ -2042,16 +997,22 @@ export default function CollectionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsDraft),
       });
-      const result = (await response.json()) as { detail?: string; settings?: RuntimeSettings; reindexed_cards?: number };
+      const result = (await response.json()) as { detail?: string; settings?: RuntimeSettings; reindexed_cards?: number; task_id?: string };
       if (!response.ok || !result.settings) throw new Error(result.detail ?? "設定套用失敗。");
       setRuntimeSettings(result.settings);
       setSettingsDraft(createSettingsDraft(result.settings));
+      let completedResult = result;
+      if (result.task_id) {
+        const task = await waitForBackgroundTask(result.task_id);
+        completedResult = (task.result ?? result) as typeof result;
+      }
       setCreateSuccess(
-        result.reindexed_cards
-          ? `設定已套用，並重新建立 ${result.reindexed_cards} 張卡片的語意關聯。`
+        completedResult.reindexed_cards
+          ? `設定已套用，並重新建立 ${completedResult.reindexed_cards} 張卡片的語意關聯。`
           : "設定已套用。",
       );
-      if (settingsDraft.embedding.source === "api" || result.reindexed_cards) {
+      setModelError("");
+      if (settingsDraft.embedding.source === "api" || completedResult.reindexed_cards) {
         setCardsRefreshKey((current) => current + 1);
       }
     } catch (error) {
@@ -2112,11 +1073,11 @@ export default function CollectionPage() {
 
       setCards([]);
       setTrashCards([]);
-      setRelationPairsState([]);
+      setRelationEdgesState([]);
       setSelectedId("");
       setViewerCardId("");
       setCollectionQuery("");
-      setActiveTopic("全部");
+      setActiveCategory("全部");
       setHasDatabaseBackup(false);
       setDatabaseBackupAcknowledged(false);
       setDatabaseResetConfirmation("");
@@ -2130,8 +1091,6 @@ export default function CollectionPage() {
   };
 
   const handleImportDatabase = async (file: File) => {
-    if (!window.confirm("匯入備份會取代目前本機的卡片、垃圾桶與關聯，確定要繼續嗎？")) return;
-
     setIsDatabaseImporting(true);
     setModelError("");
     try {
@@ -2145,6 +1104,51 @@ export default function CollectionPage() {
       if (!payload || typeof payload !== "object" || !("format_version" in payload) || !("cards" in payload)) {
         throw new Error("這份檔案不是知識卡冊的備份格式。");
       }
+
+      const previewResponse = await fetch("/api/database/import/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const preview = (await previewResponse.json().catch(() => ({}))) as {
+        valid?: boolean;
+        detail?: string;
+        summary?: { cards?: number; relations?: number; duplicate_ids?: number; invalid_cards?: number; invalid_relations?: number; added_cards?: number; updated_cards?: number; skipped_cards?: number; removed_cards?: number; changed_cards?: number; added_categories?: number; removed_categories?: number };
+        changes?: { updated_cards?: Array<{ id: string; title: string; fields: string[] }>; added_categories?: string[]; removed_categories?: string[] };
+      };
+      if (!previewResponse.ok || !preview.valid) {
+        throw new Error(preview.detail ?? `匯入預覽未通過：${preview.summary?.duplicate_ids ?? 0} 個重複 ID、${preview.summary?.invalid_cards ?? 0} 張欄位不完整卡片。`);
+      }
+      const strategy = window.prompt(
+        `備份檔案驗證通過，共 ${preview.summary?.cards ?? 0} 張卡片、${preview.summary?.relations ?? 0} 條關聯。\n請選擇匯入衝突策略：replace（取代全部）、skip（保留現有同 ID）、update（更新同 ID）：`,
+        "replace",
+      )?.trim().toLowerCase();
+      if (!strategy || !["replace", "skip", "update"].includes(strategy)) return;
+      payload = { ...(payload as Record<string, unknown>), conflict_strategy: strategy };
+
+      const strategyPreviewResponse = await fetch("/api/database/import/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const strategyPreview = (await strategyPreviewResponse.json().catch(() => ({}))) as {
+        valid?: boolean;
+        detail?: string;
+        summary?: { added_cards?: number; updated_cards?: number; skipped_cards?: number; removed_cards?: number; changed_cards?: number; added_categories?: number; removed_categories?: number; relations?: number };
+        changes?: { updated_cards?: Array<{ id: string; title: string; fields: string[] }>; added_categories?: string[]; removed_categories?: string[] };
+      };
+      if (!strategyPreviewResponse.ok || !strategyPreview.valid) {
+        throw new Error(strategyPreview.detail ?? "無法產生這個衝突策略的匯入預覽。");
+      }
+      const strategySummary = strategyPreview.summary ?? {};
+      const changedPreview = (strategyPreview.changes?.updated_cards ?? [])
+        .slice(0, 5)
+        .map((item) => `- ${item.title || item.id}：${item.fields.join("、")}`)
+        .join("\n");
+      const confirmed = window.confirm(
+        `即將以 ${strategy} 策略匯入：\n新增 ${strategySummary.added_cards ?? 0}、更新 ${strategySummary.updated_cards ?? 0}、略過 ${strategySummary.skipped_cards ?? 0}、移除 ${strategySummary.removed_cards ?? 0} 張卡片。\n分類新增 ${strategySummary.added_categories ?? 0}、移除 ${strategySummary.removed_categories ?? 0}，保留 ${strategySummary.relations ?? 0} 條關聯。${strategySummary.changed_cards ? `\n有 ${strategySummary.changed_cards} 張既有卡片內容不同：\n${changedPreview}` : ""}\n\n確定要匯入嗎？`,
+      );
+      if (!confirmed) return;
 
       const response = await fetch("/api/database/import", {
         method: "POST",
@@ -2173,12 +1177,23 @@ export default function CollectionPage() {
   };
 
   const handleDownloadModel = async (modelId: string) => {
+    if (isBackgroundTaskRunning) return;
     setModelActionId(modelId);
+    setBackgroundTask(null);
     setModelError("");
     try {
       const response = await fetch(`/api/models/${encodeURIComponent(modelId)}/download`, { method: "POST" });
-      const result = (await response.json()) as { detail?: string };
+      const result = (await response.json()) as { detail?: string; task_id?: string };
       if (!response.ok) throw new Error(result.detail ?? "模型下載無法開始。");
+
+      if (result.task_id) {
+        await waitForBackgroundTask(result.task_id);
+        const latest = await loadModels(false);
+        const model = latest?.models.find((candidate) => candidate.id === modelId);
+        if (model?.error) throw new Error(model.error);
+        setCreateSuccess(`已下載「${model?.label ?? modelId}」，現在可以啟用它。`);
+        return;
+      }
 
       for (let attempt = 0; attempt < 180; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -2200,7 +1215,9 @@ export default function CollectionPage() {
   };
 
   const handleSelectModel = async (kind: ModelKind, modelId: string) => {
+    if (isBackgroundTaskRunning) return;
     setModelActionId(modelId);
+    setBackgroundTask(null);
     setModelError("");
     try {
       const response = await fetch("/api/models/select", {
@@ -2208,15 +1225,122 @@ export default function CollectionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind, model_id: modelId }),
       });
-      const result = (await response.json()) as { detail?: string; selection?: { model?: ModelOption }; models?: ModelCatalog };
+      const result = (await response.json()) as { detail?: string; selection?: { model?: ModelOption }; models?: ModelCatalog; task_id?: string };
       if (!response.ok) throw new Error(result.detail ?? "模型啟用失敗。");
       if (result.models) setModelCatalog(result.models);
-      setCreateSuccess(`已啟用「${result.selection?.model?.label ?? "本機模型"}」。${kind === "embedding" ? "卡片關聯正在使用新的語意索引。" : ""}`);
+      if (result.task_id) {
+        const task = await waitForBackgroundTask(result.task_id);
+        const taskResult = task.result as { selection?: { model?: ModelOption }; models?: ModelCatalog; reindexed_cards?: number } | null | undefined;
+        if (taskResult?.models) setModelCatalog(taskResult.models);
+        setCreateSuccess(`已啟用「${taskResult?.selection?.model?.label ?? result.selection?.model?.label ?? "本機模型"}」。已完成 ${taskResult?.reindexed_cards ?? 0} 張卡片的語意索引更新。`);
+        setModelError("");
+      } else {
+        setCreateSuccess(`已啟用「${result.selection?.model?.label ?? "本機模型"}」。${kind === "embedding" ? "卡片關聯正在使用新的語意索引。" : ""}`);
+      }
       if (kind === "embedding") setCardsRefreshKey((current) => current + 1);
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "模型啟用失敗，請稍後再試。");
     } finally {
       setModelActionId("");
+    }
+  };
+
+  const handleCreateCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newCategoryName.trim();
+    if (!name) return;
+    setIsCategorySaving(true);
+    setCategoryManagerError("");
+    try {
+      const response = await fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const result = (await response.json().catch(() => ({}))) as CategoryRecord & { detail?: string };
+      if (!response.ok) throw new Error(result.detail ?? "新增分類失敗。");
+      setCategoryRecords((current) => [...current.filter((item) => item.name !== result.name), result]);
+      setNewCategoryName("");
+      setCreateSuccess(`已新增分類「${result.name}」。`);
+    } catch (error) {
+      setCategoryManagerError(error instanceof Error ? error.message : "新增分類失敗。");
+    } finally {
+      setIsCategorySaving(false);
+    }
+  };
+
+  const handleBatchOrganize = async (apply = false) => {
+    if (!batchSelectedIds.length) return;
+    setIsBatchRunning(true);
+    try {
+      const response = await fetch("/api/cards/batch/organize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ card_ids: batchSelectedIds, apply }),
+      });
+      const result = (await response.json().catch(() => ({}))) as BatchOrganizeResult;
+      if (!response.ok) throw new Error(result.detail ?? "批次整理失敗。");
+      setBatchResult(result);
+      if (result.task_id) await waitForBackgroundTask(result.task_id);
+      if (apply) {
+        setCardsRefreshKey((current) => current + 1);
+        setCreateSuccess(`已套用 ${result.changed_cards ?? 0} 張卡片的整理建議。`);
+      }
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "批次整理失敗，請稍後再試。");
+    } finally {
+      setIsBatchRunning(false);
+    }
+  };
+
+  const handleRenameCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedCategoryName || !renamedCategoryName.trim()) return;
+    setIsCategorySaving(true);
+    setCategoryManagerError("");
+    try {
+      const response = await fetch(`/api/categories/${encodeURIComponent(selectedCategoryName)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: renamedCategoryName.trim() }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { detail?: string; name?: string; source?: string; task_id?: string };
+      if (!response.ok || !result.name) throw new Error(result.detail ?? "重新命名分類失敗。");
+      if (result.task_id) await waitForBackgroundTask(result.task_id);
+      setCategoryRecords((current) => current.map((item) => item.name === selectedCategoryName ? { ...item, name: result.name! } : item));
+      setSelectedCategoryName("");
+      setRenamedCategoryName("");
+      setCardsRefreshKey((current) => current + 1);
+      setCreateSuccess(`已將分類重新命名為「${result.name}」。`);
+    } catch (error) {
+      setCategoryManagerError(error instanceof Error ? error.message : "重新命名分類失敗。");
+    } finally {
+      setIsCategorySaving(false);
+    }
+  };
+
+  const handleMergeCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedCategoryName || !mergeTargetCategory || selectedCategoryName === mergeTargetCategory) return;
+    setIsCategorySaving(true);
+    setCategoryManagerError("");
+    try {
+      const response = await fetch("/api/categories/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: selectedCategoryName, target: mergeTargetCategory }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { detail?: string; name?: string; affected_cards?: number; task_id?: string };
+      if (!response.ok || !result.name) throw new Error(result.detail ?? "合併分類失敗。");
+      if (result.task_id) await waitForBackgroundTask(result.task_id);
+      setSelectedCategoryName("");
+      setMergeTargetCategory("");
+      setCardsRefreshKey((current) => current + 1);
+      setCreateSuccess(`已合併分類，${result.affected_cards ?? 0} 張卡片歸入「${result.name}」。`);
+    } catch (error) {
+      setCategoryManagerError(error instanceof Error ? error.message : "合併分類失敗。");
+    } finally {
+      setIsCategorySaving(false);
     }
   };
 
@@ -2234,7 +1358,7 @@ export default function CollectionPage() {
 
       const nextCard = cards.find((card) => card.id !== id);
       setCards((current) => current.filter((card) => card.id !== id));
-      setRelationPairsState((current) => current.filter(([first, second]) => first !== id && second !== id));
+      setRelationEdgesState((current) => current.filter((edge) => edge.source_id !== id && edge.target_id !== id));
       setTrashCards((current) => [result.card!, ...current.filter((card) => card.id !== id)]);
       setSelectedId((current) => current === id ? nextCard?.id ?? "" : current);
       setCreateSuccess(`已將「${result.card.title}」移到垃圾桶。`);
@@ -2310,6 +1434,7 @@ export default function CollectionPage() {
       const generated = result.draft;
       setCardDraft((current) => ({
         ...current,
+        category: generated.category ?? generated.topic ?? current.category,
         topic: generated.topic ?? current.topic,
         title: generated.title ?? current.title,
         question: generated.question ?? current.question,
@@ -2341,6 +1466,7 @@ export default function CollectionPage() {
       const cardFields = {
         number: cardDraft.number.trim(),
         topic: cardDraft.topic.trim(),
+        category: cardDraft.category.trim() || cardDraft.topic.trim(),
         title: cardDraft.title.trim(),
         question: cardDraft.question.trim(),
         summary: cardDraft.summary.trim(),
@@ -2377,11 +1503,17 @@ export default function CollectionPage() {
           if (suggestedIds.includes(card.id)) related.push(updatedCard.id);
           return { ...card, related: Array.from(new Set(related)) };
         }));
-        setRelationPairsState((current) => {
-          const next = current.filter(([first, second]) => first !== updatedCard.id && second !== updatedCard.id);
+        setRelationEdgesState((current) => {
+          const next = current.filter((edge) => edge.source_id !== updatedCard.id && edge.target_id !== updatedCard.id);
           suggestedIds.forEach((targetId) => {
-            if (!next.some(([first, second]) => relationKey(first, second) === relationKey(updatedCard.id, targetId))) {
-              next.push([updatedCard.id, targetId]);
+            if (!next.some((edge) => edge.relation_type === "semantic" && relationKey(edge.source_id, edge.target_id) === relationKey(updatedCard.id, targetId))) {
+              next.push({
+                source_id: updatedCard.id,
+                target_id: targetId,
+                relation_type: "semantic",
+                score: 0,
+                status: "suggested",
+              });
             }
           });
           return next;
@@ -2404,17 +1536,23 @@ export default function CollectionPage() {
             ? { ...card, related: Array.from(new Set([...card.related, createdCard.id])) }
             : card),
       ]);
-      setRelationPairsState((current) => {
+      setRelationEdgesState((current) => {
         const next = [...current];
         suggestedIds.forEach((targetId) => {
-          if (!next.some(([first, second]) => relationKey(first, second) === relationKey(createdCard.id, targetId))) {
-            next.push([createdCard.id, targetId]);
+          if (!next.some((edge) => edge.relation_type === "semantic" && relationKey(edge.source_id, edge.target_id) === relationKey(createdCard.id, targetId))) {
+            next.push({
+              source_id: createdCard.id,
+              target_id: targetId,
+              relation_type: "semantic",
+              score: 0,
+              status: "suggested",
+            });
           }
         });
         return next;
       });
       setSelectedId(createdCard.id);
-      setActiveTopic("全部");
+      setActiveCategory("全部");
       setCollectionQuery("");
       setCardDraft(createEmptyDraft());
       setSourceText("");
@@ -2465,19 +1603,32 @@ export default function CollectionPage() {
               aria-label="搜尋收藏卡片"
             />
           </label>
-          <div className="topic-filters" aria-label="依領域篩選">
-            {topics.map((topic) => (
-              <button
-                className={activeTopic === topic ? "is-active" : ""}
-                key={topic}
-                type="button"
-                onClick={() => setActiveTopic(topic)}
-                aria-pressed={activeTopic === topic}
-              >
-                {topic}
-              </button>
-            ))}
-          </div>
+          <label className="database-filter-select database-category-filter">
+            <span>分類</span>
+            <select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value)}>
+              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </label>
+          <label className="database-filter-select">
+            <span>標籤</span>
+            <select value={activeTag} onChange={(event) => setActiveTag(event.target.value)}>
+              {tags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+            </select>
+          </label>
+          <label className="database-filter-select">
+            <span>排序</span>
+            <select value={searchSort} onChange={(event) => setSearchSort(event.target.value as typeof searchSort)}>
+              <option value="relevance">預設順序</option>
+              <option value="updated">最近更新</option>
+              <option value="title">標題 A-Z</option>
+            </select>
+          </label>
+          <button className={`database-category-button ${isCategoryManagerOpen ? "is-active" : ""}`} type="button" onClick={() => { setCategoryManagerError(""); setIsCategoryManagerOpen((current) => !current); }}>
+            管理分類
+          </button>
+          <button className={`database-category-button ${isBatchPanelOpen ? "is-active" : ""}`} type="button" onClick={() => { setBatchResult(null); setIsBatchPanelOpen((current) => !current); }}>
+            AI 批次整理
+          </button>
           <button className="database-add-button" type="button" onClick={openCreateCard}>
             <DatabaseActionIcon kind="add" />
             <span>新增卡片</span>
@@ -2514,9 +1665,66 @@ export default function CollectionPage() {
 
         {loadError ? <p className="database-notice" role="status">{loadError}</p> : null}
         {createSuccess ? <p className="database-notice database-notice--success" role="status">{createSuccess}</p> : null}
+        {isCategoryManagerOpen ? (
+          <section className="category-manager" aria-label="分類管理">
+            <div className="category-manager__heading">
+              <div><span className="eyebrow">CATEGORY CONTROL</span><strong>分類管理</strong></div>
+              <small>未分類卡片會集中在「待分類」，不會被誤刪。</small>
+            </div>
+            <div className="category-manager__list">
+              {categories.filter((category) => category !== "全部").map((category) => {
+                const count = categoryRecords.find((item) => item.name === category)?.card_count ?? cards.filter((card) => (card.category || "待分類") === category).length;
+                return <button key={category} type="button" className={selectedCategoryName === category ? "is-active" : ""} onClick={() => { setSelectedCategoryName(category); setRenamedCategoryName(category); setMergeTargetCategory(""); }}>{category}<small>{count} 張</small></button>;
+              })}
+            </div>
+            <div className="category-manager__forms">
+              <form onSubmit={(event) => void handleCreateCategory(event)}><label><span>新增分類</span><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="例如：資料工程" /></label><button type="submit" disabled={isCategorySaving}>新增</button></form>
+              {selectedCategoryName && selectedCategoryName !== "待分類" ? <>
+                <form onSubmit={(event) => void handleRenameCategory(event)}><label><span>重新命名「{selectedCategoryName}」</span><input value={renamedCategoryName} onChange={(event) => setRenamedCategoryName(event.target.value)} /></label><button type="submit" disabled={isCategorySaving}>套用</button></form>
+                <form onSubmit={(event) => void handleMergeCategory(event)}><label><span>合併到</span><select value={mergeTargetCategory} onChange={(event) => setMergeTargetCategory(event.target.value)}><option value="">選擇目標分類</option>{categories.filter((category) => category !== "全部" && category !== selectedCategoryName).map((category) => <option key={category} value={category}>{category}</option>)}</select></label><button type="submit" disabled={isCategorySaving || !mergeTargetCategory}>合併</button></form>
+              </> : null}
+            </div>
+            {categoryManagerError ? <p className="category-manager__error" role="alert">{categoryManagerError}</p> : null}
+          </section>
+        ) : null}
+        {isBatchPanelOpen ? (
+          <section className="category-manager batch-organizer" aria-label="AI 批次整理">
+            <div className="category-manager__heading">
+              <div><span className="eyebrow">BATCH AI ORGANIZER</span><strong>選取卡片後檢查整理建議</strong></div>
+              <small>會先預覽分類、標籤、重複卡片與自製關聯建議，確認後才套用。</small>
+            </div>
+            <div className="batch-organizer__cards">
+              {cards.map((card) => <label key={card.id}><input type="checkbox" checked={batchSelectedIds.includes(card.id)} onChange={(event) => setBatchSelectedIds((current) => event.target.checked ? [...current, card.id] : current.filter((id) => id !== card.id))} /><span>{card.title}</span><small>{card.category}</small></label>)}
+            </div>
+            <div className="category-manager__forms">
+              <button type="button" className="database-category-button" onClick={() => setBatchSelectedIds(cards.map((card) => card.id))}>全選</button>
+              <button type="button" className="database-category-button" onClick={() => setBatchSelectedIds([])}>清除選取</button>
+              <button type="button" className="database-add-button" disabled={isBatchRunning || !batchSelectedIds.length} onClick={() => void handleBatchOrganize(false)}>{isBatchRunning ? "分析中…" : `預覽 ${batchSelectedIds.length} 張`}</button>
+              <button type="button" className="database-add-button" disabled={isBatchRunning || !batchResult || batchChangedCount === 0} onClick={() => void handleBatchOrganize(true)} title={!batchResult ? "請先預覽整理建議" : batchChangedCount === 0 ? "目前沒有分類或標籤變更可套用" : undefined}>
+                {!batchResult ? "套用整理建議" : batchChangedCount > 0 ? `套用 ${batchChangedCount} 張分類／標籤` : "沒有可套用的整理"}
+              </button>
+            </div>
+            {batchResult ? <div className="batch-organizer__result">
+              <strong>分析結果</strong>
+              <span>{batchResult.cards?.filter((item) => item.changed).length ?? 0} 張有格式整理建議 · {batchResult.duplicates?.length ?? 0} 組疑似重複 · {batchResult.relations?.length ?? 0} 條關聯建議</span>
+              {batchResult.cards?.filter((item) => item.changed).slice(0, 6).map((item) => <small key={item.id}>{item.title} → {item.suggested_category} · {item.suggested_tags.join("、") || "無標籤"}</small>)}
+              {batchResult.duplicates?.slice(0, 4).map((item) => {
+                const firstTitle = cards.find((card) => card.id === item.source_id)?.title ?? item.source_id;
+                const secondTitle = cards.find((card) => card.id === item.target_id)?.title ?? item.target_id;
+                return <small key={`duplicate-${item.source_id}-${item.target_id}`}>疑似重複：{firstTitle} ↔ {secondTitle} · {item.reason}</small>;
+              })}
+              {batchResult.relations?.slice(0, 4).map((item) => {
+                const firstTitle = cards.find((card) => card.id === item.source_id)?.title ?? item.source_id;
+                const secondTitle = cards.find((card) => card.id === item.target_id)?.title ?? item.target_id;
+                return <small key={`relation-${item.source_id}-${item.target_id}`}>關聯建議：{firstTitle} ↔ {secondTitle} · {item.reason} · {Math.round(item.score * 100)}%</small>;
+              })}
+            </div> : null}
+          </section>
+        ) : null}
         {isCreateCardOpen ? (
           <CreateCardForm
             draft={cardDraft}
+            categoryOptions={categories.filter((category) => category !== "全部")}
             sourceText={sourceText}
             isEditing={Boolean(editingId)}
             isSaving={isSaving}
@@ -2542,12 +1750,14 @@ export default function CollectionPage() {
           />
         ) : null}
         {isModelsOpen ? (
-          <div className="settings-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModels(); }}>
+          <div className="settings-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModels(); }}>
             <ModelSettingsPanel
               catalog={modelCatalog}
               runtimeSettings={runtimeSettings}
               settingsDraft={settingsDraft}
               settingsTab={settingsTab}
+              backgroundTask={backgroundTask}
+              isBackgroundTaskRunning={isBackgroundTaskRunning}
               isLoading={isModelsLoading}
               isSettingsSaving={isSettingsSaving}
               isDatabaseExporting={isDatabaseExporting}
@@ -2561,6 +1771,11 @@ export default function CollectionPage() {
               onClose={closeModels}
               onDownload={(id) => void handleDownloadModel(id)}
               onSelect={(kind, id) => void handleSelectModel(kind, id)}
+              onInspect={(id) => void handleInspectModel(id)}
+              onRemove={(id) => void handleRemoveModel(id)}
+              onCancelTask={() => void handleCancelTask()}
+              onRetryTask={() => void handleRetryTask()}
+              onDismissTask={() => setBackgroundTask(null)}
               onSettingsTabChange={setSettingsTab}
               onDraftChange={updateSettingsDraft}
               onSaveSettings={handleSaveSettings}
@@ -2581,28 +1796,37 @@ export default function CollectionPage() {
         ) : filteredCards.length === 0 ? (
           <div className="database-empty">
             <strong>找不到符合的知識卡</strong>
-            <span>試著換一個關鍵字，或清除目前的領域篩選。</span>
+            <span>試著換一個關鍵字，或清除目前的分類篩選。</span>
           </div>
         ) : collectionView === "cards" ? (
-          <div className="collection-grid collection-grid--stacked">
+          <div className="collection-categories">
             {cardGroups.map((group) => (
-              <KnowledgeCardStack
-                key={group.topic}
-                topic={group.topic}
+              <KnowledgeCardSection
+                key={group.category}
+                category={group.category}
                 cards={group.cards}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onOpen={setViewerCardId}
+                searchReasons={searchReasonsById}
               />
             ))}
+            {collectionQuery || activeCategory !== "全部" || activeTag !== "全部" ? (
+              <p className="collection-search-reasons">目前篩選：{[
+                ...getSearchReasons(filteredCards[0] ?? cards[0] ?? knowledgeCards[0]),
+                activeTag !== "全部" ? `標籤「${activeTag}」` : "",
+                searchSort === "updated" ? "最近更新" : searchSort === "title" ? "標題排序" : "",
+              ].filter(Boolean).join(" · ") || "篩選條件"}</p>
+            ) : null}
           </div>
         ) : collectionView === "relations" ? (
           <RelationView
             cards={filteredCards}
-            pairs={relationPairsState}
+            edges={relationEdgesState}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onOpen={setViewerCardId}
+            onRelationCreated={() => setCardsRefreshKey((current) => current + 1)}
           />
         ) : (
           <TableView
@@ -2613,10 +1837,6 @@ export default function CollectionPage() {
           />
         )}
 
-        <div className="database-footer">
-          <span>來源層：Notion 論文圖書館</span>
-          <span>選取卡片後，可以回到首頁閱讀完整預覽</span>
-        </div>
       </section>
       {viewerCard ? (
         <CollectionCardViewer

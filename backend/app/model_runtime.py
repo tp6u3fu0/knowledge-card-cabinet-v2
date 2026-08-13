@@ -9,7 +9,9 @@ rather than the Transformers.js/ONNX entries used by the desktop build.
 import asyncio
 import copy
 import os
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .config import settings
@@ -45,6 +47,7 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
         "task": "text-generation",
         "size_label": "約 1 GB",
+        "download_size_bytes": 1_000_000_000,
         "min_memory_gb": 8,
         "tier": "平衡硬體",
         "languages": "中英文短摘要與欄位整理",
@@ -54,17 +57,17 @@ MODEL_CATALOG: list[dict[str, Any]] = [
     {
         "id": BUILTIN_EMBEDDING_MODEL,
         "kind": "embedding",
-        "label": "Hash 384",
+        "label": f"Hash fallback {settings.embedding_dimensions}",
         "short_label": "內建輕量",
         "provider": "local-hash",
         "model_id": None,
         "task": "hash",
-        "dimensions": 384,
+        "dimensions": settings.embedding_dimensions,
         "size_label": "不需下載",
         "min_memory_gb": 0,
         "tier": "任何硬體",
         "languages": "依文字切詞，速度最快",
-        "description": "內建的 384 維向量，零下載、零等待，適合低規格電腦或離線環境。",
+        "description": "非語意的 deterministic fallback 向量，零下載、零等待，適合低規格電腦或離線環境；正式關聯建議使用 Qwen。",
         "builtin": True,
     },
     {
@@ -75,12 +78,47 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "provider": "local-transformers",
         "model_id": "Qwen/Qwen3-Embedding-0.6B",
         "task": "feature-extraction",
-        "dimensions": 384,
+        "dimensions": settings.embedding_dimensions,
         "size_label": "約 1.2 GB",
+        "download_size_bytes": 1_200_000_000,
         "min_memory_gb": 8,
         "tier": "平衡硬體",
         "languages": "中文、英文與多語言語意關聯",
-        "description": "目前 Docker 版的預設語意向量模型；切換後會重新建立所有卡片的向量與關聯。",
+        "description": "Docker 版的預設多語言語意模型；使用目前設定的完整輸出維度，切換後會重新建立所有卡片的向量與關聯。",
+        "builtin": False,
+    },
+    {
+        "id": "embedding-bge-m3",
+        "kind": "embedding",
+        "label": "BGE-M3 多語言",
+        "short_label": "多語言進階",
+        "provider": "local-transformers",
+        "model_id": "BAAI/bge-m3",
+        "task": "feature-extraction",
+        "dimensions": settings.embedding_dimensions,
+        "size_label": "約 2.2 GB",
+        "download_size_bytes": 2_200_000_000,
+        "min_memory_gb": 10,
+        "tier": "進階硬體",
+        "languages": "中文、英文與多語言長文本",
+        "description": "多語言檢索模型，支援較長文本；適合用來和 Qwen 0.6B 比較關聯品質。",
+        "builtin": False,
+    },
+    {
+        "id": "embedding-e5-large",
+        "kind": "embedding",
+        "label": "Multilingual E5 Large",
+        "short_label": "多語言大型",
+        "provider": "local-transformers",
+        "model_id": "intfloat/multilingual-e5-large",
+        "task": "feature-extraction",
+        "dimensions": settings.embedding_dimensions,
+        "size_label": "約 2.2 GB",
+        "download_size_bytes": 2_200_000_000,
+        "min_memory_gb": 12,
+        "tier": "進階硬體",
+        "languages": "多語言檢索，需使用 query／passage 格式",
+        "description": "大型多語言句向量模型，適合用來比較跨語言與概念檢索效果。",
         "builtin": False,
     },
 ]
@@ -147,14 +185,17 @@ def _configured_model_id(kind: str) -> str:
         return BUILTIN_SUMMARY_MODEL
     if settings.embedding_provider == "local-hash" or settings.embedding_model == BUILTIN_EMBEDDING_MODEL:
         return BUILTIN_EMBEDDING_MODEL
-    if settings.embedding_model == "Qwen/Qwen3-Embedding-0.6B":
-        return "embedding-qwen-0.6b"
+    for model in MODEL_CATALOG:
+        if model["kind"] == "embedding" and model.get("model_id") == settings.embedding_model:
+            return str(model["id"])
     return BUILTIN_EMBEDDING_MODEL
 
 
 class ModelRuntime:
-    def __init__(self) -> None:
+    def __init__(self, models_dir: str | None = None) -> None:
         self.hardware = hardware_profile()
+        self.models_dir = Path(models_dir or os.getenv("HF_HOME", "/root/.cache/huggingface"))
+        self.models_dir.mkdir(parents=True, exist_ok=True)
         self._operation_states: dict[str, dict[str, str]] = {}
         self._errors: dict[str, str] = {}
         self._installed: dict[str, str] = {}
@@ -272,8 +313,91 @@ class ModelRuntime:
     def _is_installed(self, model: dict[str, Any]) -> bool:
         return bool(model["builtin"] or model["id"] in self._installed)
 
+    @staticmethod
+    def _human_size(value: int) -> str:
+        if value < 1024 * 1024:
+            return f"{value / 1024:.0f} KB"
+        if value < 1024 * 1024 * 1024:
+            return f"{value / 1024 / 1024:.0f} MB"
+        return f"{value / 1024 / 1024 / 1024:.1f} GB"
+
+    def _model_cache_dir(self, model: dict[str, Any]) -> Path:
+        model_id = str(model.get("model_id") or "")
+        return self.models_dir / "hub" / f"models--{model_id.replace('/', '--')}"
+
+    def inspect(self, model_id: str) -> dict[str, Any]:
+        model = _find_model(model_id)
+        if not model:
+            raise ValueError("找不到指定模型")
+        if model["builtin"]:
+            return {
+                "model_id": model_id,
+                "status": "ready",
+                "installed": True,
+                "files": 0,
+                "bytes": 0,
+                "size_label": "不需下載",
+                "download_size_bytes": 0,
+                "resumable": False,
+            }
+        cache_dir = self._model_cache_dir(model)
+        total_bytes = 0
+        file_count = 0
+        if cache_dir.exists():
+            for path in cache_dir.rglob("*"):
+                if path.is_file():
+                    file_count += 1
+                    try:
+                        total_bytes += path.stat().st_size
+                    except OSError:
+                        pass
+        installed = self._is_installed(model)
+        status = "ready" if installed and file_count > 0 else "partial" if file_count > 0 else "missing"
+        return {
+            "model_id": model_id,
+            "status": status,
+            "installed": installed and status == "ready",
+            "files": file_count,
+            "bytes": total_bytes,
+            "size_label": self._human_size(total_bytes) if total_bytes else "尚未建立快取",
+            "download_size_bytes": int(model.get("download_size_bytes", 0)),
+            "resumable": True,
+        }
+
+    def storage(self) -> dict[str, Any]:
+        try:
+            usage = shutil.disk_usage(self.models_dir)
+            return {
+                "path_label": "模型快取所在磁碟",
+                "free_bytes": usage.free,
+                "free_size_label": self._human_size(usage.free),
+                "total_bytes": usage.total,
+                "total_size_label": self._human_size(usage.total),
+            }
+        except OSError:
+            return {
+                "path_label": "模型快取所在磁碟",
+                "free_bytes": 0,
+                "free_size_label": "無法讀取",
+                "total_bytes": 0,
+                "total_size_label": "無法讀取",
+            }
+
+    @staticmethod
+    def _error_hint(error: str) -> tuple[str, str]:
+        lowered = error.lower()
+        if "no space" in lowered or "enospc" in lowered:
+            return "DISK_FULL", "請清理模型檔案或釋放磁碟空間後重試。"
+        if "timeout" in lowered or "connection" in lowered or "network" in lowered:
+            return "NETWORK", "下載中斷時會保留既有快取；確認網路後可直接重試。"
+        if "onnx" in lowered or "runtime" in lowered:
+            return "RUNTIME", "模型檔案可能與目前 runtime 不相容，請先檢查檔案或清理後重試。"
+        return "MODEL_LOAD", "請檢查模型檔案；若仍失敗，可清理後重新下載。"
+
     def _describe(self, model: dict[str, Any]) -> dict[str, Any]:
         operation = self._operation_states.get(model["id"])
+        error = self._errors.get(model["id"], "")
+        error_code, error_hint = self._error_hint(error) if error else ("", "")
         return {
             **model,
             "active": self._active[model["kind"]] == model["id"],
@@ -283,7 +407,10 @@ class ModelRuntime:
                 self.hardware["recommended_embedding"],
             },
             "status": operation["status"] if operation else ("ready" if self._is_installed(model) else "available"),
-            "error": self._errors.get(model["id"], ""),
+            "error": error,
+            "error_code": error_code,
+            "error_hint": error_hint,
+            "storage": self.inspect(model["id"]),
         }
 
     def catalog(self) -> dict[str, Any]:
@@ -291,8 +418,28 @@ class ModelRuntime:
             "hardware": self.hardware,
             "active": dict(self._active),
             "active_source": dict(self._sources),
+            "storage": self.storage(),
             "models": [self._describe(model) for model in MODEL_CATALOG],
         }
+
+    def remove(self, model_id: str) -> dict[str, Any]:
+        model = _find_model(model_id)
+        if not model:
+            raise ValueError("找不到指定模型")
+        if model["builtin"]:
+            raise ValueError("內建模型沒有可清理的檔案")
+        if self._active[model["kind"]] == model_id and self._sources[model["kind"]] == "local":
+            raise ValueError("目前使用中的模型不能清理，請先切換到其他模型")
+        if model_id in self._download_tasks:
+            raise ValueError("模型仍在下載中，請先取消下載任務")
+        cache_dir = self._model_cache_dir(model)
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+        self._installed.pop(model_id, None)
+        self._errors.pop(model_id, None)
+        self._operation_states.pop(model_id, None)
+        self._persist()
+        return self.inspect(model_id)
 
     async def download(self, model_id: str) -> dict[str, Any]:
         model = _find_model(model_id)
@@ -429,7 +576,16 @@ class ModelRuntime:
 
         self._sources = {kind: str((payload.get(kind) or {}).get("source", "local")) for kind in ("summary", "embedding")}
         self._custom = updated
-        embedding_changed = previous["sources"]["embedding"] != self._sources["embedding"] or previous["custom"]["embedding"] != self._custom["embedding"]
+        previous_embedding = {
+            key: value for key, value in previous["custom"]["embedding"].items() if key != "api_key"
+        }
+        next_embedding = {
+            key: value for key, value in self._custom["embedding"].items() if key != "api_key"
+        }
+        embedding_changed = (
+            previous["sources"]["embedding"] != self._sources["embedding"]
+            or previous_embedding != next_embedding
+        )
         self._apply_active("summary")
         self._apply_active("embedding")
         self._persist()
@@ -468,5 +624,5 @@ class ModelRuntime:
         }
 
 
-def create_model_runtime() -> ModelRuntime:
-    return ModelRuntime()
+def create_model_runtime(models_dir: str | None = None) -> ModelRuntime:
+    return ModelRuntime(models_dir)

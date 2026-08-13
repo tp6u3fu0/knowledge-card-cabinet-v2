@@ -2,6 +2,7 @@
   {
     "id": "attention",
     "number": "AI-001",
+    "category": "人工智慧",
     "topic": "人工智慧",
     "title": "Attention 是什麼？",
     "question": "AI 如何判斷哪些資訊比較重要？",
@@ -14,6 +15,7 @@
   {
     "id": "qkv",
     "number": "AI-002",
+    "category": "人工智慧",
     "topic": "人工智慧",
     "title": "Query、Key、Value",
     "question": "Attention 到底在比較什麼？",
@@ -26,6 +28,7 @@
   {
     "id": "transformer",
     "number": "AI-003",
+    "category": "人工智慧",
     "topic": "人工智慧",
     "title": "Transformer",
     "question": "為什麼現在很多模型都以它為基礎？",
@@ -38,6 +41,7 @@
   {
     "id": "rag",
     "number": "AI-004",
+    "category": "生成式 AI",
     "topic": "生成式 AI",
     "title": "RAG 為什麼需要檢索？",
     "question": "模型不知道的事，能不能先去查資料？",

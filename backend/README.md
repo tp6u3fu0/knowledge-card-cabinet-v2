@@ -6,6 +6,13 @@
 SentenceTransformers 在 FastAPI container 內載入。第一次啟動會下載模型並保存到
 `hf_cache` volume；不需要把資料送到外部 embedding API。
 
+Docker 也提供可下載的 `BAAI/bge-m3` 與 `intfloat/multilingual-e5-large`，兩者都是
+1024 維多語言模型，可從模型設定頁切換並用同一批卡片比較關聯品質。E5 會自動使用
+`query:`／`passage:` 輸入格式；切換 embedding 模型會在背景重新建立過期向量與關聯。
+
+每張卡片有 `category` 高層分類、`topic` 細部主題與多個 `tags` 標籤；同分類會提高
+關聯排序的輔助分數，但 embedding 自動關聯仍然保留。
+
 卡片新增頁也提供本機 AI 草稿整理，預設使用較小的
 `Qwen/Qwen2.5-0.5B-Instruct`。它只負責摘要、問題、標題、比喻、細節與標籤欄位，
 而且採延遲載入：第一次按下「AI 整理欄位」才下載與載入，不會在 API 啟動時強制佔用
@@ -30,9 +37,9 @@ docker compose exec -T api python seed.py
 
 ## Embedding 模式
 
-預設使用 `Qwen/Qwen3-Embedding-0.6B` 的本機 SentenceTransformers。它支援中文／英文混合內容；目前保留 384 維向量以配合 MVP 的 PostgreSQL schema，並使用模型支援的 Matryoshka 截取維度。
+預設使用 `Qwen/Qwen3-Embedding-0.6B` 的本機 SentenceTransformers。它支援中文／英文混合內容；Docker 版使用模型支援的 1024 維輸出，避免 MVP 早期的 384 維截取造成語意資訊損失。Qwen3 Embedding 支援自訂輸出維度，若硬體限制需要縮小，可在 `.env` 設定較低維度，啟動時會自動備份並重建索引。關聯排序另外混合主題與標籤命中，避免模型分數略低時完全漏掉同類卡片。
 
-如果本機 embedding 服務不可用，仍可清空 `EMBEDDING_API_URL` 回到 deterministic local hash embedder；那個模式只適合 smoke test，不代表真正的語意相似度。
+如果本機 embedding 服務不可用，仍可清空 `EMBEDDING_API_URL` 回到 deterministic local hash embedder；那個模式只適合 smoke test 或極低規格離線環境，不代表真正的語意相似度。
 
 要啟用真正的語意搜尋，請在專案根目錄建立 `.env`，加入 OpenAI-compatible embeddings endpoint、API key、model 與對應的 `EMBEDDING_DIMENSIONS`。資料庫的向量維度必須和模型輸出一致。
 
@@ -54,5 +61,8 @@ docker compose exec -T api python seed.py
 - `GET /search?q=...`：向量搜尋
 - `GET /cards/{id}/related`：取得自動或人工關聯
 - `POST /cards/{id}/relations/{target_id}/confirm`：確認一條關聯
+
+建立或編輯卡片時可傳入 `category`；若省略，後端會以 `topic` 作為向後相容的初始分類。
+`category` 只會作為同分類關聯的輔助訊號，不會取代 embedding 語意關聯。
 
 這一版刻意不包含登入、Notion 寫回與公開部署；先驗證卡片、Embedding、搜尋與關聯資料流。

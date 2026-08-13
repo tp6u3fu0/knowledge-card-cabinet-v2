@@ -25,6 +25,13 @@ const eslintConfig = defineConfig([
   jsxA11y.flatConfigs.recommended,
   next.configs["core-web-vitals"],
   {
+    // This app runs on vinext, not Next.js: there is no `next/link` to import,
+    // so the rule that insists on it can only ever be a false positive here.
+    rules: {
+      "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+  {
     files: ["desktop/**/*.cjs"],
     rules: {
       "@typescript-eslint/no-require-imports": "off",

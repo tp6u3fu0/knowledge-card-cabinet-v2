@@ -34,6 +34,7 @@ const MODEL_CATALOG = [
     task: "text2text-generation",
     dtype: "q8",
     size_label: "約 180 MB",
+    download_size_bytes: 180_000_000,
     min_memory_gb: 8,
     tier: "平衡硬體",
     languages: "中英文可試，短摘要優先",
@@ -50,6 +51,7 @@ const MODEL_CATALOG = [
     task: "text2text-generation",
     dtype: "q8",
     size_label: "約 260 MB",
+    download_size_bytes: 260_000_000,
     min_memory_gb: 12,
     tier: "進階硬體",
     languages: "多語言，中文品質需實測",
@@ -66,6 +68,7 @@ const MODEL_CATALOG = [
     task: "text2text-generation",
     dtype: "q8",
     size_label: "約 450 MB",
+    download_size_bytes: 450_000_000,
     min_memory_gb: 16,
     tier: "進階硬體",
     languages: "多語言，包含中文",
@@ -99,6 +102,7 @@ const MODEL_CATALOG = [
     dtype: "q8",
     dimensions: 384,
     size_label: "約 90 MB",
+    download_size_bytes: 90_000_000,
     min_memory_gb: 4,
     tier: "輕量硬體",
     languages: "英文語意搜尋",
@@ -116,6 +120,7 @@ const MODEL_CATALOG = [
     dtype: "q8",
     dimensions: 384,
     size_label: "約 140 MB",
+    download_size_bytes: 140_000_000,
     min_memory_gb: 8,
     tier: "平衡硬體",
     languages: "中文、英文與多語言",
@@ -233,6 +238,94 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     return Boolean(model?.builtin || settings.installed[model?.id]);
   }
 
+  function humanSize(bytes) {
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  }
+
+  function modelPathTokens(model) {
+    return [
+      String(model.model_id || "").replaceAll("/", "--").toLowerCase(),
+      String(model.model_id || "").toLowerCase(),
+    ].filter(Boolean);
+  }
+
+  function inspectModel(modelId) {
+    const model = findModel(modelId);
+    if (!model) throw new Error("找不到指定模型");
+    if (model.builtin) {
+      return { model_id: modelId, status: "ready", installed: true, files: 0, bytes: 0, size_label: "不需下載", download_size_bytes: 0, resumable: false };
+    }
+    const tokens = modelPathTokens(model);
+    let files = 0;
+    let bytes = 0;
+    const matchingRoots = new Set();
+    const walk = (directory, depth = 0) => {
+      if (depth > 8 || files > 50000) return;
+      let entries = [];
+      try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        const fullPath = path.join(directory, entry.name);
+        const normalized = fullPath.replaceAll("\\", "/").toLowerCase();
+        const matches = tokens.some((token) => normalized.includes(token));
+        if (entry.isDirectory()) {
+          if (matches) matchingRoots.add(fullPath);
+          walk(fullPath, depth + 1);
+        } else if (entry.isFile() && matches) {
+          files += 1;
+          try { bytes += fs.statSync(fullPath).size; } catch { /* File changed while scanning. */ }
+        }
+      }
+    };
+    walk(cacheDir);
+    const installed = isInstalled(model);
+    const status = installed && files > 0 ? "ready" : files > 0 ? "partial" : "missing";
+    return {
+      model_id: modelId,
+      status,
+      installed: installed && status === "ready",
+      files,
+      bytes,
+      size_label: bytes ? humanSize(bytes) : "尚未建立快取",
+      download_size_bytes: Number(model.download_size_bytes || 0),
+      resumable: true,
+      cache_entries: matchingRoots.size,
+    };
+  }
+
+  function storageInfo() {
+    try {
+      const stats = fs.statfsSync(cacheDir);
+      const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+      const totalBytes = Number(stats.blocks) * Number(stats.bsize);
+      return { path_label: "模型快取所在磁碟", free_bytes: freeBytes, free_size_label: humanSize(freeBytes), total_bytes: totalBytes, total_size_label: humanSize(totalBytes) };
+    } catch {
+      return { path_label: "模型快取所在磁碟", free_bytes: 0, free_size_label: "無法讀取", total_bytes: 0, total_size_label: "無法讀取" };
+    }
+  }
+
+  function removeModel(modelId) {
+    const model = findModel(modelId);
+    if (!model) throw new Error("找不到指定模型");
+    if (model.builtin) throw new Error("內建模型沒有可清理的檔案");
+    if (settings.sources[model.kind] === "local" && getActive(model.kind).id === modelId) throw new Error("目前使用中的模型不能清理，請先切換到其他模型");
+    if (downloadPromises.has(modelId)) throw new Error("模型仍在下載中，請先取消下載任務");
+    const tokens = modelPathTokens(model);
+    let entries = [];
+    try { entries = fs.readdirSync(cacheDir, { withFileTypes: true }); } catch { /* Cache directory may not exist yet. */ }
+    for (const entry of entries) {
+      const fullPath = path.join(cacheDir, entry.name);
+      const normalized = fullPath.replaceAll("\\", "/").toLowerCase();
+      if (tokens.some((token) => normalized.includes(token))) fs.rmSync(fullPath, { recursive: true, force: true });
+    }
+    delete settings.installed[modelId];
+    modelErrors.delete(modelId);
+    operationStates.delete(modelId);
+    saveSettings();
+    return inspectModel(modelId);
+  }
+
   async function getTransformers() {
     if (!transformersPromise) {
       transformersPromise = Promise.resolve().then(() => {
@@ -253,12 +346,12 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
             .join(path.delimiter);
           Module._initPaths();
         }
-        const module = isPackaged ? require(packagedModulePath) : require("@huggingface/transformers");
-        module.env.cacheDir = cacheDir;
-        module.env.allowRemoteModels = true;
-        module.env.useFSCache = true;
-        module.env.useWasmCache = true;
-        return module;
+        const transformersModule = isPackaged ? require(packagedModulePath) : require("@huggingface/transformers");
+        transformersModule.env.cacheDir = cacheDir;
+        transformersModule.env.allowRemoteModels = true;
+        transformersModule.env.useFSCache = true;
+        transformersModule.env.useWasmCache = true;
+        return transformersModule;
       });
     }
     return transformersPromise;
@@ -318,6 +411,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     const operation = operationStates.get(model.id);
     const installed = isInstalled(model);
     const error = modelErrors.get(model.id) || "";
+    const loweredError = error.toLowerCase();
+    const errorCode = loweredError.includes("space") ? "DISK_FULL" : loweredError.includes("onnx") || loweredError.includes("runtime") ? "RUNTIME" : loweredError.includes("network") || loweredError.includes("fetch") ? "NETWORK" : error ? "MODEL_LOAD" : "";
+    const errorHint = errorCode === "DISK_FULL" ? "請清理模型檔案或釋放磁碟空間後重試。" : errorCode === "NETWORK" ? "下載中斷時會保留既有快取；確認網路後可直接重試。" : errorCode === "RUNTIME" ? "模型檔案可能與目前 runtime 不相容，請先檢查檔案或清理後重試。" : error ? "請檢查模型檔案；若仍失敗，可清理後重新下載。" : "";
     return {
       ...model,
       active,
@@ -325,6 +421,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
       recommended: hardware.recommended_summary === model.id || hardware.recommended_embedding === model.id,
       status: operation?.status || (installed ? "ready" : "available"),
       error,
+      error_code: errorCode,
+      error_hint: errorHint,
+      storage: inspectModel(model.id),
     };
   }
 
@@ -336,6 +435,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
         embedding: getActive("embedding").id,
       },
       active_source: { ...settings.sources },
+      storage: storageInfo(),
       models: MODEL_CATALOG.map(describeModel),
     };
   }
@@ -429,8 +529,12 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
       embedding: payload.embedding.source,
     };
     settings.custom = nextCustom;
+    const previousEmbedding = { ...previous.custom.embedding };
+    const nextEmbedding = { ...settings.custom.embedding };
+    delete previousEmbedding.api_key;
+    delete nextEmbedding.api_key;
     const embeddingChanged = previous.sources.embedding !== settings.sources.embedding
-      || JSON.stringify(previous.custom.embedding) !== JSON.stringify(settings.custom.embedding);
+      || JSON.stringify(previousEmbedding) !== JSON.stringify(nextEmbedding);
     saveSettings();
     return { embedding_changed: embeddingChanged, settings: settingsView() };
   }
@@ -591,6 +695,8 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
 
   return {
     catalog,
+    inspect: inspectModel,
+    remove: removeModel,
     download,
     select,
     embed,

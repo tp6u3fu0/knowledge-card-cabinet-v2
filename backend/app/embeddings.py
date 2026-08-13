@@ -32,10 +32,15 @@ def build_embedding_text(card: dict) -> str:
             f"Analogy: {card['analogy']}",
             f"Detail: {card['detail']}",
             f"Topic: {card['topic']}",
+            f"Category: {card.get('category', card['topic'])}",
             f"Tags: {', '.join(card.get('tags', []))}",
             f"Source: {card.get('source', '')}",
         ]
     )
+
+
+def embedding_source_hash(card: dict) -> str:
+    return hashlib.sha256(build_embedding_text(card).encode("utf-8")).hexdigest()
 
 
 def local_smoke_embedding(text: str, dimensions: int) -> list[float]:
@@ -62,6 +67,15 @@ def local_smoke_embedding(text: str, dimensions: int) -> list[float]:
 
 def query_embedding_text(text: str) -> str:
     return f"Instruct: {settings.embedding_query_instruction}\nQuery: {text}"
+
+
+def prepare_embedding_input(text: str, *, is_query: bool) -> str:
+    model = get_embedding_model().lower()
+    if "multilingual-e5" in model:
+        return f"{'query' if is_query else 'passage'}: {text}"
+    if "qwen3" in model and is_query:
+        return query_embedding_text(text)
+    return text
 
 
 def normalize_embedding(values: Sequence[float]) -> list[float]:
@@ -105,7 +119,7 @@ async def local_transformers_embedding(text: str) -> list[float]:
 
 
 async def embed_text(text: str, *, is_query: bool = False) -> tuple[list[float], str]:
-    input_text = query_embedding_text(text) if is_query else text
+    input_text = prepare_embedding_input(text, is_query=is_query)
 
     dimensions = get_embedding_dimensions()
 

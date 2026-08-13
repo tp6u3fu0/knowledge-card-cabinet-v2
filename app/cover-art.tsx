@@ -1,42 +1,181 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
+
+export type CoverGlyph =
+  | "steps"
+  | "quad"
+  | "nested"
+  | "crosshair-box"
+  | "link"
+  | "target"
+  | "triple-dot"
+  | "constellation"
+  | "folder"
+  | "stack"
+  | "arch"
+  | "lines"
+  | "corners"
+  | "diagonal"
+  | "pill"
+  | "brackets"
+  | "bars"
+  | "crosshair";
 
 export type CoverMotif = {
-  shape: "block" | "stair" | "corner" | "zigzag" | "stack" | "window" | "plus" | "frame";
+  shape: CoverGlyph;
   x: number;
   y: number;
   size: number;
-  rotation: number;
   opacity: number;
   weight: number;
 };
 
-const motifShapes: CoverMotif["shape"][] = [
-  "block",
-  "stair",
-  "corner",
-  "zigzag",
-  "stack",
-  "window",
-  "plus",
-  "frame",
+const dot = (cx: number, cy: number, r = 2) => (
+  <circle className="cover-mosaic__glyph-dot" cx={cx} cy={cy} r={r} />
+);
+
+const glyphLibrary: Record<CoverGlyph, ReactNode> = {
+  steps: (
+    <>
+      <rect x="4" y="4" width="5" height="5" rx="1.2" />
+      <rect x="4" y="11" width="5" height="5" rx="1.2" />
+      <rect x="11" y="11" width="5" height="5" rx="1.2" />
+    </>
+  ),
+  quad: (
+    <>
+      <rect x="4" y="4" width="5" height="5" rx="1.2" />
+      <rect x="11" y="4" width="5" height="5" rx="1.2" />
+      <rect x="4" y="11" width="5" height="5" rx="1.2" />
+      <rect x="11" y="11" width="5" height="5" rx="1.2" />
+    </>
+  ),
+  nested: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="2.5" />
+      <rect x="9" y="9" width="6" height="6" rx="1.4" />
+    </>
+  ),
+  "crosshair-box": (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="2.5" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+    </>
+  ),
+  link: (
+    <>
+      <rect x="4" y="4" width="5" height="5" rx="1.2" />
+      <rect x="15" y="15" width="5" height="5" rx="1.2" />
+      <line x1="9.5" y1="9.5" x2="14.5" y2="14.5" />
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="7" />
+      {dot(12, 12)}
+    </>
+  ),
+  "triple-dot": (
+    <>
+      {dot(6, 12)}
+      {dot(12, 12)}
+      {dot(18, 12)}
+    </>
+  ),
+  constellation: (
+    <>
+      <line x1="7" y1="17" x2="12" y2="8" />
+      <line x1="12" y1="8" x2="18" y2="14" />
+      {dot(7, 17)}
+      {dot(12, 8)}
+      {dot(18, 14)}
+    </>
+  ),
+  folder: (
+    <>
+      <rect x="5" y="8" width="14" height="11" rx="2.5" />
+      <rect x="5" y="4" width="6" height="4" rx="1.5" />
+    </>
+  ),
+  stack: (
+    <>
+      <rect x="4" y="7" width="11" height="13" rx="2.5" />
+      <rect x="9.5" y="4" width="11" height="13" rx="2.5" />
+    </>
+  ),
+  arch: <path d="M4 20 L4 12 A8 8 0 0 1 20 12 L20 20" />,
+  lines: (
+    <>
+      <line x1="5" y1="8" x2="19" y2="8" />
+      <line x1="5" y1="12" x2="15" y2="12" />
+      <line x1="5" y1="16" x2="11" y2="16" />
+    </>
+  ),
+  corners: (
+    <>
+      <rect x="4" y="4" width="4" height="4" rx="1" />
+      <rect x="16" y="4" width="4" height="4" rx="1" />
+      <rect x="4" y="16" width="4" height="4" rx="1" />
+      <rect x="16" y="16" width="4" height="4" rx="1" />
+    </>
+  ),
+  diagonal: (
+    <>
+      <line x1="6" y1="6" x2="18" y2="18" />
+      {dot(6, 6)}
+      {dot(18, 18)}
+    </>
+  ),
+  pill: (
+    <>
+      <rect x="4" y="9" width="16" height="6" rx="3" />
+      {dot(8, 12, 1.6)}
+    </>
+  ),
+  brackets: (
+    <>
+      <path d="M9 4 L5 4 L5 8" />
+      <path d="M15 20 L19 20 L19 16" />
+      {dot(12, 12)}
+    </>
+  ),
+  bars: (
+    <>
+      <rect x="4" y="14" width="5" height="6" rx="1.2" />
+      <rect x="9.5" y="9" width="5" height="11" rx="1.2" />
+      <rect x="15" y="4" width="5" height="16" rx="1.2" />
+    </>
+  ),
+  crosshair: (
+    <>
+      <line x1="12" y1="4" x2="12" y2="20" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <circle className="cover-mosaic__glyph-knockout" cx="12" cy="12" r="3.5" />
+    </>
+  ),
+};
+
+const glyphNames = Object.keys(glyphLibrary) as CoverGlyph[];
+
+/**
+ * Slots hug the border band; the middle of the cover stays clear for the mark.
+ */
+const motifLayout: Array<[number, number]> = [
+  [12, 13],
+  [38, 10],
+  [64, 10],
+  [88, 13],
+  [90, 38],
+  [90, 62],
+  [88, 87],
+  [64, 90],
+  [38, 90],
+  [12, 87],
+  [10, 62],
+  [10, 38],
 ];
 
-const motifSize = 8.4;
-
-const motifLayout: Array<[number, number, number]> = [
-  [11, 11, 0],
-  [37, 11, 0],
-  [63, 11, 0],
-  [89, 11, 90],
-  [89, 37, 90],
-  [89, 63, 90],
-  [89, 89, 180],
-  [63, 89, 180],
-  [37, 89, 180],
-  [11, 89, 270],
-  [11, 63, 270],
-  [11, 37, 270],
-];
+const motifSize = 13.5;
 
 function createSeededRandom(seed: string) {
   let state = 2166136261;
@@ -55,102 +194,102 @@ function createSeededRandom(seed: string) {
 }
 
 function createFallbackMotifs(seed: string, density: number, pattern: string): CoverMotif[] {
-  const random = createSeededRandom(`${seed}:${pattern}:edge-blocks`);
-  const count = 12;
+  const random = createSeededRandom(`${seed}:${pattern}:emblem`);
+  const count = 8 + Math.floor(density * 4.99);
+  const slots = motifLayout.map((slot, index) => ({ slot, index, order: random() }));
+  slots.sort((left, right) => left.order - right.order);
 
-  return Array.from({ length: count }, (_, index) => {
-    const [x, y, rotation] = motifLayout[index];
-
-    return {
-      shape: motifShapes[Math.floor(random() * motifShapes.length)],
-      x,
-      y,
+  return slots
+    .slice(0, Math.min(count, motifLayout.length))
+    .sort((left, right) => left.index - right.index)
+    .map(({ slot: [x, y] }) => ({
+      shape: glyphNames[Math.floor(random() * glyphNames.length)],
+      x: Math.round((x + (random() - 0.5) * 4) * 100) / 100,
+      y: Math.round((y + (random() - 0.5) * 4) * 100) / 100,
       size: motifSize,
-      rotation,
-      opacity: 0.36 + random() * 0.42,
+      opacity: Math.round((0.42 + random() * 0.38) * 1000) / 1000,
       weight: random(),
-    };
-  });
+    }));
 }
 
 function mosaicStyle(): CSSProperties {
   return {
-    "--motif-ink": "color-mix(in srgb, var(--cover-color) 78%, #292633)",
+    "--motif-ink": "color-mix(in srgb, var(--cover-color) 62%, #6f6a60)",
   } as CSSProperties;
 }
 
-function ProductMark({ pattern }: { pattern: string }) {
-  const rotation = pattern === "grid" ? 0 : pattern === "ladder" ? -5 : pattern === "shelf" ? 5 : -3;
-
+/**
+ * The mark at small sizes: nodes only, the trace lines drop out because they
+ * turn to mush below ~24px.
+ */
+export function CardMark({ className }: { className?: string }) {
   return (
-    <g className={`cover-mosaic__product cover-mosaic__product--${pattern}`}>
-      <circle className="cover-mosaic__product-halo" cx="50" cy="50" r="19" />
-      <rect className="cover-mosaic__product-card" x="39" y="37" width="22" height="27" rx="4" transform={`rotate(${rotation} 50 50)`} />
-      <path className="cover-mosaic__product-fold" d="M 54 38 V 44 H 60" transform={`rotate(${rotation} 50 50)`} />
-      <path className="cover-mosaic__product-line" d="M 44 49 H 55 M 44 54 H 52 M 44 59 H 56" transform={`rotate(${rotation} 50 50)`} />
-      <circle className="cover-mosaic__product-core" cx="50" cy="50" r="2.6" />
-    </g>
+    <svg
+      className={`card-mark${className ? ` ${className}` : ""}`}
+      viewBox="0 0 100 100"
+      fill="none"
+      aria-hidden="true"
+    >
+      <rect className="card-mark__panel" x="16" y="12" width="68" height="76" rx="12" />
+      <circle className="card-mark__node" cx="36" cy="62" r="9" />
+      <circle className="card-mark__node" cx="50" cy="36" r="9" />
+      <circle className="card-mark__node" cx="66" cy="56" r="9" />
+    </svg>
   );
 }
 
-function blockTiles(x: number, y: number, unit: number, points: Array<[number, number]>) {
-  return points.map(([dx, dy], index) => (
-    <rect
-      key={`tile-${index}`}
-      x={x + dx * unit - unit / 2}
-      y={y + dy * unit - unit / 2}
-      width={unit - 0.35}
-      height={unit - 0.35}
-      rx={unit * 0.08}
-    />
-  ));
+/** A single glyph from the library, for use outside the cover's border band. */
+export function CoverGlyphMark({ shape, className }: { shape?: CoverGlyph; className?: string }) {
+  return (
+    <svg
+      className={`cover-mosaic__glyph${className ? ` ${className}` : ""}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      {(shape && glyphLibrary[shape]) ?? glyphLibrary.quad}
+    </svg>
+  );
+}
+
+/** The cabinet mark: a card panel with the three-node trace knocked out of it. */
+function ProductMark() {
+  return (
+    <svg
+      className="cover-mosaic__mark"
+      viewBox="0 0 100 100"
+      fill="none"
+      aria-hidden="true"
+    >
+      <rect className="cover-mosaic__mark-panel" x="16" y="12" width="68" height="76" rx="12" />
+      <path className="cover-mosaic__mark-link" d="M36 62 L50 36 L66 56" />
+      <circle className="cover-mosaic__mark-node" cx="36" cy="62" r="7.5" />
+      <circle className="cover-mosaic__mark-node" cx="50" cy="36" r="7.5" />
+      <circle className="cover-mosaic__mark-node" cx="66" cy="56" r="7.5" />
+    </svg>
+  );
 }
 
 function MotifMark({ motif }: { motif: CoverMotif }) {
-  const className = `cover-mosaic__motif cover-mosaic__motif--${motif.shape}${motif.weight > 0.7 ? " is-heavy" : ""}`;
-  const transform = `rotate(${motif.rotation} ${motif.x} ${motif.y})`;
-  const unit = motif.size / 3;
-
-  if (motif.shape === "block") {
-    return <g className={className} opacity={motif.opacity} transform={transform}>{blockTiles(motif.x, motif.y, unit, [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]])}</g>;
-  }
-
-  if (motif.shape === "stair") {
-    return <g className={className} opacity={motif.opacity} transform={transform}>{blockTiles(motif.x, motif.y, unit, [[-1, -1], [0, -1], [0, 0], [1, 0]])}</g>;
-  }
-
-  if (motif.shape === "corner") {
-    return <g className={className} opacity={motif.opacity} transform={transform}>{blockTiles(motif.x, motif.y, unit, [[-1, -1], [-1, 0], [0, 0], [1, 0]])}</g>;
-  }
-
-  if (motif.shape === "zigzag") {
-    return <g className={className} opacity={motif.opacity} transform={transform}>{blockTiles(motif.x, motif.y, unit, [[-1, 0], [0, 0], [0, -1], [1, -1]])}</g>;
-  }
-
-  if (motif.shape === "stack") {
-    return <g className={className} opacity={motif.opacity} transform={transform}>{blockTiles(motif.x, motif.y, unit, [[-1, -1], [0, -1], [0, 0], [0, 1]])}</g>;
-  }
-
-  if (motif.shape === "window") {
-    return (
-      <g className={className} opacity={motif.opacity} transform={transform}>
-        <rect x={motif.x - unit * 1.5} y={motif.y - unit * 1.5} width={unit * 3} height={unit * 3} rx={unit * 0.1} />
-        <path d={`M ${motif.x} ${motif.y - unit * 1.5} V ${motif.y + unit * 1.5} M ${motif.x - unit * 1.5} ${motif.y} H ${motif.x + unit * 1.5}`} />
-      </g>
-    );
-  }
-
-  if (motif.shape === "plus") {
-    return <g className={className} opacity={motif.opacity} transform={transform}>{blockTiles(motif.x, motif.y, unit, [[0, -1], [-1, 0], [0, 0], [1, 0], [0, 1]])}</g>;
-  }
+  const glyph = glyphLibrary[motif.shape] ?? glyphLibrary.quad;
+  const size = motif.size > 0 ? motif.size : motifSize;
 
   return (
-    <g className={className} opacity={motif.opacity} transform={transform}>
-      <rect x={motif.x - unit * 1.5} y={motif.y - unit * 1.5} width={unit * 3} height={unit * 0.65} rx={unit * 0.08} />
-      <rect x={motif.x - unit * 1.5} y={motif.y + unit * 0.85} width={unit * 3} height={unit * 0.65} rx={unit * 0.08} />
-      <rect x={motif.x - unit * 1.5} y={motif.y - unit * 1.5} width={unit * 0.65} height={unit * 3} rx={unit * 0.08} />
-      <rect x={motif.x + unit * 0.85} y={motif.y - unit * 1.5} width={unit * 0.65} height={unit * 3} rx={unit * 0.08} />
-    </g>
+    <svg
+      className={`cover-mosaic__glyph${motif.weight > 0.7 ? " is-heavy" : ""}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      style={{
+        left: `${motif.x}%`,
+        top: `${motif.y}%`,
+        width: `${size}%`,
+        opacity: motif.opacity,
+        transform: "translate(-50%, -50%)",
+      }}
+    >
+      {glyph}
+    </svg>
   );
 }
 
@@ -168,15 +307,17 @@ export function SeededCoverArt({
   const resolvedMotifs = motifs?.length ? motifs : createFallbackMotifs(seed, density, pattern);
 
   return (
-    <span className={`collection-card__art collection-card__art--${pattern}`} aria-hidden="true">
-      <svg className="cover-mosaic" viewBox="0 0 100 100" preserveAspectRatio="none" style={mosaicStyle()}>
-        <ProductMark pattern={pattern} />
-        <g className="cover-mosaic__motifs">
-          {resolvedMotifs.map((motif, index) => (
-            <MotifMark key={`${motif.shape}-${index}`} motif={motif} />
-          ))}
-        </g>
-      </svg>
+    <span
+      className={`collection-card__art collection-card__art--${pattern}`}
+      aria-hidden="true"
+      style={mosaicStyle()}
+    >
+      <span className="cover-mosaic">
+        <ProductMark />
+        {resolvedMotifs.map((motif, index) => (
+          <MotifMark key={`${motif.shape}-${index}`} motif={motif} />
+        ))}
+      </span>
     </span>
   );
 }

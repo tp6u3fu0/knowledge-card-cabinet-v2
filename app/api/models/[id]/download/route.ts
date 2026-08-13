@@ -1,4 +1,4 @@
-const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
+import { backendFetch, forwardBackend } from "../../../_lib/backend";
 
 export const dynamic = "force-dynamic";
 
@@ -8,14 +8,10 @@ export async function POST(
 ): Promise<Response> {
   const { id } = await context.params;
   try {
-    const response = await fetch(`${API_INTERNAL_URL}/models/${encodeURIComponent(id)}`, {
+    const response = await backendFetch(`/models/${encodeURIComponent(id)}`, {
       method: "POST",
     });
-    const body = await response.text();
-    return new Response(body, {
-      status: response.status,
-      headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" },
-    });
+    return forwardBackend(response);
   } catch {
     return Response.json({ detail: "無法開始下載本機模型，請確認網路連線後再試。" }, { status: 503 });
   }

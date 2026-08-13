@@ -24,13 +24,24 @@ services:
       EMBEDDING_API_FORMAT: ${EMBEDDING_API_FORMAT:-openai}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
-      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       RELATED_MIN_SCORE: ${RELATED_MIN_SCORE:-0.55}
       SUMMARY_PROVIDER: ${SUMMARY_PROVIDER:-local-transformers}
       SUMMARY_MODEL: ${SUMMARY_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
       SUMMARY_MAX_NEW_TOKENS: ${SUMMARY_MAX_NEW_TOKENS:-192}
+      TASK_STATE_FILE: /app/data/tasks.json
+      MODEL_CACHE_DIR: /root/.cache/huggingface
+      KCC_API_TOKEN: ${KCC_API_TOKEN:-kcc-local-dev-token}
+      KCC_API_READ_TOKEN: ${KCC_API_READ_TOKEN:-}
+      KCC_CORS_ORIGINS: ${KCC_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      BACKUP_DIR: /app/data/backups
+      AUDIT_LOG_FILE: /app/data/audit.jsonl
+      RELATED_LIMIT: ${RELATED_LIMIT:-6}
+      RELATED_KEYWORD_WEIGHT: ${RELATED_KEYWORD_WEIGHT:-0.35}
+      SEARCH_KEYWORD_WEIGHT: ${SEARCH_KEYWORD_WEIGHT:-0.25}
     volumes:
       - hf_cache:/root/.cache/huggingface
+      - backend_data:/app/data
     ports:
       - "8000:8000"
     depends_on:
@@ -44,6 +55,7 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       API_INTERNAL_URL: http://api:8000
+      API_INTERNAL_TOKEN: ${KCC_API_TOKEN:-kcc-local-dev-token}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
@@ -60,3 +72,4 @@ services:
 volumes:
   knowledge_pgdata:
   hf_cache:
+  backend_data:

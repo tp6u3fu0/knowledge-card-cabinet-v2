@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { SeededCoverArt } from "./cover-art";
+import { useEffect, useState } from "react";
+import { FlipCard, KnowledgeCardBack, KnowledgeCardFront } from "./card-face";
 
 type KnowledgeCard = {
   id: string;
@@ -94,24 +94,6 @@ const knowledgeCards: KnowledgeCard[] = [
   },
 ];
 
-const relationPairs = [
-  ["attention", "qkv"],
-  ["attention", "transformer"],
-  ["qkv", "transformer"],
-  ["transformer", "rag"],
-] as const;
-
-const relationLabels: Record<string, string> = {
-  "attention-qkv": "拆解機制",
-  "attention-transformer": "延伸架構",
-  "qkv-transformer": "組成關係",
-  "rag-transformer": "應用方法",
-};
-
-function relationKey(first: string, second: string) {
-  return [first, second].sort().join("-");
-}
-
 const railCards = Array.from({ length: 12 }, (_, index) => ({
   id: index,
   pattern: ["orbit", "grid", "ladder", "shelf"][index % 4],
@@ -135,215 +117,32 @@ function DecorativeCard({
   );
 }
 
-function tiltCard(event: PointerEvent<HTMLElement>) {
-  const card = event.currentTarget;
-  const bounds = card.getBoundingClientRect();
-  const x = (event.clientX - bounds.left) / bounds.width - 0.5;
-  const y = (event.clientY - bounds.top) / bounds.height - 0.5;
-
-  card.style.setProperty("--tilt-x", `${y * -11}deg`);
-  card.style.setProperty("--tilt-y", `${x * 13}deg`);
-}
-
-function resetTilt(event: PointerEvent<HTMLElement>) {
-  event.currentTarget.style.setProperty("--tilt-x", "0deg");
-  event.currentTarget.style.setProperty("--tilt-y", "0deg");
-}
-
-function KnowledgeCardPreview({
-  card,
-  active,
-  onClick,
-}: {
-  card: KnowledgeCard;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`collection-card collection-card--${card.accent} ${
-        active ? "is-active" : ""
-      }`}
-      type="button"
-      onClick={onClick}
-      onPointerMove={tiltCard}
-      onPointerLeave={resetTilt}
-      onPointerCancel={resetTilt}
-      aria-label={`${card.title}。${card.question}。標籤：${card.tags.join("、")}`}
-      aria-pressed={active}
-    >
-      <span className="collection-card__accent" aria-hidden="true" />
-      <span className="collection-card__topline">
-        <span>{card.number}</span>
-        <span>{card.topic}</span>
-      </span>
-      <SeededCoverArt seed={card.id} pattern={card.pattern} />
-      <span className="collection-card__copy">
-        <strong>{card.title}</strong>
-        <span>{card.question}</span>
-      </span>
-      <span className="collection-card__tags">
-        {card.tags.map((tag) => (
-          <span key={tag}>{tag}</span>
-        ))}
-      </span>
-    </button>
-  );
-}
-
-function RelationView({
-  cards,
-  selectedId,
-  onSelect,
-}: {
-  cards: KnowledgeCard[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-}) {
-  const visibleIds = new Set(cards.map((card) => card.id));
-  const visiblePairs = relationPairs.filter(
-    ([first, second]) => visibleIds.has(first) && visibleIds.has(second),
-  );
-
-  return (
-    <div className="relation-workspace">
-      <div className="relation-canvas" aria-label="知識卡片關聯圖">
-        <span className="relation-canvas__grid" aria-hidden="true" />
-        {visiblePairs.map(([first, second]) => (
-          <span
-            className={`relation-line relation-line--${relationKey(first, second)}`}
-            key={`${first}-${second}`}
-            aria-hidden="true"
-          />
-        ))}
-        {cards.map((card) => (
-          <button
-            className={`relation-node relation-node--${card.id} ${
-              selectedId === card.id ? "is-selected" : ""
-            }`}
-            key={card.id}
-            type="button"
-            onClick={() => onSelect(card.id)}
-            onPointerMove={tiltCard}
-            onPointerLeave={resetTilt}
-            onPointerCancel={resetTilt}
-            aria-pressed={selectedId === card.id}
-          >
-            <span className="relation-node__number">{card.number}</span>
-            <strong>{card.title}</strong>
-            <span>{card.topic}</span>
-            <small>{card.related.length} 個關聯</small>
-          </button>
-        ))}
-      </div>
-      <div className="relation-legend">
-        {visiblePairs.map(([first, second]) => (
-          <span key={`legend-${first}-${second}`}>
-            <i aria-hidden="true" />
-            {relationLabels[relationKey(first, second)]}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TableView({
-  cards,
-  onSelect,
-}: {
-  cards: KnowledgeCard[];
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="collection-table-wrap">
-      <table className="collection-table">
-        <thead>
-          <tr>
-            <th>卡片</th>
-            <th>領域</th>
-            <th>關聯</th>
-            <th>來源</th>
-          </tr>
-        </thead>
-        <tbody>
-          {cards.map((card) => (
-            <tr key={card.id}>
-              <td>
-                <button
-                  className={`table-card-button table-card-button--${card.accent}`}
-                  type="button"
-                  onClick={() => onSelect(card.id)}
-                >
-                  <span>{card.number}</span>
-                  <strong>{card.title}</strong>
-                </button>
-              </td>
-              <td>{card.topic}</td>
-              <td>{card.related.length} 張卡片</td>
-              <td className="table-source">{card.source}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function CardViewer({
   card,
+  relatedCards,
+  onOpenRelated,
   onClose,
 }: {
   card: KnowledgeCard;
+  relatedCards: KnowledgeCard[];
+  onOpenRelated: (id: string) => void;
   onClose: () => void;
 }) {
-  const [rotation, setRotation] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragOrigin = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    rotation: { x: number; y: number };
-  } | null>(null);
-
-  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragOrigin.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      rotation,
-    };
-    setIsDragging(true);
-  };
-
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const origin = dragOrigin.current;
-    if (!origin || origin.pointerId !== event.pointerId) return;
-
-    const nextX = Math.max(-24, Math.min(24, origin.rotation.x - (event.clientY - origin.startY) * 0.2));
-    const nextY = Math.max(-24, Math.min(24, origin.rotation.y + (event.clientX - origin.startX) * 0.2));
-    setRotation({ x: nextX, y: nextY });
-  };
-
-  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    if (!dragOrigin.current || dragOrigin.current.pointerId !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    dragOrigin.current = null;
-    setIsDragging(false);
-  };
-
   return (
-    <div className="card-viewer" onClick={onClose}>
+    // The backdrop is presentational: dismissal also lives on the close button
+    // and the Escape handler, so it needs no role or key handling of its own.
+    <div
+      className="card-viewer"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div
         className="card-viewer__panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="card-viewer-title"
-        onClick={(event) => event.stopPropagation()}
       >
         <div className="card-viewer__topline">
           <span>OPEN KNOWLEDGE CARD</span>
@@ -353,37 +152,21 @@ function CardViewer({
         </div>
 
         <div className="card-viewer__content">
-          <div className="card-viewer__card-wrap">
-            <p className="card-viewer__hint">DRAG TO ROTATE · 拖曳卡片旋轉檢視</p>
-            <div
-              className={`featured-card featured-card--${card.accent} card-viewer__card ${
-                isDragging ? "is-dragging" : ""
-              }`}
-              style={{
-                transform: `perspective(1050px) rotateX(${rotation.x}deg) rotateY(${rotation.y}deg) rotate(-2deg)`,
-                transition: isDragging ? "none" : undefined,
-              }}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onLostPointerCapture={handlePointerUp}
-            >
-              <div className="featured-card__header">
-                <span>{card.number}</span>
-                <span>{card.topic}</span>
-              </div>
-              <div className={`featured-art featured-art--${card.pattern}`}>
-                <span className="featured-art__ring featured-art__ring--one" />
-                <span className="featured-art__ring featured-art__ring--two" />
-                <span className="featured-art__dot" />
-              </div>
-              <div className="featured-card__footer">
-                <span>KNOWLEDGE CARD</span>
-                <span>CURATED NOTE</span>
-              </div>
-            </div>
-          </div>
+          <FlipCard
+            key={card.id}
+            front={<KnowledgeCardFront card={card} active onClick={() => undefined} />}
+            back={
+              <KnowledgeCardBack
+                accent={card.accent}
+                number={card.number}
+                lead={card.summary}
+                body={card.analogy || card.detail}
+                tags={card.tags}
+                neighbours={relatedCards}
+                onOpenNeighbour={onOpenRelated}
+              />
+            }
+          />
 
           <article className="card-viewer__reading">
             <div className="reading-meta">
@@ -532,35 +315,12 @@ export default function Home() {
         </div>
 
         <div className="featured-layout">
-          <div
-            className={`featured-card featured-card--${selectedCard.accent}`}
-            role="button"
-            tabIndex={0}
-            aria-label={`開啟${selectedCard.title}知識卡`}
-            onClick={() => openCard(selectedCard.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                openCard(selectedCard.id);
-              }
-            }}
-            onPointerMove={tiltCard}
-            onPointerLeave={resetTilt}
-            onPointerCancel={resetTilt}
-          >
-            <div className="featured-card__header">
-              <span>{selectedCard.number}</span>
-              <span>{selectedCard.topic}</span>
-            </div>
-            <div className={`featured-art featured-art--${selectedCard.pattern}`}>
-              <span className="featured-art__ring featured-art__ring--one" />
-              <span className="featured-art__ring featured-art__ring--two" />
-              <span className="featured-art__dot" />
-            </div>
-            <div className="featured-card__footer">
-              <span>KNOWLEDGE CARD</span>
-              <span>可回來閱讀</span>
-            </div>
+          <div className="featured-layout__card">
+            <KnowledgeCardFront
+              card={selectedCard}
+              active={false}
+              onClick={() => openCard(selectedCard.id)}
+            />
           </div>
 
           <article className="knowledge-reading">
@@ -610,7 +370,7 @@ export default function Home() {
         </div>
         <div className="collection-grid collection-grid--preview">
           {knowledgeCards.slice(0, 3).map((card) => (
-            <KnowledgeCardPreview
+            <KnowledgeCardFront
               key={card.id}
               card={card}
               active={card.id === selectedId}
@@ -683,7 +443,16 @@ export default function Home() {
         <span>desktop app in progress</span>
       </footer>
 
-      {isViewerOpen && <CardViewer card={selectedCard} onClose={() => setIsViewerOpen(false)} />}
+      {isViewerOpen && (
+        <CardViewer
+          card={selectedCard}
+          relatedCards={selectedCard.related
+            .map((relatedId) => knowledgeCards.find((item) => item.id === relatedId))
+            .filter((item): item is KnowledgeCard => Boolean(item))}
+          onOpenRelated={setSelectedId}
+          onClose={() => setIsViewerOpen(false)}
+        />
+      )}
     </main>
   );
 }

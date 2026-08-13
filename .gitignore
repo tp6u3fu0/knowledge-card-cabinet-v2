@@ -48,3 +48,6 @@ release-verify/
 release-verify*/
 release-sync/
 release-clean/
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo

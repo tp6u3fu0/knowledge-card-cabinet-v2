@@ -16,7 +16,11 @@
     "desktop:prepare": "npm install --prefix desktop --omit=dev",
     "desktop:dist": "npm run build && npm run desktop:prepare && electron-builder --config desktop/electron-builder.yml",
     "desktop:mcp": "node desktop/mcp-server.cjs",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run test:unit && npm run build && node --test tests/rendered-html.test.mjs",
+    "test:unit": "node --test --experimental-strip-types tests/flip-math.test.mjs",
+    "test:backend": "python -m unittest discover -s backend/tests",
+    "verify:runtime": "node tests/runtime-contract.mjs",
+    "release:check": "node scripts/release-check.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
