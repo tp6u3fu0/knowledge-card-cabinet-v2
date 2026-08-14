@@ -3,9 +3,9 @@
 這是知識卡冊的獨立桌面應用程式。它會：
 
 1. 啟動內嵌的本機 API 與前端 standalone server。
-2. 將卡片資料保存到「文件\知識卡冊」的本機 SQLite，模型快取留在 Electron userData。
-3. 第一次啟動時，若偵測到舊版 `localhost:8000` API，會嘗試匯入現有卡片。
-4. 沒有舊服務時，使用安裝包內的 starter cards 建立本機資料。
+2. 將卡片保存到「文件\知識卡冊」的本機 SQLite，模型快取留在 Electron `userData`。
+3. 從舊版升級時，把原本在 `userData/data` 的卡片搬到新位置，舊檔保留作為退路。
+4. 全新安裝時建立一個**空的**卡冊——範例卡片隨程式附帶，但不會自動載入。
 
 ## 開發啟動
 
@@ -26,13 +26,13 @@ npm run desktop:dev
 模型使用 Transformers.js／ONNX runtime 在本機 CPU 執行，不會把卡片內容送到外部 API。模型檔案會放在 Electron `userData/models`，卡片向量會依目前啟用的 embedding 模型重建。
 
 桌面本機 API 只監聽 `127.0.0.1`，所有非公開路徑都需要 runtime manifest 中的隨機 Bearer
-Token；回應會寫入不含內容與密鑰的 `userData/audit.jsonl`。因此 MCP Bridge 必須先讀取有效
+Token；回應會寫入不含內容與密鑰的 `audit.jsonl`（與卡片同一個資料夾）。因此 MCP Bridge 必須先讀取有效
 manifest，桌面程式關閉或 token 過期後不會繼續存取卡片。
 
 卡片會保存 embedding 內容指紋與模型識別。新增／編輯只重建受影響的卡片與關聯，啟動時也只
 處理過期向量；切換 embedding 模型則會重新檢查整個集合，以確保所有卡片使用同一模型。
 
-模型下載、embedding 切換與會觸發重建索引的設定更新會在桌面 runtime 背景執行；可以透過本機 API 的 `/tasks` 與 `/tasks/{task_id}` 查詢進度，並使用 `/cancel` 或 `/retry` 管理任務。任務歷史保存於 userData 的 `tasks.json`，重新啟動後未完成任務會保留為可重試狀態。模型設定也提供快取檔案檢查、磁碟空間資訊與清理模型檔案功能；下載中斷時會沿用既有 Transformers.js 快取。
+模型下載、embedding 切換與會觸發重建索引的設定更新會在桌面 runtime 背景執行；可以透過本機 API 的 `/tasks` 與 `/tasks/{task_id}` 查詢進度，並使用 `/cancel` 或 `/retry` 管理任務。任務歷史保存於資料夾下的 `tasks.json`，重新啟動後未完成任務會保留為可重試狀態。模型設定也提供快取檔案檢查、磁碟空間資訊與清理模型檔案功能；下載中斷時會沿用既有 Transformers.js 快取。
 
 ## 建立安裝包
 
@@ -43,7 +43,7 @@ npm run desktop:dist
 安裝包會放在 `release/`。建立安裝包前會先產生前端 standalone build，並將它與本機 API runtime 一起放入安裝包。
 
 桌面資料管理 API 支援版本化 JSON 匯出／匯入與重置。匯出格式含 SHA-256 校驗碼；匯入前
-會驗證資料結構，匯入／重置前會先把目前資料備份到 `userData/backups`，最多保留最近 10 份。
+會驗證資料結構，匯入／重置前會先把目前資料備份到資料夾下的 `backups/`，最多保留最近 10 份。
 若主要 `cards.json` 損壞，啟動時會嘗試從最近的有效備份復原。
 
 ## 讓 AI 協作管理卡片

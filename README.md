@@ -48,7 +48,11 @@ npm run serve
 
 ## 桌面版
 
-桌面版使用 Electron 啟動內嵌的本機 API 與前端 standalone server。卡片資料與模型檔案會保存於 Electron `userData`，可離線使用。
+桌面版使用 Electron 啟動內嵌的本機 API 與前端 standalone server，完全離線可用。
+
+**剛裝好是空的**——不會預先塞入任何範例卡片。卡片存在「文件\知識卡冊」，你找得到也好備份，甚至可以直接把它放進同步資料夾；模型快取留在 Electron `userData`，因為那是可重新下載的東西，不值得備份。從舊版升級時，原本在 `userData` 的卡片會自動搬到新位置，舊檔保留不動。
+
+資料位置可用 `KCC_DATA_DIR` 覆寫。
 
 ```powershell
 npm install
@@ -65,7 +69,7 @@ npm run desktop:dist
 
 ## 常駐主機版（樹莓派、家用伺服器）
 
-同一份 runtime 也可以不透過 Electron 執行，適合放在一台常開的機器上，讓手機或其他電腦連進來。不需要 PostgreSQL，也不需要 Python 服務。
+同一份 runtime 也可以不透過 Electron 執行，適合放在一台常開的機器上，讓手機或其他電腦連進來。
 
 ```bash
 npm ci && npm run build
@@ -115,9 +119,8 @@ embedding 維度與校驗碼，驗證失敗不會覆蓋現有資料。匯入與�
 
 embedding 會保存內容指紋與模型識別。新增或編輯卡片只重建受影響的向量與關聯；切換
 embedding 模型時，為確保維度與語意一致，仍會逐張檢查並重建過期向量。`category` 是
-可管理的高層分類；同分類會提高關聯候選的輔助分數，但不會取代 embedding 關聯。搜尋採語意分數
-與標題、主題、分類、問題、摘要、標籤等欄位的關鍵字命中混合排序，並限制每張卡片保留的
-語意關聯數量。關聯建議會把語意分數與分類／主題／標籤命中混合計算。語意分數是**相對於這個收藏本身的相似度分布**測量的，不是絕對 cosine——強多語言模型會把所有配對壓在很窄的高分帶裡，絕對門檻無法分辨「相關」與「兩者都是文字」。
+可管理的高層分類；同分類會提高關聯候選的輔助分數，但不會取代 embedding 關聯。搜尋採語意分數與標題、主題、分類、問題、摘要、標籤等欄位的關鍵字命中混合排序，並限制每張卡片保留的
+語意關聯數量。搜尋的語意分數同樣是相對值——相對於該次查詢自己的分數分布，因此「語意相似」這個標記在同一批結果之間才有區辨力；結果太少而測不出分布時就不標記。關聯建議會把語意分數與分類／主題／標籤命中混合計算。語意分數是**相對於這個收藏本身的相似度分布**測量的，不是絕對 cosine——強多語言模型會把所有配對壓在很窄的高分帶裡，絕對門檻無法分辨「相關」與「兩者都是文字」。
 匯入端點提供 `/database/import/preview`、衝突策略與 SHA-256 校驗；批次整理預設只預覽，必須明確傳入
 `apply: true` 才會修改卡片。
 
@@ -170,7 +173,8 @@ npm run desktop:mcp
 npm run dev              # 前端開發伺服器（需搭配 dev:api）
 npm run dev:api          # 本機 API，供開發用
 npm run build            # 建立前端 standalone build
-npm test                 # 建置並執行測試
+npm test                 # 建置並執行全部測試
+npm run test:api         # 只跑 API 行為契約（較快）
 npm run lint             # ESLint
 npm run desktop:dev      # 啟動桌面開發版
 npm run desktop:dist     # 建立桌面安裝包
@@ -180,7 +184,7 @@ npm run serve            # 以 headless 模式啟動（常駐主機用）
 npm run verify:runtime   # 驗證 runtime capability 契約
 ```
 
-GitHub Actions 會在 push／Pull Request 執行 build、測試與 runtime contract；推送符合
+GitHub Actions 會在 push／Pull Request 執行 lint、build、測試與 runtime contract；推送符合
 `vX.Y.Z` 的 tag 時，Windows runner 會建立並上傳桌面安裝包到 GitHub Release。這是目前
 Installer 與後續自動更新功能的發佈基礎。
 
