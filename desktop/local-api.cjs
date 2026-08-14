@@ -10,14 +10,24 @@ const { createTaskManager } = require("./task-manager.cjs");
 /** Width of the built-in hash embedding, and the width covers are drawn from. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
 const STORE_VERSION = 2;
-const COVER_VERSION = 8;
-const MOTIF_SIZE = 8.4;
-const MOTIF_SHAPES = ["block", "stair", "corner", "zigzag", "stack", "window", "plus", "frame"];
+const COVER_VERSION = 11;
+const MOTIF_COUNT = 12;
+const MOTIF_MIN_COUNT = 8;
+const MOTIF_SIZE = 13.5;
+// These names are drawn by app/cover-art.tsx. A name that is not in that glyph
+// library silently renders as "quad", so every cover collapses into the same
+// grid of four-square marks — which is exactly what shipped in COVER_VERSION 8.
+const MOTIF_SHAPES = [
+  "steps", "quad", "nested", "crosshair-box", "link", "target",
+  "triple-dot", "constellation", "folder", "stack", "arch", "lines",
+  "corners", "diagonal", "pill", "brackets", "bars", "crosshair",
+];
+/** Slots hug the border band; the middle of the cover stays clear for the mark. */
 const MOTIF_LAYOUT = [
-  [11, 11, 0], [37, 11, 0], [63, 11, 0],
-  [89, 11, 90], [89, 37, 90], [89, 63, 90],
-  [89, 89, 180], [63, 89, 180], [37, 89, 180],
-  [11, 89, 270], [11, 63, 270], [11, 37, 270],
+  [12, 13], [38, 10], [64, 10],
+  [88, 13], [90, 38], [90, 62],
+  [88, 87], [64, 90], [38, 90],
+  [12, 87], [10, 62], [10, 38],
 ];
 const PALETTES = [
   { accent: "coral", color: "#c96f5f", soft_color: "#f0d5cc", background: "#fbf1eb" },
@@ -275,19 +285,26 @@ function buildCover(embedding) {
   const patternNames = ["orbit", "grid", "ladder", "shelf"];
   const pattern = patternNames[Math.floor(unitValue(digest, 0) * patternNames.length) % patternNames.length];
   const palette = PALETTES[Math.floor((Math.abs(chunks[0]) + unitValue(digest, 12)) * PALETTES.length) % PALETTES.length];
-  const motifs = features.map(({ average, energy, variation }, index) => {
+  // 8–12 glyphs per cover: sparser cards read as calmer, denser ones as busier.
+  const motifCount = Math.min(MOTIF_COUNT, MOTIF_MIN_COUNT + Math.floor(unitValue(digest, 52) * (MOTIF_COUNT - MOTIF_MIN_COUNT + 1)));
+  const keptSlots = Array.from({ length: MOTIF_COUNT }, (_, index) => index)
+    .sort((left, right) => unitValue(digest, 60 + left * 3) - unitValue(digest, 60 + right * 3))
+    .slice(0, motifCount)
+    .sort((left, right) => left - right);
+
+  const motifs = keptSlots.map((index) => {
+    const { average, energy, variation } = features[index];
     const averageRatio = (average / maxAverage + 1) / 2;
     const energyRatio = energy / maxEnergy;
     const variationRatio = variation / maxVariation;
-    const [x, y, rotation] = MOTIF_LAYOUT[index];
+    const [x, y] = MOTIF_LAYOUT[index];
     const shapeIndex = Math.floor((averageRatio * 2.1 + energyRatio * 3.4 + variationRatio * 4.7 + unitValue(digest, 44 + index * 5)) * MOTIF_SHAPES.length) % MOTIF_SHAPES.length;
     return {
       shape: MOTIF_SHAPES[shapeIndex],
-      x,
-      y,
+      x: Number((x + (variationRatio - 0.5) * 4).toFixed(2)),
+      y: Number((y + (averageRatio - 0.5) * 4).toFixed(2)),
       size: MOTIF_SIZE,
-      rotation,
-      opacity: Number((0.38 + energyRatio * 0.46).toFixed(3)),
+      opacity: Number((0.42 + energyRatio * 0.38).toFixed(3)),
       weight: Number(energyRatio.toFixed(3)),
     };
   });
@@ -297,8 +314,6 @@ function buildCover(embedding) {
     seed: digest.slice(0, 16),
     pattern,
     ...palette,
-    rotation: Number((-24 + unitValue(digest, 20) * 48).toFixed(2)),
-    scale: Number((0.88 + unitValue(digest, 28) * 0.24).toFixed(3)),
     density: Number((0.55 + Math.abs(chunks[3]) * 0.45).toFixed(3)),
     orbit: Number((Math.abs(chunks[5]) * 0.9 + unitValue(digest, 36) * 0.1).toFixed(3)),
     motifs,
@@ -721,6 +736,18 @@ async function applyEmbedding(card, modelRuntime) {
   card.cover = buildCover(coverVector(card));
   card.embedding_source_hash = embeddingSourceHash(card);
   return card;
+}
+
+/**
+ * A cover is derived data, so changing how covers are drawn has to reach the
+ * cards already on disk. Nothing else notices a stale cover — the embedding and
+ * its hash are unchanged — so reindexStore walks straight past them and a
+ * cabinet keeps rendering whatever scheme it was written under.
+ */
+function refreshStaleCovers(store) {
+  const stale = store.cards.filter((card) => (card.cover?.version ?? 0) !== COVER_VERSION);
+  for (const card of stale) card.cover = buildCover(coverVector(card));
+  return stale.length;
 }
 
 async function reindexStore(store, modelRuntime, { allowFallback = false, progress } = {}) {
@@ -1521,8 +1548,9 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
   // what identifies them, and one rebuild puts the whole graph back on one scale.
   const rescored = !store.semantic_baseline && store.cards.some((card) => hasUsableEmbedding(card));
   if (rescored) rebuildSemanticRelations(store);
+  const refreshedCovers = refreshStaleCovers(store);
   const reindexedCards = await reindexStore(store, modelRuntime, { allowFallback: false });
-  if (rescored || reindexedCards > 0 || store.embedding_model_id !== modelRuntime.activeEmbeddingModelId()) {
+  if (rescored || refreshedCovers > 0 || reindexedCards > 0 || store.embedding_model_id !== modelRuntime.activeEmbeddingModelId()) {
     store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
     store.summary_model_id = modelRuntime.activeSummaryModelId();
     db.save(store);
@@ -1561,4 +1589,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline };
+module.exports = { startLocalApi, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, COVER_VERSION };
