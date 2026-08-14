@@ -1,4 +1,6 @@
-const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? "http://api:8000";
+// The desktop app and `npm run serve` both inject the local API's real address;
+// this default only covers `npm run dev:api`, which pins that port.
+const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? "http://127.0.0.1:8000";
 
 export function backendHeaders(extra: HeadersInit = {}): Headers {
   const headers = new Headers(extra);

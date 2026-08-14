@@ -27,12 +27,15 @@
 
 需求：Node.js 22.13 以上。
 
+前端與本機 API 是分開的兩個行程，開兩個終端機：
+
 ```bash
 npm install
-npm run dev
+npm run dev:api      # 本機 API，固定在 127.0.0.1:8000
+npm run dev          # 前端，存檔即更新
 ```
 
-前端會開在 vinext 指定的埠。要連同本機 API 一起跑（含 SQLite 與模型）：
+或用單一指令跑完整的正式組合（無 HMR）：
 
 ```bash
 npm run build
@@ -164,7 +167,8 @@ npm run desktop:mcp
 ## 常用指令
 
 ```powershell
-npm run dev              # 前端開發伺服器
+npm run dev              # 前端開發伺服器（需搭配 dev:api）
+npm run dev:api          # 本機 API，供開發用
 npm run build            # 建立前端 standalone build
 npm test                 # 建置並執行測試
 npm run lint             # ESLint

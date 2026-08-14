@@ -3,11 +3,11 @@ import { spawn } from "node:child_process";
 
 const command = process.argv[2] ?? "build";
 const executable = path.resolve("node_modules", ".bin", process.platform === "win32" ? "vinext.cmd" : "vinext");
-// `npm run dev` runs on the host while the API and database stay in Docker,
-// so point at the published ports unless the environment says otherwise.
+// `npm run dev` serves the frontend with HMR and proxies to the local API
+// started separately by `npm run dev:api`, which listens on these defaults.
 const devDefaults = command === "dev"
   ? {
-      API_INTERNAL_URL: process.env.API_INTERNAL_URL ?? "http://localhost:8000",
+      API_INTERNAL_URL: process.env.API_INTERNAL_URL ?? "http://127.0.0.1:8000",
       API_INTERNAL_TOKEN: process.env.API_INTERNAL_TOKEN ?? process.env.KCC_API_TOKEN ?? "kcc-local-dev-token",
     }
   : {};

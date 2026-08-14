@@ -233,7 +233,7 @@ export function DataManagementPanel({
       <div className="settings-api-intro settings-api-intro--data">
         <span className="model-settings-kicker">LOCAL DATA / SAFETY</span>
         <strong>先備份，再整理本機資料</strong>
-        <p>資料會留在這台電腦的 Docker PostgreSQL。匯出會下載一份 JSON 備份；重置只會清除卡片、垃圾桶與關聯，不會刪除模型檔案或資料表結構。</p>
+        <p>資料會留在這台電腦的本機資料庫。匯出會下載一份 JSON 備份；重置只會清除卡片、垃圾桶與關聯，不會刪除模型檔案或資料表結構。</p>
       </div>
 
       <section className="settings-data-card">

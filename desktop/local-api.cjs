@@ -440,9 +440,9 @@ function migrateStore(store) {
   const before = JSON.stringify({ version: store.version, categories: store.categories });
   const previousVersion = Number(store.version || 1);
   ensureCategories(store);
-  // Version 2 formalizes categories and keeps the local JSON store aligned
-  // with the Docker schema. The migration is idempotent for old and partial
-  // files, so a failed write can safely be retried at the next startup.
+  // Version 2 formalises categories as their own list rather than deriving them
+  // from cards. The migration is idempotent for old and partial stores, so a
+  // failed write can safely be retried at the next startup.
   store.version = Math.max(previousVersion, STORE_VERSION);
   return before !== JSON.stringify({ version: store.version, categories: store.categories });
 }

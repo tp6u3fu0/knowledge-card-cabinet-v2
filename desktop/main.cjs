@@ -244,7 +244,9 @@ function createWindow() {
 }
 
 ipcMain.handle("desktop:retry", () => startServices());
-ipcMain.handle("desktop:open-docs", () => shell.openExternal(`${localApiRuntime?.baseUrl || "http://127.0.0.1:8000"}/docs`));
+// The API's port is chosen at startup, so there is nothing sensible to open
+// before it is running.
+ipcMain.handle("desktop:open-docs", () => (localApiRuntime ? shell.openExternal(`${localApiRuntime.baseUrl}/docs`) : undefined));
 ipcMain.handle("desktop:data-dir", () => dataDirectory());
 ipcMain.handle("desktop:open-data-dir", () => shell.openPath(dataDirectory()));
 

@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "node scripts/run-vinext.mjs dev",
+    "dev:api": "node scripts/dev-api.mjs",
     "build": "node scripts/run-vinext.mjs build",
     "start": "node scripts/run-vinext.mjs start",
     "desktop:dev": "npm run build && npm run desktop:prepare && electron desktop/main.cjs",
