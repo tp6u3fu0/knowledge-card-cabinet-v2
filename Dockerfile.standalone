@@ -1,0 +1,59 @@
+# All-in-one image: frontend + local API + SQLite in one container.
+#
+# This is the deployment story for an always-on box such as a Raspberry Pi.
+# There is no Postgres and no Python service — the runtime is the same Node
+# code the desktop app runs, so there is one implementation to keep correct.
+#
+#   docker build -f Dockerfile.standalone -t knowledge-card-cabinet .
+#   docker run -d --name kcc -p 3000:3000 \
+#     -e KCC_HOST=0.0.0.0 -e KCC_API_TOKEN=... \
+#     -v kcc-data:/data knowledge-card-cabinet
+#
+# Debian rather than Alpine on purpose: onnxruntime-node, which the embedding
+# models run on, ships glibc prebuilds only. On musl it fails at install time.
+# node:22-bookworm-slim is published for both amd64 and arm64, so the same
+# Dockerfile builds for a Pi 4/5.
+
+FROM node:22-bookworm-slim AS base
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# Model runtime dependencies are installed separately so the huge onnxruntime
+# download is not repeated whenever frontend sources change.
+FROM base AS runtime-deps
+COPY desktop/package.json desktop/package-lock.json ./desktop/
+RUN npm install --prefix desktop --omit=dev
+
+FROM base AS runner
+ENV NODE_ENV=production \
+    KCC_DATA_DIR=/data \
+    KCC_MODELS_DIR=/data/models \
+    KCC_HOST=127.0.0.1 \
+    KCC_PORT=3000
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
+COPY --from=runtime-deps /app/desktop/node_modules ./desktop/node_modules
+COPY desktop/*.cjs ./desktop/
+COPY desktop/package.json ./desktop/
+COPY backend/seed.json ./backend/seed.json
+
+# The data volume has to be writable by the unprivileged user the app runs as.
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
+VOLUME ["/data"]
+EXPOSE 3000
+
+# Checks the frontend, which only answers once the API behind it is up.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.KCC_PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "desktop/server.cjs"]

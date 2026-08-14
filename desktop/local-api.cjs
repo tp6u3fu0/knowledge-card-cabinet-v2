@@ -4,9 +4,11 @@ const http = require("node:http");
 const path = require("node:path");
 const { URL } = require("node:url");
 const { createModelRuntime } = require("./model-runtime.cjs");
+const { openStore, writeBackup } = require("./store.cjs");
 const { createTaskManager } = require("./task-manager.cjs");
 
-const EMBEDDING_DIMENSIONS = 384;
+/** Width of the built-in hash embedding, and the width covers are drawn from. */
+const HASH_EMBEDDING_DIMENSIONS = 384;
 const STORE_VERSION = 2;
 const COVER_VERSION = 8;
 const MOTIF_SIZE = 8.4;
@@ -25,7 +27,11 @@ const PALETTES = [
 ];
 const TOKEN_PATTERN = /[a-z0-9_]+|[\u4e00-\u9fff]/giu;
 const RELATION_LIMIT = 6;
-const RELATION_MIN_SCORE = 0.55;
+// Scores are measured against the collection's own spread (see semanticBaseline),
+// so this is "how far above typical a pair has to sit", not a raw cosine. Tuned
+// on a real cabinet: genuine cross-topic links land at 0.44–0.49 while pairs
+// that merely share a generic tag fall to 0.26.
+const RELATION_MIN_SCORE = 0.42;
 const RELATION_KEYWORD_WEIGHT = 0.35;
 const KEYWORD_WEIGHT = 0.25;
 
@@ -51,14 +57,15 @@ function embeddingSourceHash(card) {
   return crypto.createHash("sha256").update(embeddingText(card), "utf8").digest("hex");
 }
 
-function hashEmbedding(text) {
+function hashEmbedding(text, dimensions = HASH_EMBEDDING_DIMENSIONS) {
+  const width = Number(dimensions) || HASH_EMBEDDING_DIMENSIONS;
   const tokens = text.toLowerCase().match(TOKEN_PATTERN) || [];
   const expanded = tokens.concat(tokens.slice(0, -1).map((token, index) => `${token}_${tokens[index + 1]}`));
-  const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
+  const vector = Array.from({ length: width }, () => 0);
 
   for (const token of expanded) {
     const digest = crypto.createHash("sha256").update(token, "utf8").digest();
-    const bucket = digest.readUInt32BE(0) % EMBEDDING_DIMENSIONS;
+    const bucket = digest.readUInt32BE(0) % width;
     vector[bucket] += digest[4] & 1 ? 1 : -1;
   }
 
@@ -66,11 +73,28 @@ function hashEmbedding(text) {
   return vector.map((value) => value / norm);
 }
 
+/**
+ * Cosine similarity of two vectors of the same width.
+ *
+ * Truncating to the shorter of the two — which is what a Math.min guard does —
+ * turns a mismatch into a plausible-looking number instead of an error, so a
+ * single wrong-width vector silently poisons search and relations. Callers are
+ * expected to have filtered with `hasUsableEmbedding` first; reaching here with
+ * a mismatch is a bug, and it should say so.
+ */
 function cosine(first, second) {
-  const length = Math.min(first.length, second.length);
+  if (!Array.isArray(first) || !Array.isArray(second) || first.length !== second.length) {
+    throw new Error(`embedding 維度不符：${first?.length ?? "無"} 對 ${second?.length ?? "無"}`);
+  }
   let score = 0;
-  for (let index = 0; index < length; index += 1) score += first[index] * second[index];
+  for (let index = 0; index < first.length; index += 1) score += first[index] * second[index];
   return score;
+}
+
+/** A card can be compared only if it carries a vector of the width in use now. */
+function hasUsableEmbedding(card, dimensions) {
+  if (!Array.isArray(card?.embedding) || card.embedding.length === 0) return false;
+  return !dimensions || card.embedding.length === dimensions;
 }
 
 function keywordScore(card, query) {
@@ -93,8 +117,60 @@ function relationKeywordScore(first, second) {
   return hasSharedTag ? 0.75 : 0;
 }
 
-function relationScore(first, second) {
-  const semantic = cosine(first.embedding, second.embedding);
+/** True when two cards carry vectors that can meaningfully be compared. */
+function comparable(first, second) {
+  return hasUsableEmbedding(first) && hasUsableEmbedding(second)
+    && first.embedding.length === second.embedding.length;
+}
+
+/**
+ * How similar two cards have to be before similarity means anything.
+ *
+ * A strong multilingual model packs every pair into a narrow high band — on a
+ * real cabinet BGE-M3 never scores two cards below 0.698 — so raw cosine says
+ * more about "both of these are prose" than about the cards. Measured against
+ * the collection's own median it separates again: the median is what unrelated
+ * looks like here, and the top of the range is what related looks like.
+ *
+ * Sampled rather than exhaustive because a full pass is O(n²) and the shape of
+ * the distribution settles long before every pair has been counted.
+ */
+function semanticBaseline(cards) {
+  const usable = cards.filter((card) => hasUsableEmbedding(card));
+  if (usable.length < 4) return null;
+
+  const scores = [];
+  const step = Math.max(1, Math.floor(usable.length / 40));
+  for (let i = 0; i < usable.length; i += 1) {
+    for (let j = i + 1; j < usable.length; j += step) {
+      if (usable[i].embedding.length === usable[j].embedding.length) {
+        scores.push(cosine(usable[i].embedding, usable[j].embedding));
+      }
+    }
+  }
+  if (scores.length < 6) return null;
+
+  scores.sort((a, b) => a - b);
+  const lo = scores[Math.floor(scores.length * 0.5)];
+  const hi = scores[Math.floor(scores.length * 0.99)];
+  // A collection of near-identical cards has no spread to normalise against.
+  return hi - lo < 0.01 ? null : { lo, hi };
+}
+
+/** Where this pair sits in the collection's own range of similarity. */
+function relativeSemantic(value, baseline) {
+  if (!baseline) return value;
+  return Math.min(1, Math.max(0, (value - baseline.lo) / (baseline.hi - baseline.lo)));
+}
+
+/**
+ * Blended semantic + lexical score, or null when the pair cannot be compared —
+ * a card still waiting to be embedded is skipped rather than scored, and the
+ * next reindex brings it back in.
+ */
+function relationScore(first, second, baseline = null) {
+  if (!comparable(first, second)) return null;
+  const semantic = relativeSemantic(cosine(first.embedding, second.embedding), baseline);
   const lexical = relationKeywordScore(first, second);
   return (1 - RELATION_KEYWORD_WEIGHT) * semantic + RELATION_KEYWORD_WEIGHT * lexical;
 }
@@ -147,7 +223,8 @@ function batchOrganize(store, cardIds = []) {
     for (let secondIndex = firstIndex + 1; secondIndex < cards.length; secondIndex += 1) {
       const first = cards[firstIndex];
       const second = cards[secondIndex];
-      const score = cosine(first.embedding, second.embedding);
+      // A card with no vector can still be caught as a duplicate by title.
+      const score = comparable(first, second) ? cosine(first.embedding, second.embedding) : 0;
       const titleSame = String(first.title).replace(/\W+/gu, "").toLocaleLowerCase() === String(second.title).replace(/\W+/gu, "").toLocaleLowerCase();
       if (titleSame || score >= 0.9) duplicates.push({ source_id: first.id, target_id: second.id, score: Math.round(Math.max(score, titleSame ? 1 : score) * 10000) / 10000, reason: titleSame ? "標題相同" : "語意高度重複" });
       if (score >= RELATION_MIN_SCORE) {
@@ -245,10 +322,23 @@ function normalizeCard(input, previous = {}) {
     updated_at: now(),
     deleted_at: input.deleted_at ?? previous.deleted_at ?? null,
   };
-  card.embedding = hashEmbedding(embeddingText(card));
+  // The real vector is the caller's job — normalising a card must not invent
+  // one, or a hash embedding ends up standing in for a model embedding.
+  card.embedding = Array.isArray(input.embedding) ? input.embedding.map(Number)
+    : Array.isArray(previous.embedding) ? previous.embedding : null;
   card.embedding_source_hash = embeddingSourceHash(card);
-  card.cover = buildCover(card.embedding);
+  card.cover = card.cover ?? buildCover(coverVector(card));
   return card;
+}
+
+/**
+ * Covers are decoration, so they must render even when the card has no usable
+ * vector yet; the model embedding is preferred so the art keeps tracking meaning.
+ */
+function coverVector(card) {
+  return Array.isArray(card.embedding) && card.embedding.length > 0
+    ? card.embedding
+    : hashEmbedding(embeddingText(card), HASH_EMBEDDING_DIMENSIONS);
 }
 
 function publicCard(card, score = 0) {
@@ -289,11 +379,24 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+/**
+ * Fingerprint of a backup's contents, ignoring the fields that describe the
+ * backup rather than the data.
+ *
+ * This detects a damaged or edited file; it is NOT comparable across runtimes.
+ * The retired Python service serialised small floats in exponent form
+ * (`4.92e-05`) where JavaScript writes them out in full, so the same data
+ * hashes differently there. A payload from another implementation should
+ * therefore arrive without a checksum rather than with a foreign one — import
+ * skips the check when the field is absent.
+ */
 function backupPayloadChecksum(payload) {
   const unsigned = { ...payload };
   delete unsigned.checksum_sha256;
   delete unsigned.exported_at;
   delete unsigned.conflict_strategy;
+  delete unsigned.backup_reason;
+  delete unsigned.backed_up_at;
   return crypto.createHash("sha256").update(canonicalJson(unsigned), "utf8").digest("hex");
 }
 
@@ -435,25 +538,7 @@ function recoverStoreBackup(dataFile) {
   return null;
 }
 
-function writeStore(filePath, store) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  if (fs.existsSync(filePath)) {
-    const backupDir = path.join(path.dirname(filePath), "backups");
-    fs.mkdirSync(backupDir, { recursive: true });
-    const backupPath = path.join(backupDir, `cards-${new Date().toISOString().replace(/[.:]/gu, "-")}.json`);
-    fs.copyFileSync(filePath, backupPath);
-    const backups = fs.readdirSync(backupDir)
-      .filter((name) => name.startsWith("cards-") && name.endsWith(".json"))
-      .map((name) => path.join(backupDir, name))
-      .sort((first, second) => fs.statSync(second).mtimeMs - fs.statSync(first).mtimeMs);
-    for (const oldBackup of backups.slice(10)) fs.rmSync(oldBackup, { force: true });
-  }
-  const temporaryPath = `${filePath}.tmp`;
-  fs.writeFileSync(temporaryPath, JSON.stringify(store, null, 2), "utf8");
-  fs.renameSync(temporaryPath, filePath);
-}
-
-function appendAudit(logPath, request, status, actor) {
+function appendAudit(logPath, request, status, actor, durationMs = 0) {
   if (!logPath) return;
   try {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -463,6 +548,7 @@ function appendAudit(logPath, request, status, actor) {
       route: new URL(request.url || "/", "http://127.0.0.1").pathname,
       status,
       actor,
+      duration_ms: durationMs,
     })}\n`, "utf8");
   } catch {
     // Audit failures must never stop the local API.
@@ -476,12 +562,14 @@ function relationKey(sourceId, targetId, type) {
 function rebuildSemanticRelations(store) {
   store.relations = store.relations.filter((relation) => relation.relation_type !== "semantic");
   const activeCards = store.cards.filter((card) => !card.deleted_at);
+  const baseline = semanticBaseline(activeCards);
+  store.semantic_baseline = baseline;
   for (let firstIndex = 0; firstIndex < activeCards.length; firstIndex += 1) {
     for (let secondIndex = firstIndex + 1; secondIndex < activeCards.length; secondIndex += 1) {
       const first = activeCards[firstIndex];
       const second = activeCards[secondIndex];
-      const score = relationScore(first, second);
-      if (score < RELATION_MIN_SCORE) continue;
+      const score = relationScore(first, second, baseline);
+      if (score === null || score < RELATION_MIN_SCORE) continue;
       const [sourceId, targetId] = [first.id, second.id].sort();
       store.relations.push({ source_id: sourceId, target_id: targetId, relation_type: "semantic", score, status: "suggested", updated_at: now() });
     }
@@ -523,42 +611,58 @@ function pruneSemanticRelations(store) {
 
 function rebuildSemanticRelationsFor(store, cardIds) {
   const changed = new Set(cardIds);
+  // Reuse the collection's measured range so a single edited card is scored on
+  // the same scale as everything already in the graph.
+  const baseline = store.semantic_baseline ?? semanticBaseline(store.cards.filter((card) => !card.deleted_at));
   store.relations = store.relations.filter((relation) => relation.relation_type !== "semantic" || (!changed.has(relation.source_id) && !changed.has(relation.target_id)));
   const activeCards = store.cards.filter((card) => !card.deleted_at);
+  // When both ends of a pair are in the changed set — which is every pair once
+  // a reindex touches the whole cabinet — the inner loop reaches it from both
+  // directions. The store's primary key hides that on write, so the duplicate
+  // only ever showed up in what the API served until the next restart.
+  const emitted = new Set(store.relations.map((relation) => relationKey(relation.source_id, relation.target_id, relation.relation_type)));
   for (const first of activeCards.filter((card) => changed.has(card.id))) {
     for (const second of activeCards) {
       if (first.id === second.id) continue;
-      const score = relationScore(first, second);
-      if (score < RELATION_MIN_SCORE) continue;
       const [sourceId, targetId] = [first.id, second.id].sort();
+      if (emitted.has(relationKey(sourceId, targetId, "semantic"))) continue;
+      const score = relationScore(first, second, baseline);
+      if (score === null || score < RELATION_MIN_SCORE) continue;
+      emitted.add(relationKey(sourceId, targetId, "semantic"));
       store.relations.push({ source_id: sourceId, target_id: targetId, relation_type: "semantic", score, status: "suggested", updated_at: now() });
     }
   }
   pruneSemanticRelations(store);
 }
 
-async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken = "" }) {
+/** Cards arriving from an older store may predate the category field. */
+function normalizeLoadedStore(store) {
+  store.cards = (store.cards || []).map((card) => ({
+    ...card,
+    category: String(card.category || card.topic || "待分類").trim(),
+  }));
+  store.relations = Array.isArray(store.relations) ? store.relations : [];
+  return store;
+}
+
+async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken = "", loadSeed = false, db }) {
+  if (!db.isEmpty()) {
+    const existing = normalizeLoadedStore(db.load());
+    if (migrateStore(existing)) db.replaceAll(existing);
+    return existing;
+  }
+
+  // First run against SQLite: adopt whatever the JSON store held. The JSON file
+  // is deliberately left in place — if this migration is wrong, the old data is
+  // still sitting there untouched.
   if (fs.existsSync(dataFile)) {
-    const existing = readJson(dataFile, null);
-    if (existing?.cards) {
-      existing.cards = existing.cards.map((card) => ({
-        ...card,
-        category: String(card.category || card.topic || "待分類").trim(),
-      }));
-      existing.relations = Array.isArray(existing.relations) ? existing.relations : [];
-      if (migrateStore(existing)) writeStore(dataFile, existing);
-      return existing;
-    }
-    const recovered = recoverStoreBackup(dataFile);
-    if (recovered?.cards) {
-      recovered.cards = recovered.cards.map((card) => ({
-        ...card,
-        category: String(card.category || card.topic || "待分類").trim(),
-      }));
-      recovered.relations = Array.isArray(recovered.relations) ? recovered.relations : [];
-      migrateStore(recovered);
-      writeStore(dataFile, recovered);
-      return recovered;
+    const legacy = readJson(dataFile, null) ?? recoverStoreBackup(dataFile);
+    if (legacy?.cards?.length) {
+      const adopted = normalizeLoadedStore(legacy);
+      migrateStore(adopted);
+      ensureCategories(adopted);
+      db.replaceAll(adopted);
+      return adopted;
     }
   }
 
@@ -573,10 +677,13 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken 
         if (Array.isArray(remoteCards) && remoteCards.length > 0) sourceCards = remoteCards;
       }
     } catch {
-      // Docker is optional; fall back to the bundled starter cards.
+      // The old service is optional; an empty cabinet is a fine starting point.
     }
   }
-  if (sourceCards.length === 0) sourceCards = readJson(seedPath, []);
+  // A fresh install starts empty. The sample cards ship with the app but are
+  // only loaded when something explicitly asks for them — a cabinet that
+  // arrives full of someone else's cards is not an empty cabinet.
+  if (sourceCards.length === 0 && loadSeed) sourceCards = readJson(seedPath, []);
 
   const store = {
     version: STORE_VERSION,
@@ -588,8 +695,29 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken 
   };
   ensureCategories(store);
   rebuildSemanticRelations(store);
-  writeStore(dataFile, store);
+  db.replaceAll(store);
   return store;
+}
+
+/**
+ * Give a card its vector, and record honestly when that could not be done.
+ *
+ * A failed embedding leaves the card without one rather than with a hash
+ * stand-in: search and relations then skip it, instead of scoring it against
+ * real vectors as though the result meant something. Clearing the model id is
+ * what lets reindexStore find the card and try again later.
+ */
+async function applyEmbedding(card, modelRuntime) {
+  try {
+    card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback: false });
+    card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
+  } catch {
+    card.embedding = null;
+    card.embedding_model_id = null;
+  }
+  card.cover = buildCover(coverVector(card));
+  card.embedding_source_hash = embeddingSourceHash(card);
+  return card;
 }
 
 async function reindexStore(store, modelRuntime, { allowFallback = false, progress } = {}) {
@@ -598,10 +726,16 @@ async function reindexStore(store, modelRuntime, { allowFallback = false, progre
   const cardsToUpdate = allCards.filter((card) => card.embedding_model_id !== currentModel || card.embedding_source_hash !== embeddingSourceHash(card));
   let completed = 0;
   for (const card of cardsToUpdate) {
-    card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
-    card.cover = buildCover(card.embedding);
-    card.embedding_model_id = currentModel;
-    card.embedding_source_hash = embeddingSourceHash(card);
+    if (allowFallback) {
+      card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
+      card.embedding_model_id = currentModel;
+      card.cover = buildCover(coverVector(card));
+      card.embedding_source_hash = embeddingSourceHash(card);
+    } else {
+      // One card the model chokes on must not abort the whole rebuild; it keeps
+      // a null model id and gets picked up by the next pass.
+      await applyEmbedding(card, modelRuntime);
+    }
     card.updated_at = now();
     completed += 1;
     progress?.(10 + Math.floor(completed / Math.max(1, cardsToUpdate.length) * 70), `已建立 ${completed}/${cardsToUpdate.length} 張卡片向量`);
@@ -661,17 +795,23 @@ function createApiServer(store, dataFile, modelRuntime, {
   taskManager,
   auditLogPath = "",
   corsOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"],
+  db,
 } = {}) {
-  const save = () => {
+  /**
+   * Persist the store. `changedCards` names the ids that were touched so only
+   * those rows are rewritten; calling it bare rewrites every card, which is
+   * correct but is exactly the cost this store was built to avoid.
+   */
+  const save = (changedCards) => {
     store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
     store.summary_model_id = modelRuntime.activeSummaryModelId();
-    writeStore(dataFile, store);
+    db.save(store, { cards: changedCards });
   };
   const getCard = (id, includeDeleted = false) => store.cards.find((card) => card.id === id && (includeDeleted || !card.deleted_at));
   const similarCards = (card) => store.cards
     .filter((candidate) => candidate.id !== card.id && !candidate.deleted_at)
-    .map((candidate) => ({ id: candidate.id, score: relationScore(card, candidate) }))
-    .filter((candidate) => candidate.score >= RELATION_MIN_SCORE)
+    .map((candidate) => ({ id: candidate.id, score: relationScore(card, candidate, store.semantic_baseline) }))
+    .filter((candidate) => candidate.score !== null && candidate.score >= RELATION_MIN_SCORE)
     .sort((first, second) => second.score - first.score)
     .slice(0, RELATION_LIMIT);
 
@@ -721,6 +861,8 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     const isPublic = segments[0] === "health" || segments[0] === "docs" || segments[0] === "openapi.json";
+    // Recorded on the request so the audit hook on response.end can read the
+    // actor we actually authenticated, not just guess from the header.
     let actor = "anonymous";
     if (!isPublic && authToken) {
       const authorization = String(request.headers.authorization || "");
@@ -732,6 +874,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       actor = "api-token";
     }
+    request.kccActor = actor;
 
     if (segments.length === 0 && isVersioned) {
       sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local", intended_use: "local desktop runtime", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset"] });
@@ -739,7 +882,9 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (request.method === "GET" && segments[0] === "health") {
-      sendJson(response, 200, { status: "ok", ...modelRuntime.health() });
+      // The data directory is reported so the app can show people where their
+      // cards actually live rather than leaving them to guess.
+      sendJson(response, 200, { status: "ok", data_dir: path.dirname(dataFile), ...modelRuntime.health() });
       return;
     }
 
@@ -799,12 +944,25 @@ function createApiServer(store, dataFile, modelRuntime, {
         validateImportedStore(payload);
         const strategy = String(payload.conflict_strategy || "replace");
         if (!["replace", "skip", "update"].includes(strategy)) throw new Error("不支援的匯入衝突策略");
+        // Written to disk, not just handed back: the old JSON store rotated a
+        // copy on every save, so replacing it must keep an explicit escape hatch.
         const backup = exportStore(store);
+        const backupFile = writeBackup(dataFile, backup, "before-import");
         const importedCards = payload.cards.map((rawCard) => {
           const card = normalizeCard(rawCard);
-          if (Array.isArray(rawCard.embedding) && rawCard.embedding.length === EMBEDDING_DIMENSIONS) card.embedding = rawCard.embedding.map(Number);
-          card.cover = rawCard.cover || rawCard.cover_data || buildCover(card.embedding);
-          card.embedding_model_id = rawCard.embedding_model_id || rawCard.embedding_model || modelRuntime.activeEmbeddingModelId();
+          // A backup taken with a different embedding model carries vectors of
+          // another width. Keeping them would mean this store held two
+          // incompatible kinds of vector at once, so they are dropped and the
+          // card is left for the reindex — which is why the model id is only
+          // carried over when the vector was.
+          const width = modelRuntime.expectedEmbeddingDimensions();
+          const usable = Array.isArray(rawCard.embedding) && rawCard.embedding.length > 0
+            && (!width || rawCard.embedding.length === width);
+          card.embedding = usable ? rawCard.embedding.map(Number) : null;
+          card.cover = rawCard.cover || rawCard.cover_data || buildCover(coverVector(card));
+          card.embedding_model_id = usable
+            ? (rawCard.embedding_model_id || rawCard.embedding_model || modelRuntime.activeEmbeddingModelId())
+            : null;
           card.embedding_source_hash = rawCard.embedding_source_hash || embeddingSourceHash(card);
           return card;
         });
@@ -825,8 +983,15 @@ function createApiServer(store, dataFile, modelRuntime, {
           updated_at: relation.updated_at || now(),
         }));
         ensureCategories(store);
-        save();
-        sendJson(response, 200, { status: "imported", imported: { cards: store.cards.length, relations: store.relations.length, deleted_cards: store.cards.filter((card) => card.deleted_at).length }, backup });
+        // Vectors from another runtime or another model are not carried over,
+        // so the imported cards arrive without one. Rebuilding here rather than
+        // waiting for the next restart is what keeps search working: a card
+        // with no vector is deliberately invisible to it.
+        const rebuilt = await reindexStore(store, modelRuntime, { allowFallback: false });
+        // An import replaces the working set wholesale, so rows that vanished
+        // have to be cleared rather than merely not rewritten.
+        db.replaceAll(store);
+        sendJson(response, 200, { status: "imported", imported: { cards: store.cards.length, relations: store.relations.length, deleted_cards: store.cards.filter((card) => card.deleted_at).length, reindexed_cards: rebuilt }, backup, backup_file: backupFile });
       } catch (error) {
         sendJson(response, 400, { detail: error instanceof Error ? error.message : String(error) });
       }
@@ -838,11 +1003,12 @@ function createApiServer(store, dataFile, modelRuntime, {
         const body = await readBody(request);
         if (body.confirmation !== "RESET DATABASE") throw new Error("請輸入 RESET DATABASE 才能重置本機資料庫。");
         const backup = exportStore(store);
+        const backupFile = writeBackup(dataFile, backup, "before-reset");
         const removed = { cards: store.cards.length, relations: store.relations.length };
         store.cards = [];
         store.relations = [];
-        save();
-        sendJson(response, 200, { status: "reset", removed, preserved: ["schema", "runtime_settings", "model_files"], backup });
+        db.replaceAll(store);
+        sendJson(response, 200, { status: "reset", removed, preserved: ["schema", "runtime_settings", "model_files"], backup, backup_file: backupFile });
       } catch (error) {
         sendJson(response, 400, { detail: error instanceof Error ? error.message : String(error) });
       }
@@ -1043,10 +1209,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = targetName;
-        card.embedding = await modelRuntime.embed(embeddingText(card));
-        card.cover = buildCover(card.embedding);
-        card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
-        card.embedding_source_hash = embeddingSourceHash(card);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         affected += 1;
       }
@@ -1078,10 +1241,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = target;
-        card.embedding = await modelRuntime.embed(embeddingText(card));
-        card.cover = buildCover(card.embedding);
-        card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
-        card.embedding_source_hash = embeddingSourceHash(card);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         affected += 1;
       }
@@ -1111,10 +1271,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         if (!card) continue;
         card.category = suggestion.suggested_category;
         card.tags = suggestion.suggested_tags;
-        card.embedding = await modelRuntime.embed(embeddingText(card));
-        card.cover = buildCover(card.embedding);
-        card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
-        card.embedding_source_hash = embeddingSourceHash(card);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         changedCards += 1;
       }
@@ -1137,6 +1294,9 @@ function createApiServer(store, dataFile, modelRuntime, {
       const tag = requestUrl.searchParams.get("tag") || "";
       const sort = requestUrl.searchParams.get("sort") || "relevance";
       const results = store.cards.filter((card) => !card.deleted_at)
+        // Only cards carrying a vector of the query's own width can be scored
+        // against it; the rest are waiting on a reindex.
+        .filter((card) => hasUsableEmbedding(card, queryVector.length))
         .filter((card) => !category || String(card.category).toLocaleLowerCase() === category.toLocaleLowerCase())
         .filter((card) => !tag || (card.tags || []).some((item) => String(item).toLocaleLowerCase() === tag.toLocaleLowerCase()))
         .map((card) => {
@@ -1180,7 +1340,18 @@ function createApiServer(store, dataFile, modelRuntime, {
           else if (String(relatedCard.topic).toLocaleLowerCase() === String(card.topic).toLocaleLowerCase()) reason = "同主題 + 語意相似";
         }
         return { relation_type: relation.relation_type, score: relation.score, status: relation.status, reason, created_at: relation.created_at || null, updated_at: relation.updated_at || null, card: relatedCard };
-      }).filter((relation) => relation.card).sort((first, second) => second.score - first.score);
+      }).filter((relation) => relation.card)
+        // A pair can hold both a hand-made relation and a suggested one. They
+        // are one neighbour, and the hand-made one is the answer — it was
+        // chosen, not inferred — so it wins ties rather than appearing twice.
+        .sort((first, second) => (second.score - first.score)
+          || (first.relation_type === "manual" ? -1 : second.relation_type === "manual" ? 1 : 0))
+        .filter((relation, index, all) => all.findIndex((other) => other.card.id === relation.card.id) === index)
+        .slice(0, RELATION_LIMIT);
+      // Capped like the server runtime: pruning bounds semantic edges per card,
+      // but a relation kept for its *other* endpoint still shows up here, and
+      // manual relations are not pruned at all. Without this slice one card can
+      // return far more edges than the canvas is laid out for.
       sendJson(response, 200, related.map((relation) => ({ ...relation, card: publicCard(relation.card) })));
       return;
     }
@@ -1194,7 +1365,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       card.deleted_at = null;
       card.updated_at = now();
       rebuildSemanticRelations(store);
-      save();
+      save([card.id]);
       sendJson(response, 200, { status: "restored", card: publicCard(card) });
       return;
     }
@@ -1210,7 +1381,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       const existing = store.relations.find((relation) => relationKey(relation.source_id, relation.target_id, relation.relation_type) === relationKey(sourceId, targetId, "manual"));
       if (existing) existing.status = "confirmed";
       else store.relations.push({ source_id: sourceId, target_id: targetId, relation_type: "manual", score: 1, status: "confirmed", created_at: now(), updated_at: now() });
-      save();
+      save([]);
       sendJson(response, 200, { source_id: sourceId, target_id: targetId, relation_type: "manual", score: 1, status: "confirmed" });
       return;
     }
@@ -1229,7 +1400,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         return;
       }
       store.relations.splice(index, 1);
-      save();
+      save([]);
       sendJson(response, 200, { status: "deleted", source_id: sourceId, target_id: targetId, relation_type: "manual" });
       return;
     }
@@ -1242,14 +1413,11 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const existing = store.cards.find((card) => card.id === String(body.id).trim());
       const card = normalizeCard(body, existing);
-      card.embedding = await modelRuntime.embed(embeddingText(card));
-      card.cover = buildCover(card.embedding);
-      card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
-      card.embedding_source_hash = embeddingSourceHash(card);
+      await applyEmbedding(card, modelRuntime);
       if (existing) Object.assign(existing, card);
       else store.cards.push(card);
       rebuildSemanticRelationsFor(store, [card.id]);
-      save();
+      save([card.id]);
       sendJson(response, 200, { card: publicCard(card), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(card) });
       return;
     }
@@ -1269,13 +1437,10 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const changes = await readBody(request);
       const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing);
-      card.embedding = await modelRuntime.embed(embeddingText(card));
-      card.cover = buildCover(card.embedding);
-      card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
-      card.embedding_source_hash = embeddingSourceHash(card);
+      await applyEmbedding(card, modelRuntime);
       Object.assign(existing, card);
       rebuildSemanticRelationsFor(store, [card.id]);
-      save();
+      save([card.id]);
       sendJson(response, 200, { card: publicCard(card), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(card) });
       return;
     }
@@ -1289,7 +1454,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       card.deleted_at = now();
       card.updated_at = now();
       rebuildSemanticRelations(store);
-      save();
+      save([card.id]);
       sendJson(response, 200, { status: "trashed", card: { ...publicCard(card), deleted_at: card.deleted_at } });
       return;
     }
@@ -1302,7 +1467,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       store.cards.splice(index, 1);
       store.relations = store.relations.filter((relation) => relation.source_id !== segments[1] && relation.target_id !== segments[1]);
-      save();
+      save([]);
       sendJson(response, 200, { status: "deleted", id: segments[1] });
       return;
     }
@@ -1314,25 +1479,41 @@ function createApiServer(store, dataFile, modelRuntime, {
     const requestOrigin = String(request.headers.origin || "");
     const allowOrigin = corsOrigins.includes("*") || corsOrigins.includes(requestOrigin) ? (requestOrigin || "*") : corsOrigins[0] || "";
     response.setHeader("Access-Control-Allow-Origin", allowOrigin);
+    const startedAt = Date.now();
     const originalEnd = response.end.bind(response);
     response.end = (...args) => {
-      appendAudit(auditLogPath, request, response.statusCode, request.headers.authorization ? "api-token" : "anonymous");
+      // A rejected request carries an Authorization header too, so trusting the
+      // header alone would log a failed attempt as an authenticated one.
+      appendAudit(auditLogPath, request, response.statusCode, request.kccActor ?? "anonymous", Date.now() - startedAt);
       return originalEnd(...args);
     };
     handle(request, response).catch((error) => sendJson(response, 500, { detail: error.message || "Local API error" }));
   });
 }
 
-async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromToken = "", modelsDir, port = 0, authToken = "", corsOrigins } = {}) {
+async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromToken = "", loadSeed = false, modelsDir, port = 0, authToken = "", corsOrigins } = {}) {
+  // The store is opened first so the model runtime can start out knowing the
+  // width the existing cards already use. Without that, a custom embedding API
+  // returning a different width after a restart would be adopted as the new
+  // truth instead of being rejected.
+  const db = openStore(dataFile);
   const modelRuntime = createModelRuntime({
     modelsDir: modelsDir || path.join(path.dirname(dataFile), "models"),
     hashEmbedding,
     templateDraft: draftFromContent,
+    apiDimensions: db.storedDimensions(),
   });
-  const store = await loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken });
+  const store = await loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken, loadSeed, db });
+  // Relations saved before scores became relative were measured on a different
+  // scale, so they cannot be compared with new ones. The missing baseline is
+  // what identifies them, and one rebuild puts the whole graph back on one scale.
+  const rescored = !store.semantic_baseline && store.cards.some((card) => hasUsableEmbedding(card));
+  if (rescored) rebuildSemanticRelations(store);
   const reindexedCards = await reindexStore(store, modelRuntime, { allowFallback: false });
-  if (reindexedCards > 0 || store.embedding_model_id !== modelRuntime.activeEmbeddingModelId()) {
-    writeStore(dataFile, store);
+  if (rescored || reindexedCards > 0 || store.embedding_model_id !== modelRuntime.activeEmbeddingModelId()) {
+    store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
+    store.summary_model_id = modelRuntime.activeSummaryModelId();
+    db.save(store);
   }
   const resolvedAuthToken = authToken || crypto.randomBytes(32).toString("hex");
   const taskManager = createTaskManager({ storagePath: path.join(path.dirname(dataFile), "tasks.json") });
@@ -1341,6 +1522,7 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
     taskManager,
     auditLogPath: path.join(path.dirname(dataFile), "audit.jsonl"),
     corsOrigins,
+    db,
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -1355,11 +1537,16 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
     authToken: resolvedAuthToken,
     modelRuntime,
     taskManager,
+    databaseFile: db.databaseFile,
     close: async () => {
       await taskManager.close();
       await new Promise((resolve) => server.close(() => resolve()));
+      db.close();
     },
   };
 }
 
-module.exports = { startLocalApi };
+// The vector helpers are exported for tests: they carry the invariants that
+// keep incompatible embeddings out of the store, and those are worth checking
+// directly rather than only through an HTTP round trip.
+module.exports = { startLocalApi, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline };

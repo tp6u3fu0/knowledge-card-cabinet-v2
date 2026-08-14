@@ -5,7 +5,8 @@ const path = require("node:path");
 
 const BUILTIN_SUMMARY_MODEL = "summary-template";
 const BUILTIN_EMBEDDING_MODEL = "embedding-hash-384";
-const EMBEDDING_DIMENSIONS = 384;
+/** Width of the built-in hash embedding. Not the width of every model. */
+const HASH_EMBEDDING_DIMENSIONS = 384;
 const SETTINGS_VERSION = 1;
 
 const MODEL_CATALOG = [
@@ -127,6 +128,26 @@ const MODEL_CATALOG = [
     description: "適合知識卡冊的中英文語意關聯；切換後會重新建立所有卡片的向量與關聯。",
     builtin: false,
   },
+  {
+    id: "embedding-bge-m3-1024",
+    kind: "embedding",
+    label: "BGE-M3",
+    short_label: "中文最佳",
+    provider: "transformers.js",
+    model_id: "Xenova/bge-m3",
+    task: "feature-extraction",
+    // q8 resolves to model_quantized.onnx (~570 MB) rather than the 2.3 GB
+    // fp32 weights — the difference between running on a Raspberry Pi and not.
+    dtype: "q8",
+    dimensions: 1024,
+    size_label: "約 570 MB",
+    download_size_bytes: 570_000_000,
+    min_memory_gb: 8,
+    tier: "平衡硬體",
+    languages: "中文、英文與多語言長文",
+    description: "1024 維、支援長文的多語言模型，中文語意關聯品質明顯優於 384 維模型。下載較大，切換後會重建所有卡片的向量與關聯。",
+    builtin: false,
+  },
 ];
 
 function readJson(filePath, fallback) {
@@ -154,8 +175,8 @@ function hardwareProfile() {
       memory_gb: roundedMemoryGb,
       cpu_cores: os.cpus().length,
       recommended_summary: "summary-mt5-small",
-      recommended_embedding: "embedding-multilingual-384",
-      note: "可以嘗試較完整的摘要模型與多語言 embedding。首次下載與重建索引會需要較久時間。",
+      recommended_embedding: "embedding-bge-m3-1024",
+      note: "可以嘗試較完整的摘要模型與 1024 維的 BGE-M3。首次下載與重建索引會需要較久時間。",
     };
   }
   if (memoryGb >= 8) {
@@ -180,14 +201,26 @@ function hardwareProfile() {
   };
 }
 
-function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
+function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimensions = 0 }) {
   const cacheDir = path.join(modelsDir, "transformers-cache");
   const settingsPath = path.join(modelsDir, "settings.json");
   fs.mkdirSync(cacheDir, { recursive: true });
 
+  // Learned from the first successful custom-API response, or seeded from the
+  // width the existing cards already use so a restart keeps the same contract.
+  let observedApiDimensions = Number(apiDimensions) || 0;
+
   const savedSettings = readJson(settingsPath, {});
   const savedCustom = savedSettings.custom && typeof savedSettings.custom === "object" ? savedSettings.custom : {};
   const savedSources = savedSettings.sources && typeof savedSettings.sources === "object" ? savedSettings.sources : {};
+
+  // Falling back to the built-in model is a real downgrade: every vector gets
+  // rebuilt at 384 dimensions and semantic search quietly gets worse. It has to
+  // be visible, so record it as a model error the settings page can surface.
+  const droppedEmbedding = savedSettings.embedding_model_id
+    && !MODEL_CATALOG.some((model) => model.id === savedSettings.embedding_model_id && model.kind === "embedding")
+    ? String(savedSettings.embedding_model_id)
+    : "";
   let settings = {
     version: SETTINGS_VERSION,
     summary_model_id: MODEL_CATALOG.some((model) => model.id === savedSettings.summary_model_id && model.kind === "summary")
@@ -223,6 +256,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
   const downloadPromises = new Map();
   const operationStates = new Map();
   const modelErrors = new Map();
+  if (droppedEmbedding) {
+    modelErrors.set("embedding-fallback", `找不到先前選用的 embedding 模型「${droppedEmbedding}」，已暫時改用內建模型。重新選擇模型即可恢復語意品質。`);
+  }
   let transformersPromise;
 
   function findModel(id) {
@@ -451,6 +487,8 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     }
     const previous = getActive(kind).id;
     const previousSource = settings.sources[kind];
+    // Switching to a local model retires whatever width the custom API used.
+    if (kind === "embedding") observedApiDimensions = 0;
     settings.sources[kind] = "local";
     if (kind === "summary") settings.summary_model_id = model.id;
     else settings.embedding_model_id = model.id;
@@ -497,7 +535,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
         api_format: settings.custom.embedding.api_format,
         model: settings.custom.embedding.model,
         api_key_set: Boolean(settings.custom.embedding.api_key),
-        dimensions: EMBEDDING_DIMENSIONS,
+        dimensions: expectedEmbeddingDimensions(),
       },
     };
   }
@@ -535,6 +573,10 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     delete nextEmbedding.api_key;
     const embeddingChanged = previous.sources.embedding !== settings.sources.embedding
       || JSON.stringify(previousEmbedding) !== JSON.stringify(nextEmbedding);
+    // Pointing at a different embedding API means the width recorded from the
+    // old one no longer applies; the caller rebuilds every vector after this,
+    // so the next response is free to set a new one.
+    if (embeddingChanged) observedApiDimensions = 0;
     saveSettings();
     return { embedding_changed: embeddingChanged, settings: settingsView() };
   }
@@ -564,6 +606,33 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     return response.json();
   }
 
+  /**
+   * Width every vector in the store is expected to have right now.
+   *
+   * A custom API does not announce its width, so the first successful response
+   * sets it and later ones must agree — otherwise swapping the API behind the
+   * app's back would quietly mix incompatible vectors together.
+   */
+  function expectedEmbeddingDimensions() {
+    if (settings.sources.embedding === "api") return observedApiDimensions;
+    const model = getActive("embedding");
+    return model.builtin ? HASH_EMBEDDING_DIMENSIONS : Number(model.dimensions || 0);
+  }
+
+  /**
+   * The hash embedding is a different *kind* of vector, not a smaller one:
+   * mixing it into a store built by a real model produces similarity scores
+   * that look plausible and mean nothing. So it is only ever an acceptable
+   * substitute when it is already the active embedding.
+   */
+  function fallbackOrThrow(text, error, allowFallback) {
+    const expected = expectedEmbeddingDimensions();
+    if (allowFallback && expected === HASH_EMBEDDING_DIMENSIONS && settings.sources.embedding !== "api") {
+      return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
+    }
+    throw error;
+  }
+
   async function embed(text, { allowFallback = true } = {}) {
     if (settings.sources.embedding === "api") {
       try {
@@ -571,20 +640,21 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
         const vector = settings.custom.embedding.api_format === "tei"
           ? payload?.[0]
           : payload?.data?.[0]?.embedding;
-        if (!Array.isArray(vector) || vector.length !== EMBEDDING_DIMENSIONS) {
-          throw new Error(`embedding 維度不符：取得 ${vector?.length || 0}，預期 ${EMBEDDING_DIMENSIONS}`);
+        if (!Array.isArray(vector) || vector.length === 0) throw new Error("embedding API 沒有回傳向量");
+        if (observedApiDimensions && vector.length !== observedApiDimensions) {
+          throw new Error(`embedding 維度不符：取得 ${vector.length}，此資料庫使用 ${observedApiDimensions}`);
         }
         const numeric = vector.map(Number);
         if (numeric.some((value) => !Number.isFinite(value))) throw new Error("embedding 回傳了非數字內容");
+        observedApiDimensions = numeric.length;
         return numeric;
       } catch (error) {
         modelErrors.set("custom-embedding", error instanceof Error ? error.message : String(error));
-        if (!allowFallback) throw error;
-        return hashEmbedding(text);
+        return fallbackOrThrow(text, error, allowFallback);
       }
     }
     const model = getActive("embedding");
-    if (model.builtin) return hashEmbedding(text);
+    if (model.builtin) return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
     try {
       const extractor = await loadPipeline(model);
       const output = await extractor(String(text || ""), { pooling: "mean", normalize: true });
@@ -593,8 +663,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
       return vector;
     } catch (error) {
       modelErrors.set(model.id, error instanceof Error ? error.message : String(error));
-      if (!allowFallback) throw error;
-      return hashEmbedding(text);
+      return fallbackOrThrow(text, error, allowFallback);
     }
   }
 
@@ -684,12 +753,12 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     return {
       embedding_model: settings.sources.embedding === "api" ? customEmbedding.model : embedding.id,
       embedding_provider: settings.sources.embedding === "api" ? (customEmbedding.api_format === "tei" ? "api-tei" : "api-openai") : embedding.provider,
-      embedding_dimensions: EMBEDDING_DIMENSIONS,
+      embedding_dimensions: expectedEmbeddingDimensions(),
       semantic_mode: settings.sources.embedding === "api" || !embedding.builtin,
       summary_provider: settings.sources.summary === "api" ? "api-openai" : summary.provider,
       summary_model: settings.sources.summary === "api" ? customSummary.model : summary.id,
       summary_status: settings.sources.summary === "api" ? "ready" : describeModel(summary).status,
-      model_error: modelErrors.get("custom-embedding") || modelErrors.get(summary.id) || modelErrors.get(embedding.id) || "",
+      model_error: modelErrors.get("embedding-fallback") || modelErrors.get("custom-embedding") || modelErrors.get(summary.id) || modelErrors.get(embedding.id) || "",
     };
   }
 
@@ -706,6 +775,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft }) {
     settingsState,
     restoreSettingsState,
     health,
+    expectedEmbeddingDimensions,
     getActive: (kind) => getActive(kind),
     activeEmbeddingModelId: () => settings.sources.embedding === "api" ? `custom-api:${settings.custom.embedding.model}` : getActive("embedding").id,
     activeSummaryModelId: () => settings.sources.summary === "api" ? `custom-api:${settings.custom.summary.model}` : getActive("summary").id,

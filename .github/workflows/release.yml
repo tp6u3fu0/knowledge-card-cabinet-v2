@@ -22,9 +22,6 @@ jobs:
       - run: npm test
       - run: npm run verify:runtime
       - run: npm run desktop:dist
-        env:
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*

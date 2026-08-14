@@ -12,4 +12,10 @@ contextBridge.exposeInMainWorld("desktopStatus", {
   openDocs() {
     return ipcRenderer.invoke("desktop:open-docs");
   },
+  dataDir() {
+    return ipcRenderer.invoke("desktop:data-dir");
+  },
+  openDataDir() {
+    return ipcRenderer.invoke("desktop:open-data-dir");
+  },
 });

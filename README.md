@@ -89,6 +89,35 @@ npm run desktop:dist
 
 安裝包會輸出到 `release/`。桌面版預設使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型及自訂 API 設定。
 
+## 常駐主機版（樹莓派、家用伺服器）
+
+同一份 runtime 也可以不透過 Electron 執行，適合放在一台常開的機器上，讓手機或其他電腦連進來。不需要 PostgreSQL，也不需要 Python 服務。
+
+```bash
+npm ci && npm run build
+KCC_DATA_DIR=~/kcc-data npm run serve
+```
+
+或用容器（`node:22-bookworm-slim` 有 arm64，樹莓派 4／5 可直接建置）：
+
+```bash
+docker build -f Dockerfile.standalone -t knowledge-card-cabinet .
+docker run -d --name kcc -p 3000:3000 -v kcc-data:/data \
+  -e KCC_HOST=0.0.0.0 -e KCC_API_TOKEN=請換成自己的字串 knowledge-card-cabinet
+```
+
+| 環境變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `KCC_DATA_DIR` | `./data` | `cards.db`、備份與稽核記錄的位置 |
+| `KCC_MODELS_DIR` | `<data>/models` | 模型快取 |
+| `KCC_HOST` | `127.0.0.1` | 介面監聽位址 |
+| `KCC_PORT` | `3000` | 介面連接埠 |
+| `KCC_API_TOKEN` | 每次啟動隨機產生 | 固定 API 權杖 |
+
+> **對外開放前請先讀這段。** 本機 API 只監聽 loopback，由前端在伺服器端代理，權杖不會經過網路。但**介面本身沒有登入機制**，所以把 `KCC_HOST` 設成 `0.0.0.0` 等於讓所有能連到這個埠的人都能讀寫你的卡片。請只在私人網路使用（例如 Tailscale、WireGuard），不要直接對公網開放。
+
+Alpine 映像檔不適用：embedding 模型依賴的 `onnxruntime-node` 只提供 glibc 預編譯檔，在 musl 上會安裝失敗。
+
 ## 本機 AI 與模型
 
 新增卡片時，可以貼上筆記，讓摘要模型產生標題、問題、摘要與標籤草稿，確認後再寫入資料庫。embedding 會在新增或編輯卡片後重新建立，並更新語意關聯與封面。

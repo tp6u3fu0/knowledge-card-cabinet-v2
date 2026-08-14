@@ -28,6 +28,47 @@ function seedPath() {
     : path.join(__dirname, "..", "backend", "seed.json");
 }
 
+/**
+ * Where the cabinet's cards live.
+ *
+ * Documents rather than the hidden AppData folder: this is the user's own
+ * content, they should be able to find it, back it up, or drop it in a synced
+ * folder without hunting through %APPDATA%. Model files stay in AppData because
+ * they are a re-downloadable cache, not something worth backing up.
+ */
+function dataDirectory() {
+  if (process.env.KCC_DATA_DIR) return process.env.KCC_DATA_DIR;
+  return path.join(app.getPath("documents"), "知識卡冊");
+}
+
+/** The pre-Documents location, kept only so existing cabinets can be found. */
+function legacyDataDirectory() {
+  return path.join(app.getPath("userData"), "data");
+}
+
+/**
+ * Move an existing cabinet to the Documents folder the first time the app runs
+ * after the default changed. The old copy is left where it was: if anything
+ * about this is wrong, the data is still sitting there.
+ */
+function adoptLegacyData(target) {
+  const legacy = legacyDataDirectory();
+  if (!fs.existsSync(legacy) || fs.existsSync(path.join(target, "cards.db"))) return;
+
+  const carried = ["cards.db", "cards.db-wal", "cards.db-shm", "cards.json"]
+    .filter((name) => fs.existsSync(path.join(legacy, name)));
+  if (carried.length === 0) return;
+
+  fs.mkdirSync(target, { recursive: true });
+  for (const name of carried) fs.copyFileSync(path.join(legacy, name), path.join(target, name));
+  fs.writeFileSync(
+    path.join(legacy, "MOVED.txt"),
+    `這個資料夾的卡片已於 ${new Date().toISOString()} 複製到：\n${target}\n\n`
+    + "程式現在讀取上面那個位置。這裡的檔案保留作為備份，確認新位置沒問題後即可刪除。\n",
+    "utf8",
+  );
+}
+
 function runtimeManifestPath() {
   return path.join(app.getPath("appData"), "Knowledge Card Cabinet", "runtime.json");
 }
@@ -151,12 +192,17 @@ async function startServices() {
   startupPromise = (async () => {
     sendStatus("checking", "正在準備本機資料空間…");
     removeRuntimeManifest();
-    const dataFile = path.join(app.getPath("userData"), "data", "cards.json");
+    const dataDir = dataDirectory();
+    // Only the default location inherits the old cabinet. Someone who names a
+    // directory explicitly is asking for that directory, not for a copy of
+    // whatever happened to be in AppData.
+    if (!process.env.KCC_DATA_DIR) adoptLegacyData(dataDir);
     localApiRuntime = await startLocalApi({
-      dataFile,
-      modelsDir: path.join(app.getPath("userData"), "models"),
+      dataFile: path.join(dataDir, "cards.json"),
+      // Models are a cache, so they stay out of the user's Documents folder.
+      modelsDir: process.env.KCC_MODELS_DIR || path.join(app.getPath("userData"), "models"),
       seedPath: seedPath(),
-      migrateFromUrl: process.env.KCC_LEGACY_API_URL || "http://127.0.0.1:8000",
+      migrateFromUrl: process.env.KCC_LEGACY_API_URL || "",
       migrateFromToken: process.env.KCC_LEGACY_API_TOKEN || process.env.KCC_API_TOKEN || "",
     });
     writeRuntimeManifest(localApiRuntime);
@@ -200,6 +246,8 @@ function createWindow() {
 
 ipcMain.handle("desktop:retry", () => startServices());
 ipcMain.handle("desktop:open-docs", () => shell.openExternal(`${localApiRuntime?.baseUrl || "http://127.0.0.1:8000"}/docs`));
+ipcMain.handle("desktop:data-dir", () => dataDirectory());
+ipcMain.handle("desktop:open-data-dir", () => shell.openPath(dataDirectory()));
 
 if (isMcpProcess) {
   require("./mcp-server.cjs");

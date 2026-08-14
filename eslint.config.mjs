@@ -8,13 +8,19 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 const eslintConfig = defineConfig([
+  // Flat config does not read .gitignore, so build output and scratch dirs that
+  // git already ignores have to be listed again here or eslint walks into
+  // bundled vendor code and reports thousands of errors nobody can act on.
   globalIgnores([
     ".next/**",
+    ".vinext/**",
+    ".wrangler/**",
     "dist/**",
     "out/**",
     "build/**",
-    "release/**",
-    "release-test/**",
+    "release*/**",
+    "work/**",
+    "outputs/**",
     "next-env.d.ts",
   ]),
   eslint.configs.recommended,
