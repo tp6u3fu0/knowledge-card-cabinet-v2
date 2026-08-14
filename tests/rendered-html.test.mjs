@@ -243,7 +243,9 @@ test("desktop packaging points to the local runtime", async () => {
   const desktopPackage = JSON.parse(await readFile(new URL("../desktop/package.json", import.meta.url), "utf8"));
   assert.match(modelRuntime, /@huggingface\/transformers/);
   assert.match(modelRuntime, /app\.asar\.unpacked/);
-  assert.equal(desktopPackage.dependencies["site-creator-vinext-starter"], undefined);
+  // The desktop package must not pull the whole web project in as a dependency;
+  // it consumes the built frontend, not its sources.
+  assert.equal(desktopPackage.dependencies["knowledge-card-cabinet"], undefined);
 });
 
 test("collection success notices are transient", async () => {

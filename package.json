@@ -1,5 +1,5 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "knowledge-card-cabinet",
   "version": "0.1.0",
   "private": true,
   "description": "知識卡冊桌面應用程式",
@@ -23,17 +23,14 @@
     "test:api": "node --test tests/api-contract.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs",
     "verify:runtime": "node tests/runtime-contract.mjs",
     "release:check": "node scripts/release-check.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "drizzle-orm": "0.45.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
     "@eslint/js": "9.39.4",
     "@next/eslint-plugin-next": "16.2.6",
     "@tailwindcss/postcss": "4.2.1",
@@ -42,7 +39,6 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
-    "drizzle-kit": "0.31.10",
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
     "eslint": "9.39.4",
