@@ -4,6 +4,11 @@
   "private": true,
   "description": "知識卡冊桌面應用程式",
   "author": "Knowledge Card Cabinet",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tp6u3fu0/knowledge-card-cabinet-v2.git"
+  },
   "main": "desktop/main.cjs",
   "engines": {
     "node": ">=22.13.0"

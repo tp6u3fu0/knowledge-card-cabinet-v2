@@ -22,8 +22,15 @@ extraResources:
 win:
   target:
     - nsis
+  # Generated from public/favicon.svg by scripts/build-icon.mjs and committed,
+  # so a plain `npm run desktop:dist` needs no extra step. Paths here resolve
+  # against the repo root, like the extraResources entries above.
+  icon: build/icon.ico
   artifactName: "KnowledgeCardCabinet-${version}-Setup.${ext}"
 nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

@@ -229,6 +229,9 @@ function createWindow() {
     minHeight: 720,
     backgroundColor: "#f3f0e9",
     show: false,
+    // Packaged builds take the icon from the .exe. This only matters for
+    // `npm run desktop:dev`, which would otherwise show Electron's own logo.
+    ...(app.isPackaged ? {} : { icon: path.join(__dirname, "..", "build", "icon.ico") }),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

@@ -191,3 +191,7 @@ Installer 與後續自動更新功能的發佈基礎。
 ## 專案文件
 
 - [`desktop/README.md`](desktop/README.md)：桌面版模型、安裝包與 MCP 詳細說明
+
+## 授權
+
+MIT License，詳見 [`LICENSE`](LICENSE)。

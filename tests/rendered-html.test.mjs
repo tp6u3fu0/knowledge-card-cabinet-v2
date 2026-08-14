@@ -239,6 +239,10 @@ test("desktop packaging points to the local runtime", async () => {
   assert.match(builder, /asarUnpack:[\s\S]*onnxruntime-common/);
   assert.match(builder, /asarUnpack:[\s\S]*sharp/);
   assert.doesNotMatch(builder, /kcc-runtime|docker-compose/);
+  // Without an icon the installer and the .exe ship Electron's default logo,
+  // which is the first thing anyone downloading a release would notice.
+  assert.match(builder, /icon: build\/icon\.ico/);
+  await access(new URL("../build/icon.ico", import.meta.url));
   const modelRuntime = await readFile(new URL("../desktop/model-runtime.cjs", import.meta.url), "utf8");
   const desktopPackage = JSON.parse(await readFile(new URL("../desktop/package.json", import.meta.url), "utf8"));
   assert.match(modelRuntime, /@huggingface\/transformers/);
@@ -246,6 +250,26 @@ test("desktop packaging points to the local runtime", async () => {
   // The desktop package must not pull the whole web project in as a dependency;
   // it consumes the built frontend, not its sources.
   assert.equal(desktopPackage.dependencies["knowledge-card-cabinet"], undefined);
+});
+
+test("the README only documents scripts that exist", async () => {
+  // Documentation is the one part of the project no other test covers, so it
+  // quietly fell behind the code more than once.
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const readmes = await Promise.all(
+    ["../README.md", "../desktop/README.md"].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
+  );
+
+  const documented = new Set(
+    readmes.flatMap((text) => [...text.matchAll(/npm run ([a-z][a-z:]*)/g)].map((match) => match[1])),
+  );
+  assert.ok(documented.size > 0);
+  for (const script of documented) {
+    assert.ok(manifest.scripts[script], `README documents "npm run ${script}", which package.json does not define`);
+  }
+
+  assert.equal(manifest.license, "MIT");
+  await access(new URL("../LICENSE", import.meta.url));
 });
 
 test("collection success notices are transient", async () => {
