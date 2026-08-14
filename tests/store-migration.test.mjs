@@ -48,7 +48,7 @@ async function migrate(store) {
   const runtime = await startLocalApi({
     dataFile,
     modelsDir: join(root, "models"),
-    seedPath: join(process.cwd(), "backend", "seed.json"),
+    seedPath: join(process.cwd(), "desktop", "seed.json"),
     migrateFromUrl: "",
   });
   const headers = { Authorization: `Bearer ${runtime.authToken}` };
@@ -134,7 +134,7 @@ test("migrates once, then leaves the JSON file behind", async (t) => {
   const reopened = await startLocalApi({
     dataFile,
     modelsDir: join(root, "models"),
-    seedPath: join(process.cwd(), "backend", "seed.json"),
+    seedPath: join(process.cwd(), "desktop", "seed.json"),
     migrateFromUrl: "",
   });
   t.after(async () => {
@@ -153,7 +153,7 @@ async function freshRuntime(overrides = {}) {
   const runtime = await startLocalApi({
     dataFile: join(root, "cards.json"),
     modelsDir: join(root, "models"),
-    seedPath: join(process.cwd(), "backend", "seed.json"),
+    seedPath: join(process.cwd(), "desktop", "seed.json"),
     migrateFromUrl: "",
     ...overrides,
   });

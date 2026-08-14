@@ -77,7 +77,7 @@ before(async () => {
   runtime = await startLocalApi({
     dataFile: join(root, "cards.json"),
     modelsDir: join(root, "models"),
-    seedPath: join(process.cwd(), "backend", "seed.json"),
+    seedPath: join(process.cwd(), "desktop", "seed.json"),
     migrateFromUrl: "",
   });
   base = `${runtime.baseUrl}/api/v1`;
@@ -233,6 +233,24 @@ describe("search", () => {
     const results = await ok("GET", "/search?q=效能&tag=索引&limit=10");
     assert.ok(results.every((card) => card.tags.includes("索引")));
     assert.ok(results.every((card) => card.search_reasons.includes("共享標籤")));
+  });
+
+  it("marks 語意相似 relative to the query, not against a fixed cosine", async () => {
+    // A strong model scores every card in a narrow high band, so a fixed
+    // threshold labels either all of the results or none. The label is only
+    // useful if it distinguishes within a single query's own results — which
+    // needs enough cards for the query to have a distribution at all.
+    for (let index = 0; index < 8; index += 1) {
+      await ok("POST", "/cards", cardInput(`spread-${index}`, {
+        title: `索引與查詢效能 ${index}`,
+        detail: index % 2 === 0 ? "索引讓查詢跳過整表掃描。" : "完全不相干的內容，講的是天氣。",
+      }));
+    }
+    const results = await ok("GET", "/search?q=索引與查詢效能&limit=20");
+    assert.ok(results.length > 2, "need several results to compare against");
+    const labelled = results.filter((card) => card.search_reasons.includes("語意相似"));
+    assert.ok(labelled.length > 0, "something must qualify");
+    assert.ok(labelled.length < results.length, "but not everything can qualify");
   });
 
   it("honours the limit", async () => {

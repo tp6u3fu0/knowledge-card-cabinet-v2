@@ -85,7 +85,7 @@ test("local API exposes separate summary and embedding model choices", async (co
   const runtime = await startLocalApi({
     dataFile: join(root, "cards.json"),
     modelsDir: join(root, "models"),
-    seedPath: join(projectRoot, "backend", "seed.json"),
+    seedPath: join(projectRoot, "desktop", "seed.json"),
     migrateFromUrl: "",
   });
   context.after(async () => {
@@ -140,7 +140,7 @@ test("local API exposes background task status routes", async (context) => {
   const runtime = await startLocalApi({
     dataFile: join(root, "cards.json"),
     modelsDir: join(root, "models"),
-    seedPath: join(projectRoot, "backend", "seed.json"),
+    seedPath: join(projectRoot, "desktop", "seed.json"),
     migrateFromUrl: "",
   });
   context.after(async () => {
@@ -172,8 +172,10 @@ test("local API enforces auth and validates versioned backups", async (context) 
   const runtime = await startLocalApi({
     dataFile: join(root, "cards.json"),
     modelsDir: join(root, "models"),
-    seedPath: join(projectRoot, "backend", "seed.json"),
+    seedPath: join(projectRoot, "desktop", "seed.json"),
     migrateFromUrl: "",
+    // A fresh cabinet is empty, and this test needs a card to tamper with.
+    loadSeed: true,
   });
   context.after(async () => {
     await runtime.close();
@@ -230,7 +232,9 @@ test("desktop packaging points to the local runtime", async () => {
   assert.match(main, /ELECTRON_RUN_AS_NODE/);
   assert.doesNotMatch(main, /docker compose|Docker Desktop/);
   assert.match(builder, /kcc-web\/dist/);
-  assert.match(builder, /kcc-data\/seed\.json/);
+  // seed.json now ships inside the asar with the rest of desktop/, so it is
+  // deliberately no longer an extraResource.
+  assert.doesNotMatch(builder, /kcc-data/);
   assert.match(builder, /asarUnpack:[\s\S]*onnxruntime-node/);
   assert.match(builder, /asarUnpack:[\s\S]*onnxruntime-common/);
   assert.match(builder, /asarUnpack:[\s\S]*sharp/);
@@ -240,29 +244,6 @@ test("desktop packaging points to the local runtime", async () => {
   assert.match(modelRuntime, /@huggingface\/transformers/);
   assert.match(modelRuntime, /app\.asar\.unpacked/);
   assert.equal(desktopPackage.dependencies["site-creator-vinext-starter"], undefined);
-});
-
-test("Docker backend keeps the shared model-management contract", async () => {
-  const backendMain = await readFile(new URL("../backend/app/main.py", import.meta.url), "utf8");
-  const backendRuntime = await readFile(new URL("../backend/app/model_runtime.py", import.meta.url), "utf8");
-  const syncGuide = await readFile(new URL("../DEVELOPMENT_SYNC.md", import.meta.url), "utf8");
-
-  assert.match(backendMain, /@app\.get\("\/models"/);
-  assert.match(backendMain, /@app\.post\("\/models\/select"/);
-  assert.match(backendMain, /@app\.get\("\/tasks"/);
-  assert.match(backendMain, /@app\.post\("\/tasks\/\{task_id\}\/cancel"/);
-  assert.match(backendMain, /@app\.post\("\/tasks\/\{task_id\}\/retry"/);
-  assert.match(backendMain, /@app\.get\("\/models\/\{model_id\}\/inspect"/);
-  assert.match(backendMain, /@app\.delete\("\/models\/\{model_id\}"/);
-  assert.match(backendMain, /task_id/);
-  assert.match(backendMain, /reindex_cards/);
-  assert.match(backendRuntime, /download_size_bytes/);
-  assert.match(backendRuntime, /def inspect\(/);
-  assert.match(backendRuntime, /def remove\(/);
-  assert.match(backendRuntime, /summary-qwen-0\.5b/);
-  assert.match(backendRuntime, /embedding-qwen-0\.6b/);
-  assert.match(syncGuide, /Docker 版作為主要開發/);
-  assert.match(syncGuide, /POST \/models\/select/);
 });
 
 test("collection success notices are transient", async () => {

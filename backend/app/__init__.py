@@ -1,1 +1,0 @@
-"""Knowledge card backend package."""

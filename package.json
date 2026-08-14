@@ -20,7 +20,6 @@
     "test": "npm run test:unit && npm run test:api && npm run build && node --test tests/rendered-html.test.mjs",
     "test:unit": "node --test --experimental-strip-types tests/flip-math.test.mjs",
     "test:api": "node --test tests/api-contract.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs",
-    "test:backend": "python -m unittest discover -s backend/tests",
     "verify:runtime": "node tests/runtime-contract.mjs",
     "release:check": "node scripts/release-check.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",

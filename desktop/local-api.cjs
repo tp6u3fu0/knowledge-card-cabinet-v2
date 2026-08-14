@@ -135,6 +135,15 @@ function comparable(first, second) {
  * Sampled rather than exhaustive because a full pass is O(n²) and the shape of
  * the distribution settles long before every pair has been counted.
  */
+function scoreRange(scores) {
+  if (scores.length < 6) return null;
+  const sorted = [...scores].sort((a, b) => a - b);
+  const lo = sorted[Math.floor(sorted.length * 0.5)];
+  const hi = sorted[Math.floor(sorted.length * 0.99)];
+  // Values packed into a single point have no spread to normalise against.
+  return hi - lo < 0.01 ? null : { lo, hi };
+}
+
 function semanticBaseline(cards) {
   const usable = cards.filter((card) => hasUsableEmbedding(card));
   if (usable.length < 4) return null;
@@ -148,13 +157,7 @@ function semanticBaseline(cards) {
       }
     }
   }
-  if (scores.length < 6) return null;
-
-  scores.sort((a, b) => a - b);
-  const lo = scores[Math.floor(scores.length * 0.5)];
-  const hi = scores[Math.floor(scores.length * 0.99)];
-  // A collection of near-identical cards has no spread to normalise against.
-  return hi - lo < 0.01 ? null : { lo, hi };
+  return scoreRange(scores);
 }
 
 /** Where this pair sits in the collection's own range of similarity. */
@@ -1299,17 +1302,26 @@ function createApiServer(store, dataFile, modelRuntime, {
         .filter((card) => hasUsableEmbedding(card, queryVector.length))
         .filter((card) => !category || String(card.category).toLocaleLowerCase() === category.toLocaleLowerCase())
         .filter((card) => !tag || (card.tags || []).some((item) => String(item).toLocaleLowerCase() === tag.toLocaleLowerCase()))
-        .map((card) => {
-        const semantic = cosine(queryVector, card.embedding);
-        const keyword = keywordScore(card, query);
+        .map((card) => ({ card, semantic: cosine(queryVector, card.embedding), keyword: keywordScore(card, query) }));
+
+      // A query's similarities sit in their own band — lower than card-to-card,
+      // and narrower still for a strong model — so "語意相似" has to mean "high
+      // for this query", not a fixed cosine. Against BGE-M3 a fixed 0.65 either
+      // labelled every result or none of them.
+      const queryRange = scoreRange(results.map((entry) => entry.semantic));
+
+      const scored = results.map(({ card, semantic, keyword }) => {
+        const relative = relativeSemantic(semantic, queryRange);
         const reasons = [];
         if (keyword > 0) reasons.push("關鍵字命中");
-        if (semantic >= 0.65) reasons.push("語意相似");
+        // Too few results to have a distribution means there is no honest way
+        // to say a card stands out, so the label is simply withheld.
+        if (queryRange && relative >= 0.5) reasons.push("語意相似");
         if (category) reasons.push("同分類");
         if (tag) reasons.push("共享標籤");
-        return { card, score: (1 - KEYWORD_WEIGHT) * semantic + KEYWORD_WEIGHT * keyword, reasons };
+        return { card, score: (1 - KEYWORD_WEIGHT) * relative + KEYWORD_WEIGHT * keyword, reasons };
       }).sort((first, second) => sort === "updated" ? String(second.card.updated_at).localeCompare(String(first.card.updated_at)) : sort === "title" ? first.card.title.localeCompare(second.card.title) : second.score - first.score).slice(0, limit);
-      sendJson(response, 200, results.map(({ card, score, reasons }) => publicCard(card, score, reasons)));
+      sendJson(response, 200, scored.map(({ card, score, reasons }) => publicCard(card, score, reasons)));
       return;
     }
 

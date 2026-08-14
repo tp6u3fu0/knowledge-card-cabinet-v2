@@ -36,22 +36,14 @@ const root = await mkdtemp(join(tmpdir(), "kcc-runtime-contract-"));
 const desktop = await startLocalApi({
   dataFile: join(root, "cards.json"),
   modelsDir: join(root, "models"),
-  seedPath: join(process.cwd(), "backend", "seed.json"),
+  seedPath: join(process.cwd(), "desktop", "seed.json"),
   migrateFromUrl: "",
 });
 
 try {
   await assertRuntimeContract("desktop", desktop.baseUrl, "/api/v1", { Authorization: `Bearer ${desktop.authToken}` });
 
-  const dockerBase = process.env.KCC_DOCKER_API_URL ?? "http://127.0.0.1:8000";
-  try {
-    const dockerToken = process.env.KCC_DOCKER_API_TOKEN ?? process.env.KCC_API_TOKEN ?? "kcc-local-dev-token";
-    await assertRuntimeContract("docker", dockerBase, "/api/v1", { Authorization: `Bearer ${dockerToken}` });
-    console.log(`Shared runtime contract passed: desktop + ${dockerBase}`);
-  } catch (error) {
-    if (process.env.KCC_REQUIRE_DOCKER === "1") throw error;
-    console.log(`Shared desktop contract passed; Docker check skipped (${error instanceof Error ? error.message : String(error)})`);
-  }
+  console.log("Runtime contract passed: embedded Node runtime");
 } finally {
   await desktop.close();
   await rm(root, { recursive: true, force: true });

@@ -19,8 +19,6 @@ extraResources:
     to: kcc-web/dist
   - from: public
     to: kcc-web/public
-  - from: backend/seed.json
-    to: kcc-data/seed.json
 win:
   target:
     - nsis

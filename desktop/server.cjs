@@ -81,7 +81,7 @@ async function main() {
   const runtime = await startLocalApi({
     dataFile: path.join(dataDir, "cards.json"),
     modelsDir,
-    seedPath: path.join(root, "backend", "seed.json"),
+    seedPath: path.join(__dirname, "seed.json"),
     migrateFromUrl: process.env.KCC_LEGACY_API_URL || "",
     migrateFromToken: process.env.KCC_LEGACY_API_TOKEN || "",
     authToken: process.env.KCC_API_TOKEN || "",

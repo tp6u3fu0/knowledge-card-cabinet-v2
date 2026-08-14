@@ -3,7 +3,7 @@
 這是知識卡冊的獨立桌面應用程式。它會：
 
 1. 啟動內嵌的本機 API 與前端 standalone server。
-2. 將卡片資料保存到 Electron userData 資料夾，不依賴 Docker 或 PostgreSQL。
+2. 將卡片資料保存到「文件\知識卡冊」的本機 SQLite，模型快取留在 Electron userData。
 3. 第一次啟動時，若偵測到舊版 `localhost:8000` API，會嘗試匯入現有卡片。
 4. 沒有舊服務時，使用安裝包內的 starter cards 建立本機資料。
 
@@ -16,14 +16,14 @@ npm install
 npm run desktop:dev
 ```
 
-桌面版不需要 Docker Desktop。Docker Compose 仍保留在專案根目錄，供開發者啟動完整 Python、PostgreSQL/pgvector 與 Qwen 模型環境。
+桌面版不需要任何外部服務：資料存在本機 SQLite，模型在本機 CPU 上執行。
 
 獨立桌面模式預設使用內建的輕量本機向量與欄位整理 runtime，優先確保安裝後可以離線開啟、保存、搜尋、關聯、編輯與管理卡片。收藏頁的「模型設定」可以依硬體下載並啟用更完整的本機模型：
 
 - 摘要：內建規則整理、LaMini-Flan-T5 248M、FLAN-T5 Small，以及較適合中文但較大的 mT5 Small。
 - Embedding：內建 Hash 384、all-MiniLM-L6-v2，以及中文／英文較適合的 Multilingual MiniLM。
 
-模型使用 Transformers.js／ONNX runtime 在本機 CPU 執行，不會把卡片內容送到外部 API。模型檔案會放在 Electron `userData/models`，卡片向量會依目前啟用的 embedding 模型重建。完整 Qwen embedding／摘要模型仍可透過 Docker 開發環境使用。
+模型使用 Transformers.js／ONNX runtime 在本機 CPU 執行，不會把卡片內容送到外部 API。模型檔案會放在 Electron `userData/models`，卡片向量會依目前啟用的 embedding 模型重建。
 
 桌面本機 API 只監聽 `127.0.0.1`，所有非公開路徑都需要 runtime manifest 中的隨機 Bearer
 Token；回應會寫入不含內容與密鑰的 `userData/audit.jsonl`。因此 MCP Bridge 必須先讀取有效

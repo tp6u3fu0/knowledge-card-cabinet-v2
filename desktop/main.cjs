@@ -22,10 +22,9 @@ function webRuntimeDirectory() {
     : path.resolve(__dirname, "..");
 }
 
+/** Sample cards, shipped inside the app and only loaded when asked for. */
 function seedPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "kcc-data", "seed.json")
-    : path.join(__dirname, "..", "backend", "seed.json");
+  return path.join(__dirname, "seed.json");
 }
 
 /**
