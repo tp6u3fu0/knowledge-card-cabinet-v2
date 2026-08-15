@@ -10,7 +10,7 @@ const { createTaskManager } = require("./task-manager.cjs");
 /** Width of the built-in hash embedding, and the width covers are drawn from. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
 const STORE_VERSION = 2;
-const COVER_VERSION = 11;
+const COVER_VERSION = 12;
 const MOTIF_COUNT = 12;
 const MOTIF_MIN_COUNT = 8;
 const MOTIF_SIZE = 13.5;
@@ -29,11 +29,22 @@ const MOTIF_LAYOUT = [
   [88, 87], [64, 90], [38, 90],
   [12, 87], [10, 62], [10, 38],
 ];
+/**
+ * Card colour is category colour. Mirrors the accents in app/globals.css.
+ *
+ * Eight rather than the original four because colour is only useful for
+ * grouping if the groups mostly differ; past eight categories some will share a
+ * colour, which is a collision in the palette, not in the rule.
+ */
 const PALETTES = [
   { accent: "coral", color: "#c96f5f", soft_color: "#f0d5cc", background: "#fbf1eb" },
   { accent: "sky", color: "#4e91a8", soft_color: "#d7e8ed", background: "#eef7f8" },
   { accent: "lavender", color: "#8068a4", soft_color: "#e4dced", background: "#f5f0f8" },
   { accent: "mint", color: "#4d9b8e", soft_color: "#d7ebe5", background: "#eef8f4" },
+  { accent: "amber", color: "#b8863b", soft_color: "#f0e2c4", background: "#fbf5e8" },
+  { accent: "rose", color: "#b5567d", soft_color: "#f2d3e0", background: "#fbeef4" },
+  { accent: "indigo", color: "#5566a8", soft_color: "#d9dcf0", background: "#eff1fb" },
+  { accent: "moss", color: "#6f8f4a", soft_color: "#e0ead0", background: "#f3f8ea" },
 ];
 const TOKEN_PATTERN = /[a-z0-9_]+|[\u4e00-\u9fff]/giu;
 const RELATION_LIMIT = 6;
@@ -272,7 +283,85 @@ function chunkFeatures(values, index, count = MOTIF_LAYOUT.length) {
   return { average, energy, variation };
 }
 
-function buildCover(embedding) {
+function categoryName(category) {
+  return String(category || "").trim() || "待分類";
+}
+
+/**
+ * Fallback colour for a category nothing has assigned one to yet.
+ *
+ * Hashing alone was the first attempt and it grouped badly: over a real
+ * fourteen-category cabinet it put five categories on one accent and left
+ * others alone, which defeats the point of colouring by category at all. So the
+ * hash is only the starting point — assignCategoryAccents spreads them evenly
+ * and then records the result so it never moves again.
+ */
+function hashedPalette(category) {
+  const name = categoryName(category);
+  let hash = 2166136261;
+  for (const character of name) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 2246822519);
+  hash ^= hash >>> 13;
+  return PALETTES[(hash >>> 0) % PALETTES.length];
+}
+
+/**
+ * The palette a category owns, from the store's recorded assignment.
+ *
+ * Recorded rather than recomputed because a card's colour is part of how it is
+ * recognised: deriving it from the current category list would repaint cards
+ * that had nothing to do with the category someone just added or deleted.
+ */
+function categoryPalette(category, accents = null) {
+  const name = categoryName(category);
+  const assigned = accents?.[name];
+  return PALETTES.find((palette) => palette.accent === assigned) || hashedPalette(name);
+}
+
+/**
+ * Give every category a colour, spreading them across the palette.
+ *
+ * Existing assignments are never revisited. New categories take the least-used
+ * accent, so the first eight categories in a cabinet are all different colours
+ * and later ones double up as evenly as the palette allows.
+ */
+function assignCategoryAccents(store) {
+  const accents = store.category_accents && typeof store.category_accents === "object" ? store.category_accents : {};
+  const names = new Set([
+    ...(store.categories || []).map(categoryName),
+    ...(store.cards || []).map((card) => categoryName(card.category)),
+  ]);
+
+  // Drop assignments for categories that no longer exist, so a cabinet that has
+  // churned through many categories does not look permanently full.
+  for (const name of Object.keys(accents)) {
+    if (!names.has(name)) delete accents[name];
+  }
+
+  const counts = new Map(PALETTES.map((palette) => [palette.accent, 0]));
+  for (const accent of Object.values(accents)) {
+    if (counts.has(accent)) counts.set(accent, counts.get(accent) + 1);
+  }
+
+  let changed = false;
+  // Sorted so the assignment order does not depend on Set iteration order.
+  for (const name of [...names].sort()) {
+    if (counts.has(accents[name])) continue;
+    const [accent] = [...counts.entries()].sort((left, right) => left[1] - right[1] || PALETTES.findIndex((palette) => palette.accent === left[0]) - PALETTES.findIndex((palette) => palette.accent === right[0]))[0];
+    accents[name] = accent;
+    counts.set(accent, counts.get(accent) + 1);
+    changed = true;
+  }
+
+  store.category_accents = accents;
+  return changed;
+}
+
+function buildCover(embedding, category, accents = null) {
   const norm = Math.sqrt(embedding.reduce((sum, value) => sum + value * value, 0)) || 1;
   const stableValues = embedding.map((value) => value / norm);
   const fingerprint = stableValues.map((value) => value.toFixed(8)).join(",");
@@ -284,7 +373,11 @@ function buildCover(embedding) {
   const maxVariation = Math.max(...features.map(({ variation }) => variation)) || 1;
   const patternNames = ["orbit", "grid", "ladder", "shelf"];
   const pattern = patternNames[Math.floor(unitValue(digest, 0) * patternNames.length) % patternNames.length];
-  const palette = PALETTES[Math.floor((Math.abs(chunks[0]) + unitValue(digest, 12)) * PALETTES.length) % PALETTES.length];
+  // Colour comes from the category, not the vector: cards in one category have
+  // to read as one group. Everything else on the cover still comes from the
+  // embedding, so two cards in the same category are the same colour without
+  // being the same picture.
+  const palette = categoryPalette(category, accents);
   // 8–12 glyphs per cover: sparser cards read as calmer, denser ones as busier.
   const motifCount = Math.min(MOTIF_COUNT, MOTIF_MIN_COUNT + Math.floor(unitValue(digest, 52) * (MOTIF_COUNT - MOTIF_MIN_COUNT + 1)));
   const keptSlots = Array.from({ length: MOTIF_COUNT }, (_, index) => index)
@@ -345,8 +438,17 @@ function normalizeCard(input, previous = {}) {
   card.embedding = Array.isArray(input.embedding) ? input.embedding.map(Number)
     : Array.isArray(previous.embedding) ? previous.embedding : null;
   card.embedding_source_hash = embeddingSourceHash(card);
-  card.cover = card.cover ?? buildCover(coverVector(card));
+  // Provisional: the colour here is the hashed fallback, because a lone card
+  // has no view of the cabinet's colour assignments. refreshStaleCovers runs
+  // after every mutation and settles it.
+  card.cover = card.cover ?? buildCover(coverVector(card), card.category);
   return card;
+}
+
+/** A cover is current when it was drawn by this version *and* in this card's category colour. */
+function coverIsCurrent(card, accents) {
+  if ((card.cover?.version ?? 0) !== COVER_VERSION) return false;
+  return card.cover?.accent === categoryPalette(card.category, accents).accent;
 }
 
 /**
@@ -725,7 +827,7 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken 
  * real vectors as though the result meant something. Clearing the model id is
  * what lets reindexStore find the card and try again later.
  */
-async function applyEmbedding(card, modelRuntime) {
+async function applyEmbedding(card, modelRuntime, accents = null) {
   try {
     card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback: false });
     card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
@@ -733,7 +835,11 @@ async function applyEmbedding(card, modelRuntime) {
     card.embedding = null;
     card.embedding_model_id = null;
   }
-  card.cover = buildCover(coverVector(card));
+  // The accents matter: rebuilding a vector redraws the cover, and without the
+  // cabinet's colour assignment that redraw silently reverts the card to the
+  // hashed fallback colour — which is what a model switch used to do to every
+  // card at once.
+  card.cover = buildCover(coverVector(card), card.category, accents);
   card.embedding_source_hash = embeddingSourceHash(card);
   return card;
 }
@@ -745,9 +851,13 @@ async function applyEmbedding(card, modelRuntime) {
  * cabinet keeps rendering whatever scheme it was written under.
  */
 function refreshStaleCovers(store) {
-  const stale = store.cards.filter((card) => (card.cover?.version ?? 0) !== COVER_VERSION);
-  for (const card of stale) card.cover = buildCover(coverVector(card));
-  return stale.length;
+  // The single place category colour is settled: assign first, then repaint
+  // whatever no longer matches. Every mutation that can introduce or move a
+  // category ends here, so a card never keeps a colour it is not entitled to.
+  assignCategoryAccents(store);
+  const stale = store.cards.filter((card) => !coverIsCurrent(card, store.category_accents));
+  for (const card of stale) card.cover = buildCover(coverVector(card), card.category, store.category_accents);
+  return stale.map((card) => card.id);
 }
 
 async function reindexStore(store, modelRuntime, { allowFallback = false, progress } = {}) {
@@ -759,12 +869,12 @@ async function reindexStore(store, modelRuntime, { allowFallback = false, progre
     if (allowFallback) {
       card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
       card.embedding_model_id = currentModel;
-      card.cover = buildCover(coverVector(card));
+      card.cover = buildCover(coverVector(card), card.category, store.category_accents);
       card.embedding_source_hash = embeddingSourceHash(card);
     } else {
       // One card the model chokes on must not abort the whole rebuild; it keeps
       // a null model id and gets picked up by the next pass.
-      await applyEmbedding(card, modelRuntime);
+      await applyEmbedding(card, modelRuntime, store.category_accents);
     }
     card.updated_at = now();
     completed += 1;
@@ -835,7 +945,13 @@ function createApiServer(store, dataFile, modelRuntime, {
   const save = (changedCards) => {
     store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
     store.summary_model_id = modelRuntime.activeSummaryModelId();
-    db.save(store, { cards: changedCards });
+    // Category colour is settled here rather than at each call site: every
+    // mutation funnels through save(), so a new or moved category can never be
+    // written out still wearing the wrong colour. Cards repainted as a result
+    // are added to the write set, or the repaint would be lost.
+    const repainted = refreshStaleCovers(store);
+    const cards = changedCards ? [...new Set([...changedCards, ...repainted])] : null;
+    db.save(store, { cards });
   };
   const getCard = (id, includeDeleted = false) => store.cards.find((card) => card.id === id && (includeDeleted || !card.deleted_at));
   const similarCards = (card) => store.cards
@@ -989,7 +1105,7 @@ function createApiServer(store, dataFile, modelRuntime, {
           const usable = Array.isArray(rawCard.embedding) && rawCard.embedding.length > 0
             && (!width || rawCard.embedding.length === width);
           card.embedding = usable ? rawCard.embedding.map(Number) : null;
-          card.cover = rawCard.cover || rawCard.cover_data || buildCover(coverVector(card));
+          card.cover = rawCard.cover || rawCard.cover_data || buildCover(coverVector(card), card.category);
           card.embedding_model_id = usable
             ? (rawCard.embedding_model_id || rawCard.embedding_model || modelRuntime.activeEmbeddingModelId())
             : null;
@@ -1286,7 +1402,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = targetName;
-        await applyEmbedding(card, modelRuntime);
+        await applyEmbedding(card, modelRuntime, store.category_accents);
         card.updated_at = now();
         affected += 1;
       }
@@ -1318,7 +1434,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = target;
-        await applyEmbedding(card, modelRuntime);
+        await applyEmbedding(card, modelRuntime, store.category_accents);
         card.updated_at = now();
         affected += 1;
       }
@@ -1348,7 +1464,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         if (!card) continue;
         card.category = suggestion.suggested_category;
         card.tags = suggestion.suggested_tags;
-        await applyEmbedding(card, modelRuntime);
+        await applyEmbedding(card, modelRuntime, store.category_accents);
         card.updated_at = now();
         changedCards += 1;
       }
@@ -1499,12 +1615,20 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const existing = store.cards.find((card) => card.id === String(body.id).trim());
       const card = normalizeCard(body, existing);
-      await applyEmbedding(card, modelRuntime);
-      if (existing) Object.assign(existing, card);
-      else store.cards.push(card);
-      rebuildSemanticRelationsFor(store, [card.id]);
-      save([card.id]);
-      sendJson(response, 200, { card: publicCard(card), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(card) });
+      await applyEmbedding(card, modelRuntime, store.category_accents);
+      // Reply with the object the store holds, not the local copy: save() can
+      // still change it — repainting a card that introduced a new category —
+      // and the caller must be told the colour it actually got.
+      let stored = card;
+      if (existing) {
+        Object.assign(existing, card);
+        stored = existing;
+      } else {
+        store.cards.push(card);
+      }
+      rebuildSemanticRelationsFor(store, [stored.id]);
+      save([stored.id]);
+      sendJson(response, 200, { card: publicCard(stored), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(stored) });
       return;
     }
 
@@ -1523,11 +1647,13 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const changes = await readBody(request);
       const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing);
-      await applyEmbedding(card, modelRuntime);
+      await applyEmbedding(card, modelRuntime, store.category_accents);
       Object.assign(existing, card);
-      rebuildSemanticRelationsFor(store, [card.id]);
-      save([card.id]);
-      sendJson(response, 200, { card: publicCard(card), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(card) });
+      rebuildSemanticRelationsFor(store, [existing.id]);
+      save([existing.id]);
+      // `existing`, not `card`: moving a card to another category repaints it
+      // inside save(), and that repaint lands on the stored object.
+      sendJson(response, 200, { card: publicCard(existing), embedding_model: modelRuntime.activeEmbeddingModelId(), suggested_relations: similarCards(existing) });
       return;
     }
 
@@ -1595,7 +1721,7 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
   // what identifies them, and one rebuild puts the whole graph back on one scale.
   const rescored = !store.semantic_baseline && store.cards.some((card) => hasUsableEmbedding(card));
   if (rescored) rebuildSemanticRelations(store);
-  const refreshedCovers = refreshStaleCovers(store);
+  const refreshedCovers = refreshStaleCovers(store).length;
   const reindexedCards = await reindexStore(store, modelRuntime, { allowFallback: false });
   if (rescored || refreshedCovers > 0 || reindexedCards > 0 || store.embedding_model_id !== modelRuntime.activeEmbeddingModelId()) {
     store.embedding_model_id = modelRuntime.activeEmbeddingModelId();
@@ -1636,4 +1762,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, COVER_VERSION };
+module.exports = { startLocalApi, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, categoryPalette, assignCategoryAccents, COVER_VERSION };

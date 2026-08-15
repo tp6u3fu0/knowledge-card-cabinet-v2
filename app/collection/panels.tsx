@@ -7,7 +7,9 @@ import type {
   BackgroundTask,
   CardDraft,
   DimensionGuideEntry,
+  EmbeddingChoice,
   ModelCatalog,
+  SimpleChoices,
   ModelKind,
   ModelOption,
   ProviderSettingsDraft,
@@ -385,6 +387,125 @@ function AddModelForm({
   );
 }
 
+/**
+ * The default view of the local-models tab: pick a size for tidying and a
+ * language for search, and let the app choose the checkpoint. Everything the
+ * advanced view offers is still reachable — this only changes what has to be
+ * decided first.
+ */
+function SimpleModelPicker({
+  choices,
+  models,
+  activeSummary,
+  activeEmbedding,
+  actionId,
+  isTaskRunning,
+  onDownload,
+  onSelect,
+}: {
+  choices: SimpleChoices;
+  models: ModelOption[];
+  activeSummary: string;
+  activeEmbedding: string;
+  actionId: string;
+  isTaskRunning: boolean;
+  onDownload: (id: string) => void;
+  onSelect: (kind: ModelKind, id: string) => void;
+}) {
+  const activeChoice = choices.embedding.find((choice) => choice.model_id === activeEmbedding);
+  const [language, setLanguage] = useState<EmbeddingChoice["language"]>(activeChoice?.language ?? "multi");
+  const [dimensions, setDimensions] = useState<number>(activeChoice?.dimensions ?? 384);
+
+  const byId = new Map(models.map((model) => [model.id, model]));
+  const selected = choices.embedding.find((choice) => choice.language === language && choice.dimensions === dimensions);
+  const selectedModel = selected ? byId.get(selected.model_id) : undefined;
+
+  const action = (model: ModelOption | undefined, kind: ModelKind) => {
+    if (!model) return null;
+    if (model.active) return <span className="simple-choice__state">目前使用中</span>;
+    if (model.status === "downloading" || actionId === model.id) return <span className="simple-choice__state">下載／準備中…</span>;
+    return (
+      <button
+        type="button"
+        onClick={() => (model.installed ? onSelect(kind, model.id) : onDownload(model.id))}
+        disabled={isTaskRunning}
+      >
+        {model.installed ? "使用這個" : `下載並使用（${model.size_label}）`}
+      </button>
+    );
+  };
+
+  return (
+    <div className="simple-picker">
+      <div className="simple-picker__group">
+        <div className="simple-picker__heading">
+          <span className="model-settings-kicker">01 / 整理筆記</span>
+          <h3>要多大的整理模型？</h3>
+          <p>模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。隨時可以改。</p>
+        </div>
+        <div className="simple-choice-row">
+          {choices.summary.map((choice) => {
+            const model = byId.get(choice.model_id);
+            return (
+              <article className={`simple-choice${choice.model_id === activeSummary ? " is-active" : ""}`} key={choice.tier}>
+                <strong>{choice.label}</strong>
+                <span className="simple-choice__headline">{choice.headline}</span>
+                <p>{choice.note}</p>
+                {choice.model_label === choice.headline ? null : <small>{choice.model_label}</small>}
+                {action(model, "summary")}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="simple-picker__group">
+        <div className="simple-picker__heading">
+          <span className="model-settings-kicker">02 / 搜尋與關聯</span>
+          <h3>你的筆記主要用什麼語言？</h3>
+          <p>這會決定卡片之間的語意距離。維度必須全庫一致，換了會重建所有卡片的向量。</p>
+        </div>
+        <div className="simple-picker__axes">
+          <div className="simple-axis" role="group" aria-label="語言">
+            {choices.embedding.length > 0
+              ? [...new Map(choices.embedding.map((choice) => [choice.language, choice.language_label])).entries()].map(([value, label]) => (
+                <button
+                  className={language === value ? "is-active" : ""}
+                  key={value}
+                  type="button"
+                  onClick={() => setLanguage(value)}
+                >
+                  {label}
+                </button>
+              ))
+              : null}
+          </div>
+          <div className="simple-axis" role="group" aria-label="向量維度">
+            {[384, 1024].map((value) => (
+              <button
+                className={dimensions === value ? "is-active" : ""}
+                key={value}
+                type="button"
+                onClick={() => setDimensions(value)}
+              >
+                {value} 維{value === 384 ? "（小而快）" : "（較準）"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {selected ? (
+          <article className={`simple-choice simple-choice--wide${selectedModel?.active ? " is-active" : ""}`}>
+            <strong>{selected.model_label}</strong>
+            <span className="simple-choice__headline">{selected.dimensions} 維 · {selected.size_label}</span>
+            {selected.note ? <p className="simple-choice__caveat">{selected.note}</p> : <p>{selectedModel?.description}</p>}
+            {action(selectedModel, "embedding")}
+          </article>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** The 384-versus-1024 decision, stated with both sides. */
 function DimensionGuide({ entries, active }: { entries: DimensionGuideEntry[]; active?: number }) {
   if (entries.length === 0) return null;
@@ -496,6 +617,9 @@ export function ModelSettingsPanel({
   const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
   const [probeResults, setProbeResults] = useState<Record<ModelKind, ApiProbeResult | null>>({ summary: null, embedding: null });
   const [probing, setProbing] = useState<ModelKind | "">("");
+  // Simple by default: naming a checkpoint is a decision most people have no
+  // basis to make on first run.
+  const [isAdvanced, setIsAdvanced] = useState(false);
 
   const providerFields = (kind: ModelKind, label: string, description: string) => {
     const setting = runtimeSettings?.[kind];
@@ -714,6 +838,24 @@ export function ModelSettingsPanel({
             {catalog.storage ? <span>{catalog.storage.path_label} · 可用 {catalog.storage.free_size_label}</span> : null}
             <p>{catalog.hardware.note}</p>
           </div>
+          <div className="model-mode-switch" role="group" aria-label="設定模式">
+            <button className={isAdvanced ? "" : "is-active"} type="button" onClick={() => setIsAdvanced(false)}>簡易</button>
+            <button className={isAdvanced ? "is-active" : ""} type="button" onClick={() => setIsAdvanced(true)}>進階</button>
+            <span>{isAdvanced ? "逐一挑選模型，或加入 Hugging Face 上的其他模型。" : "選大小與語言就好，其餘交給應用程式。"}</span>
+          </div>
+          {!isAdvanced && catalog.simple ? (
+            <SimpleModelPicker
+              choices={catalog.simple}
+              models={catalog.models}
+              activeSummary={catalog.active.summary}
+              activeEmbedding={catalog.active.embedding}
+              actionId={actionId}
+              isTaskRunning={isBackgroundTaskRunning}
+              onDownload={onDownload}
+              onSelect={onSelect}
+            />
+          ) : (
+          <>
           <div className="model-settings-group">
             <div className="model-settings-group__heading">
               <div>
@@ -744,6 +886,8 @@ export function ModelSettingsPanel({
             </div>
           </div>
           <AddModelForm actionId={actionId} onAdd={onAddCustomModel} />
+          </>
+          )}
           <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
         </>
       ) : null}

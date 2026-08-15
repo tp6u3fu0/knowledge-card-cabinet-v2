@@ -16,8 +16,8 @@
   --card-front: #fbf6ee;
   --card-back: #433d49;
 
-  /* The four domain accents. Single source of truth — the backend's cover
-     palette (backend/app/covers.py) mirrors these hexes. */
+  /* The domain accents. One per category — PALETTES in desktop/local-api.cjs
+     mirrors these hexes and picks between them from the category name. */
   --accent-coral: #c96f5f;
   --accent-coral-soft: #f0d5cc;
   --accent-sky: #4e91a8;
@@ -26,9 +26,17 @@
   --accent-lavender-soft: #e4dced;
   --accent-mint: #4d9b8e;
   --accent-mint-soft: #d7ebe5;
+  --accent-amber: #b8863b;
+  --accent-amber-soft: #f0e2c4;
+  --accent-rose: #b5567d;
+  --accent-rose-soft: #f2d3e0;
+  --accent-indigo: #5566a8;
+  --accent-indigo-soft: #d9dcf0;
+  --accent-moss: #6f8f4a;
+  --accent-moss-soft: #e0ead0;
 }
 
-/* Every accent-coloured component resolves through these four rules. */
+/* Every accent-coloured component resolves through these rules. */
 .collection-card--coral,
 .reading-related__item--coral,
 .table-card-button--coral,
@@ -59,6 +67,38 @@
 .relation-node--mint {
   --domain-color: var(--accent-mint);
   --domain-soft: var(--accent-mint-soft);
+}
+
+.collection-card--amber,
+.reading-related__item--amber,
+.table-card-button--amber,
+.relation-node--amber {
+  --domain-color: var(--accent-amber);
+  --domain-soft: var(--accent-amber-soft);
+}
+
+.collection-card--rose,
+.reading-related__item--rose,
+.table-card-button--rose,
+.relation-node--rose {
+  --domain-color: var(--accent-rose);
+  --domain-soft: var(--accent-rose-soft);
+}
+
+.collection-card--indigo,
+.reading-related__item--indigo,
+.table-card-button--indigo,
+.relation-node--indigo {
+  --domain-color: var(--accent-indigo);
+  --domain-soft: var(--accent-indigo-soft);
+}
+
+.collection-card--moss,
+.reading-related__item--moss,
+.table-card-button--moss,
+.relation-node--moss {
+  --domain-color: var(--accent-moss);
+  --domain-soft: var(--accent-moss-soft);
 }
 
 .database-filter-select,
@@ -2100,6 +2140,154 @@ a:focus-visible {
   .background-task-panel.is-running .background-task-panel__mark {
     animation: none;
   }
+}
+
+/* --- Simple picker: size for tidying, language for search ----------------- */
+
+.model-mode-switch {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.model-mode-switch button {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 6px 18px;
+}
+
+.model-mode-switch button.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.model-mode-switch span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-left: 4px;
+}
+
+.simple-picker {
+  display: grid;
+  gap: 26px;
+}
+
+.simple-picker__heading h3 {
+  margin: 4px 0 2px;
+}
+
+.simple-picker__heading p {
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin: 0 0 14px;
+  max-width: 68ch;
+}
+
+.simple-choice-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.simple-choice {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  display: grid;
+  gap: 6px;
+  padding: 15px;
+}
+
+.simple-choice.is-active {
+  border-color: color-mix(in srgb, var(--accent-mint) 62%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-mint) 15%, transparent);
+}
+
+.simple-choice strong {
+  font-size: 1.05rem;
+}
+
+.simple-choice__headline {
+  color: var(--muted);
+  font-size: 0.73rem;
+}
+
+.simple-choice p {
+  font-size: 0.75rem;
+  margin: 2px 0 4px;
+}
+
+.simple-choice__caveat {
+  color: color-mix(in srgb, var(--accent-coral) 82%, var(--ink));
+}
+
+.simple-choice small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.simple-choice button {
+  background: var(--ink);
+  border: 0;
+  border-radius: 999px;
+  color: var(--paper);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.73rem;
+  justify-self: start;
+  margin-top: 6px;
+  padding: 7px 16px;
+}
+
+.simple-choice button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.simple-choice__state {
+  color: var(--accent-mint);
+  font-size: 0.73rem;
+  margin-top: 6px;
+}
+
+.simple-choice--wide {
+  margin-top: 14px;
+}
+
+.simple-picker__axes {
+  display: grid;
+  gap: 10px;
+}
+
+.simple-axis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.simple-axis button {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 7px 16px;
+}
+
+.simple-axis button.is-active {
+  background: color-mix(in srgb, var(--accent-sky) 16%, var(--paper));
+  border-color: color-mix(in srgb, var(--accent-sky) 62%, var(--line));
+  color: var(--ink);
 }
 
 /* --- 384 vs 1024, and adding models beyond the shipped list --------------- */

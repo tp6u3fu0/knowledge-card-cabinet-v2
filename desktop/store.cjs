@@ -67,6 +67,16 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS categories (name TEXT PRIMARY KEY, position INTEGER NOT NULL DEFAULT 0)",
 ];
 
+function readJsonMeta(value) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 /** float32 matches Postgres `vector` — same precision, a quarter of JSON's bytes. */
 function encodeVector(values) {
   if (!Array.isArray(values) || values.length === 0) return null;
@@ -203,6 +213,11 @@ function openStore(dataFile) {
         updated_at: row.updated_at ?? null,
       })),
       categories: database.prepare("SELECT name FROM categories ORDER BY position, name").all().map((row) => row.name),
+      // Which accent each category was given. Kept because the assignment is
+      // made once and must not move afterwards — a card's colour is part of how
+      // it is recognised, so it cannot be recomputed from the current category
+      // list and shift every time a category is added or deleted.
+      category_accents: readJsonMeta(meta.category_accents),
       embedding_model_id: meta.embedding_model_id ?? "embedding-hash-384",
       summary_model_id: meta.summary_model_id ?? "summary-template",
     };
@@ -212,6 +227,7 @@ function openStore(dataFile) {
     insertMeta.run("version", String(store.version ?? STORE_VERSION));
     insertMeta.run("embedding_model_id", String(store.embedding_model_id ?? ""));
     insertMeta.run("summary_model_id", String(store.summary_model_id ?? ""));
+    insertMeta.run("category_accents", JSON.stringify(store.category_accents ?? {}));
   };
 
   const writeCards = (store, ids) => {

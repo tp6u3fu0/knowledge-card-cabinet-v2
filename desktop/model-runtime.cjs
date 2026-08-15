@@ -52,6 +52,7 @@ const MODEL_CATALOG = [
   {
     id: BUILTIN_SUMMARY_MODEL,
     kind: "summary",
+    size_tier: "none",
     label: "規則整理",
     short_label: "內建輕量",
     provider: "local-template",
@@ -67,6 +68,7 @@ const MODEL_CATALOG = [
   {
     id: "summary-lamini-248m",
     kind: "summary",
+    size_tier: "small",
     label: "LaMini-Flan-T5 248M",
     short_label: "輕量模型",
     provider: "transformers.js",
@@ -84,6 +86,7 @@ const MODEL_CATALOG = [
   {
     id: "summary-flan-t5-small",
     kind: "summary",
+    size_tier: "medium",
     label: "FLAN-T5 Small",
     short_label: "進階模型",
     provider: "transformers.js",
@@ -101,6 +104,7 @@ const MODEL_CATALOG = [
   {
     id: "summary-mt5-small",
     kind: "summary",
+    size_tier: "large",
     label: "mT5 Small",
     short_label: "多語言進階",
     provider: "transformers.js",
@@ -118,6 +122,7 @@ const MODEL_CATALOG = [
   {
     id: BUILTIN_EMBEDDING_MODEL,
     kind: "embedding",
+    language: "none",
     label: "Hash 384",
     short_label: "內建輕量",
     provider: "local-runtime",
@@ -134,6 +139,7 @@ const MODEL_CATALOG = [
   {
     id: "embedding-minilm-384",
     kind: "embedding",
+    language: "en",
     label: "all-MiniLM-L6-v2",
     short_label: "英文語意",
     provider: "transformers.js",
@@ -152,6 +158,7 @@ const MODEL_CATALOG = [
   {
     id: "embedding-multilingual-384",
     kind: "embedding",
+    language: "multi",
     label: "Multilingual MiniLM",
     short_label: "中英語意",
     provider: "transformers.js",
@@ -170,6 +177,7 @@ const MODEL_CATALOG = [
   {
     id: "embedding-bge-m3-1024",
     kind: "embedding",
+    language: "zh",
     label: "BGE-M3",
     short_label: "中文最佳",
     provider: "transformers.js",
@@ -188,6 +196,62 @@ const MODEL_CATALOG = [
     builtin: false,
   },
 ];
+
+/**
+ * The simple picker.
+ *
+ * Most people do not want to compare four checkpoints; they want "small,
+ * medium or large" for tidying, and "which language do I write in" for search.
+ * These describe the choice in those terms and resolve to real catalogue
+ * entries — the advanced list is still there for anyone who wants to name a
+ * model themselves.
+ */
+const SUMMARY_TIERS = [
+  { tier: "none", label: "不下載", headline: "規則整理", note: "用本機規則直接填欄位，零下載、立刻可用。整理結果比較制式。" },
+  { tier: "small", label: "小", headline: "約 180 MB", note: "能看懂句子脈絡，適合大多數筆記，CPU 也跑得動。" },
+  { tier: "medium", label: "中", headline: "約 260 MB", note: "整理得更自然一些，需要更多記憶體，CPU 上會比較慢。" },
+  { tier: "large", label: "大", headline: "約 450 MB", note: "多語言、對中文筆記較友善，但下載與每次整理都最慢。" },
+];
+
+const EMBEDDING_LANGUAGES = [
+  { language: "zh", label: "中文為主" },
+  { language: "en", label: "英文為主" },
+  { language: "multi", label: "中英皆可" },
+];
+
+/**
+ * Which model a (language, dimensions) pair actually resolves to.
+ *
+ * Built rather than hardcoded so it cannot drift from the catalogue, and it
+ * says when a combination has no exact match instead of quietly substituting:
+ * there is no 384-dim Chinese-only model here, so "中文為主 + 384" lands on the
+ * multilingual one and says so.
+ */
+function embeddingChoices(models) {
+  const rows = [];
+  for (const { language, label } of EMBEDDING_LANGUAGES) {
+    for (const dimensions of [384, 1024]) {
+      const candidates = models.filter((model) => model.kind === "embedding" && model.dimensions === dimensions && model.language && model.language !== "none");
+      const exact = candidates.find((model) => model.language === language);
+      const chosen = exact
+        || candidates.find((model) => model.language === "multi")
+        || candidates.find((model) => model.language === "zh")
+        || candidates[0];
+      if (!chosen) continue;
+      rows.push({
+        language,
+        language_label: label,
+        dimensions,
+        model_id: chosen.id,
+        model_label: chosen.label,
+        size_label: chosen.size_label,
+        exact: Boolean(exact),
+        note: exact ? "" : `${dimensions} 維目前沒有專為${label.replace("為主", "")}訓練的模型，這裡用最接近的「${chosen.label}」。`,
+      });
+    }
+  }
+  return rows;
+}
 
 /**
  * Presets for the services people actually run, so "bring your own model" does
@@ -821,6 +885,13 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       models: allModels().map(describeModel),
       dimension_guide: DIMENSION_GUIDE,
       api_providers: API_PROVIDERS,
+      simple: {
+        summary: SUMMARY_TIERS.map((tier) => {
+          const model = allModels().find((candidate) => candidate.kind === "summary" && candidate.size_tier === tier.tier);
+          return model ? { ...tier, model_id: model.id, model_label: model.label, size_label: model.size_label } : null;
+        }).filter(Boolean),
+        embedding: embeddingChoices(allModels()),
+      },
     };
   }
 
@@ -1135,6 +1206,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
 
 module.exports = {
   API_PROVIDERS,
+  EMBEDDING_LANGUAGES,
+  SUMMARY_TIERS,
+  embeddingChoices,
   BUILTIN_EMBEDDING_MODEL,
   BUILTIN_SUMMARY_MODEL,
   DIMENSION_GUIDE,

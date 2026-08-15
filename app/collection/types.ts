@@ -122,6 +122,8 @@ export type ModelOption = {
   task: string;
   dimensions?: number;
   size_label: string;
+  size_tier?: "none" | "small" | "medium" | "large";
+  language?: "none" | "zh" | "en" | "multi";
   min_memory_gb: number;
   tier: string;
   languages: string;
@@ -178,6 +180,34 @@ export type ModelCatalog = {
   models: ModelOption[];
   dimension_guide?: DimensionGuideEntry[];
   api_providers?: ApiProvider[];
+  simple?: SimpleChoices;
+};
+
+export type SimpleChoices = {
+  summary: SummaryTierChoice[];
+  embedding: EmbeddingChoice[];
+};
+
+export type SummaryTierChoice = {
+  tier: "none" | "small" | "medium" | "large";
+  label: string;
+  headline: string;
+  note: string;
+  model_id: string;
+  model_label: string;
+  size_label: string;
+};
+
+export type EmbeddingChoice = {
+  language: "zh" | "en" | "multi";
+  language_label: string;
+  dimensions: number;
+  model_id: string;
+  model_label: string;
+  size_label: string;
+  /** False when no model matches this pair exactly and the nearest was used. */
+  exact: boolean;
+  note: string;
 };
 
 export type DimensionGuideEntry = {
@@ -250,7 +280,8 @@ export type SettingsDraft = {
 
 export type SettingsTab = "local" | "api" | "data";
 
-export const visualAccents = ["coral", "sky", "lavender", "mint"] as const;
+/** Must match PALETTES in desktop/local-api.cjs and the accent rules in globals.css. */
+export const visualAccents = ["coral", "sky", "lavender", "mint", "amber", "rose", "indigo", "moss"] as const;
 export const visualPatterns = ["orbit", "grid", "ladder", "shelf"] as const;
 export type CollectionView = "cards" | "relations" | "table";
 export type RelationFilter = "all" | "semantic" | "manual";

@@ -221,6 +221,39 @@ test("a build that bundles weights starts semantic, and one that does not still 
   });
 });
 
+test("the simple picker offers a size for tidying and a language for search", async () => {
+  await withRuntime(async ({ json }) => {
+    const { body } = await json("/models");
+    assert.ok(body.simple, "the catalogue exposes no simple choices");
+
+    // Small / medium / large, plus the no-download baseline.
+    const tiers = body.simple.summary.map((choice) => choice.tier);
+    assert.deepEqual(tiers, ["none", "small", "medium", "large"]);
+    for (const choice of body.simple.summary) {
+      const model = body.models.find((candidate) => candidate.id === choice.model_id);
+      assert.ok(model, `summary tier ${choice.tier} points at a model that does not exist`);
+      assert.equal(model.kind, "summary");
+      assert.ok(choice.note.length > 0, `tier ${choice.tier} explains nothing`);
+    }
+    // Sizes must actually increase, or "小中大" is a lie.
+    const bytes = body.simple.summary.map((choice) => body.models.find((model) => model.id === choice.model_id).storage.download_size_bytes);
+    for (let index = 1; index < bytes.length; index += 1) {
+      assert.ok(bytes[index] >= bytes[index - 1], `tier ${tiers[index]} is not larger than ${tiers[index - 1]}`);
+    }
+
+    // Every language × dimension pair resolves to something real.
+    const languages = new Set(body.simple.embedding.map((choice) => choice.language));
+    assert.deepEqual([...languages].sort(), ["en", "multi", "zh"]);
+    for (const choice of body.simple.embedding) {
+      const model = body.models.find((candidate) => candidate.id === choice.model_id);
+      assert.ok(model, `${choice.language}/${choice.dimensions} points at a missing model`);
+      assert.equal(model.dimensions, choice.dimensions, "resolved model does not have the promised width");
+      // A near-match must say so rather than quietly substituting.
+      if (!choice.exact) assert.ok(choice.note.length > 0, `${choice.language}/${choice.dimensions} substitutes silently`);
+    }
+  });
+});
+
 test("the built-in catalogue stays internally consistent", () => {
   const ids = new Set();
   for (const model of MODEL_CATALOG) {
