@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
+import QRCode from "qrcode";
 
 import type {
   ApiProbeResult,
@@ -239,6 +240,9 @@ function DeviceManagementPanel({
   onDisableLan: () => void;
 }) {
   const expiry = pairingCode ? new Date(pairingCode.expires_at).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }) : "";
+  const pairingPayload = pairingCode && lanSharing?.enabled && lanSharing.api_urls[0] && lanSharing.certificate_fingerprint_sha256
+    ? JSON.stringify({ version: 1, host: lanSharing.api_urls[0], certificate_fingerprint: lanSharing.certificate_fingerprint_sha256, pairing_code: pairingCode.code })
+    : null;
   return (
     <div className="device-management">
       <div className="settings-api-intro settings-api-intro--devices">
@@ -252,6 +256,7 @@ function DeviceManagementPanel({
           <span className="model-settings-kicker">01 / PAIRING CODE</span>
           {pairingCode ? <strong className="device-pairing-code">{pairingCode.code}</strong> : <p>產生配對碼後，在 iPhone 的知識卡冊輸入即可。</p>}
           {pairingCode ? <small>請在 {expiry} 前完成配對。每次產生新碼都會使舊碼失效。</small> : null}
+          {pairingPayload ? <PairingQRCode payload={pairingPayload} /> : pairingCode ? <small>啟用同一 Wi‑Fi 分享後，即可顯示可掃描的 iPhone 配對碼。</small> : null}
         </div>
         <button className="create-card-submit" type="button" onClick={onIssueCode} disabled={isIssuingCode}>
           {isIssuingCode ? "產生中…" : pairingCode ? "產生新配對碼" : "產生配對碼"}
@@ -299,6 +304,29 @@ function DeviceManagementPanel({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function PairingQRCode({ payload }: { payload: string }) {
+  const [imageUrl, setImageUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void QRCode.toDataURL(payload, { width: 220, margin: 1, errorCorrectionLevel: "M" }).then((value) => {
+      if (active) setImageUrl(value);
+    });
+    return () => { active = false; };
+  }, [payload]);
+
+  return (
+    <div className="device-pairing-qr">
+      {imageUrl ? (
+        // Data URL is generated locally and never requested from a remote image host.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imageUrl} alt="iPhone 配對 QR code" />
+      ) : <span>產生 QR code 中…</span>}
+      <p>在 iPhone 點選「掃描 Mac 配對碼」；QR 不包含裝置 token，且配對碼只能使用一次。</p>
     </div>
   );
 }

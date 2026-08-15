@@ -1,6 +1,6 @@
 {
   "name": "knowledge-card-cabinet",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "知識卡冊桌面應用程式",
   "author": "Knowledge Card Cabinet",
@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
+    "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
@@ -41,6 +42,7 @@
     "@next/eslint-plugin-next": "16.2.6",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",

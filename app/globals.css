@@ -219,6 +219,9 @@
 .device-pairing-card small,
 .device-list-card p { color: var(--muted); font-size: 11px; line-height: 1.7; margin: 0; }
 .device-pairing-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 28px; letter-spacing: 0.1em; }
+.device-pairing-qr { align-items: center; background: white; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 7px; justify-items: center; margin-top: 6px; max-width: 250px; padding: 10px; }
+.device-pairing-qr img { display: block; height: 220px; width: 220px; }
+.device-pairing-qr p { font-size: 10px; text-align: center; }
 .device-list-card__heading,
 .device-list__item { align-items: center; display: flex; gap: 16px; justify-content: space-between; }
 .device-list-card__heading h3 { font-family: Georgia, "Noto Serif TC", serif; font-size: 23px; font-weight: 400; margin: 6px 0 0; }
