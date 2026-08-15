@@ -300,6 +300,9 @@ export type LanSharingStatus = {
   api_urls: string[];
   certificate_fingerprint_sha256: string;
   pairing_requires_fingerprint: boolean;
+  /** mDNS is optional: macOS always has it, Windows only with Apple Bonjour. */
+  discovery_active?: boolean;
+  discovery_detail?: string;
 };
 
 /** Must match PALETTES in desktop/local-api.cjs and the accent rules in globals.css. */

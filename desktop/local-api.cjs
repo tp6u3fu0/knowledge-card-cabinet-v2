@@ -8,11 +8,14 @@ const { createModelRuntime } = require("./model-runtime.cjs");
 const { openStore, writeBackup } = require("./store.cjs");
 const { createTaskManager } = require("./task-manager.cjs");
 const { createDeviceAuth } = require("./device-auth.cjs");
-const { ensureLanCertificate, lanAddresses } = require("./lan-certificate.cjs");
+const { ensureLanCertificate, lanAddresses, defaultLanAddress } = require("./lan-certificate.cjs");
 const { advertiseKnowledgeCardHost } = require("./bonjour.cjs");
 
 /** Width of the built-in hash embedding, and the width covers are drawn from. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
+
+/** Fixed so a paired device can be told one port once, rather than re-paired. */
+const LAN_PORT = 8443;
 const STORE_VERSION = 2;
 const COVER_VERSION = 12;
 const MOTIF_COUNT = 12;
@@ -1823,20 +1826,39 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
   let lanRuntime = null;
   let bonjourAdvertisement = null;
   let lanCertificate = null;
+  // Resolved from the routing table when sharing is switched on, then reused so
+  // status() stays synchronous and always names the same host the QR code did.
+  let lanPreferredAddress = "";
   const networkController = {
     status: () => ({
       enabled: Boolean(lanRuntime),
       transport: "lan-https",
       port: lanRuntime?.port || null,
-      api_urls: lanRuntime ? lanAddresses().map((address) => `https://${address}:${lanRuntime.port}/api/v1`) : [],
+      api_urls: lanRuntime
+        ? lanAddresses({ preferredAddress: lanPreferredAddress }).map((address) => `https://${address}:${lanRuntime.port}/api/v1`)
+        : [],
       certificate_fingerprint_sha256: lanCertificate?.fingerprint_sha256 || "",
       pairing_requires_fingerprint: true,
+      // Discovery is a convenience, not a requirement: the QR code carries the
+      // address outright. Reported so the interface can say which one applies
+      // instead of promising Bonjour on a machine that has none.
+      discovery_active: Boolean(bonjourAdvertisement?.active),
+      discovery_detail: bonjourAdvertisement?.detail || "",
     }),
     enable: async () => {
       if (lanRuntime) return networkController.status();
-      lanCertificate = ensureLanCertificate({ directory: path.join(path.dirname(dataFile), "lan-tls") });
-      await startLanApi({ keyPath: lanCertificate.key_path, certPath: lanCertificate.cert_path, port: 8443 });
+      lanPreferredAddress = await defaultLanAddress();
+      const addresses = lanAddresses({ preferredAddress: lanPreferredAddress });
+      if (addresses.length === 0) throw new Error("找不到可分享的區域網路位址，請先連上 Wi‑Fi 或有線網路。");
+      lanCertificate = ensureLanCertificate({ directory: path.join(path.dirname(dataFile), "lan-tls"), addresses });
+      await startLanApi({ keyPath: lanCertificate.key_path, certPath: lanCertificate.cert_path, port: LAN_PORT })
+        .catch((error) => {
+          if (error?.code === "EADDRINUSE") throw new Error(`連接埠 ${LAN_PORT} 已被其他程式使用，請關閉該程式後再試。`);
+          if (error?.code === "EACCES") throw new Error(`沒有權限開啟連接埠 ${LAN_PORT}，請確認防火牆或系統原則設定。`);
+          throw error;
+        });
       bonjourAdvertisement = advertiseKnowledgeCardHost({ port: lanRuntime.port, fingerprint: lanCertificate.fingerprint_sha256 });
+      await bonjourAdvertisement.ready;
       return networkController.status();
     },
     disable: async () => stopLanApi(),
@@ -1879,7 +1901,12 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
       server: lanServer,
       port: actualLanPort,
       baseUrl: hostname ? `https://${hostname}${actualLanPort === 443 ? "" : `:${actualLanPort}`}` : "",
-      close: async () => new Promise((resolve) => lanServer.close(() => resolve())),
+      close: async () => new Promise((resolve) => {
+        // A phone holding a keep-alive connection would otherwise keep close()
+        // pending indefinitely, leaving "停止分享" spinning with the port open.
+        lanServer.closeAllConnections();
+        lanServer.close(() => resolve());
+      }),
     };
     return lanRuntime;
   };

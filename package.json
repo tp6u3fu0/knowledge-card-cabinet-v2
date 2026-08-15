@@ -1,6 +1,6 @@
 {
   "name": "knowledge-card-cabinet",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
   "description": "知識卡冊桌面應用程式",
   "author": "Knowledge Card Cabinet",
@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
+    "node-forge": "^1.4.0",
     "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6"

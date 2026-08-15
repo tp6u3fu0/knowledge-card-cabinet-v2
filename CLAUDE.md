@@ -103,18 +103,30 @@ const save = (changedCards) => { … refreshStaleCovers(store) … db.save(store
 
 ### 1.8 安全邊界
 
-- 本機 API **只監聽 loopback**，權杖由前端在伺服器端代理，不經過網路。
+- 桌面 API **只監聽 loopback**，權杖由前端在伺服器端代理，不經過網路。
 - **介面本身沒有登入機制。** `KCC_HOST=0.0.0.0` 等於讓所有能連到這個埠的人讀寫你的卡片。只能用在私人網路（Tailscale / WireGuard）。
 - 不要新增任何把權杖送到瀏覽器的程式碼。
-- 不要在沒有先做認證的情況下放寬 CORS 或監聽位址（見第 6 節）。
+- 區網分享是**另一個** server（`startLanApi`，HTTPS、8443），不是把 loopback server 改成監聽 `0.0.0.0`。loopback 那個永遠維持原樣。
+- **裝置權杖的權限比本機權杖小。** `deviceSafeRoute` 只放行 `cards`、`categories`、`search`、`trash`；模型、設定、資料庫、裝置管理都是 403。新增路由時要想清楚它屬於哪一邊——預設是**不**放行。
+- 配對碼一次性且十分鐘失效，`pair()` 在發出 token 前先清掉它。不要為了「使用者重試比較方便」把這個拿掉：一個看得見的碼就只能換一把鑰匙。
+- 裝置清單**永遠不回傳 token**，資料庫裡也只存 SHA-256。`tests/api-contract.test.mjs` 有斷言擋著。
 
-### 1.9 版號只有一份
+### 1.9 平台差異寫在一個地方，而且要誠實回報
+
+Windows 與 macOS 的差異只允許出現在 `desktop/` 的少數幾個檔案裡（`bonjour.cjs`、`lan-certificate.cjs`、`main.cjs` 的圖示、`mcp-server.cjs` 的 manifest 路徑）。其餘程式碼一律跨平台。
+
+- **不要用 `execFile` 叫系統工具做跨平台的事。** 憑證產生曾經寫死 `/usr/bin/openssl`／`/opt/homebrew/bin/openssl`，Windows 沒有 OpenSSL，整個區網分享直接不能用。現在用 `node:crypto` 產金鑰、node-forge 做 X.509 編碼，兩邊同一條路徑。
+- **不要用介面名稱猜哪張網卡是真的。** Windows 上 `192.168.56.1` 可能叫「乙太網路 3」（VirtualBox），名字完全看不出來。真正的答案來自路由表：`defaultLanAddress()` 用一個 connected UDP socket 問，不送封包也不開子行程，兩個平台通用。
+- **能力不存在時要說實話。** mDNS 在 macOS 一定有，在 Windows 只有裝了 Apple Bonjour 才有。`status()` 回報 `discovery_active` / `discovery_detail`，介面照著顯示。**不要寫死「Bonjour 已啟用」**——之前就是這樣，在沒有 Bonjour 的機器上直接騙人。
+- **子行程的 `error` 事件一定要接。** `spawn` 找不到執行檔是**非同步**的 `error` 事件，沒接就會 throw 掉整個 Electron main process。而且要 `await` 到它落定再回報狀態，否則 `active` 會先是 true 再偷偷變 false。
+
+### 1.10 版號只有一份
 
 `package.json` 是唯一來源。`scripts/release-check.mjs` 會掃 `desktop/*.cjs`，出現不一致的版號字面值就失敗。
 
 會這樣是因為 MCP bridge 曾寫死 `0.1.0` 對所有 AI 工具回報錯版本，而 OpenAPI 文件寫死 `0.4.0`——一個既不是 app 版本也不是路由 `v1` 的數字。
 
-### 1.10 備份校驗碼只能由產生它的實作驗證
+### 1.11 備份校驗碼只能由產生它的實作驗證
 
 JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，JS 給 `0.0000492`）。跨工具的備份請**移除 `checksum_sha256` 欄位**再匯入；沒有校驗碼的 payload 會跳過該檢查。不要試圖「修好」跨 runtime 的校驗。
 
@@ -134,6 +146,9 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `package.json` 版本 | 無（其他地方都用讀的） | — |
 | `electron-builder.yml` 的 extraResources | `main.cjs` 的路徑解析、`model-runtime.cjs` 的 `bundledModelsDir()` | 打包版找不到資源 |
 | README 提到的 npm script | `package.json` 必須真的有 | `tests/rendered-html.test.mjs` 會失敗（刻意的） |
+| `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
+| `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
+| 新增 `desktop/` 的執行期相依 | `desktop/package.json`（打包用，鎖定版號）**與**根 `package.json`（CI 測試用） | CI 綠、打包版 require 失敗，或反過來 |
 
 ---
 
@@ -148,7 +163,8 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣 |
 | `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重 |
 | `category-colour.test.mjs` | 同分類同色、分布平均、既有分類不變色、三方一致 |
-| `rendered-html.test.mjs` | 前端能 render、打包設定、README 指令存在 |
+| `lan-certificate.test.mjs` | 選對網卡（含 Windows 虛擬網卡）、憑證指紋穩定、mDNS 缺席不會炸、LAN TLS 真的服務 v1 |
+| `rendered-html.test.mjs` | 前端能 render、雙平台打包設定、README 指令存在、CLAUDE.md 引用的檔案存在 |
 
 **加功能時請一起加測試。** 這個專案唯一沒有測試覆蓋的部分（文件）就曾經悄悄落後好幾個 commit。
 
@@ -175,20 +191,18 @@ node_modules/electron/dist/electron.exe desktop/main.cjs --remote-debugging-port
 
 ---
 
-## 5. macOS 版：目前實際缺什麼
+## 5. 雙平台：現況與還沒做的
 
-好消息是**核心不需要改**：`onnxruntime-node` 已附 `darwin/arm64` 與 `darwin/x64` 預編譯檔（`bin/napi-v3/darwin/`），不需要編譯；`node:sqlite` 是 Node 內建；`main.cjs:269` 已經處理 macOS 關窗不退出的語意；`app.getPath("documents")` 在 macOS 會落在 `~/Documents/知識卡冊`。
+macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + zip）、`build-icon.mjs` 同時產 `.ico` 與 `.icns`、release workflow 用 `macos-13`（Intel）與 `macos-14`（Apple Silicon）兩個 runner 各自建置後合併上傳、`mcp-server.cjs` 會查 `~/Library/Application Support/`。核心本來就不用改：`onnxruntime-node` 附有 `darwin/arm64` 與 `darwin/x64` 預編譯檔，`node:sqlite` 是 Node 內建。
 
-需要補的是這些，都已確認：
+**還沒做的：**
 
-1. **`electron-builder.yml` 沒有 `mac:` 區塊。** 需要加 target（`dmg`、`zip`）、`category`、以及 `icon: build/icon.icns`。
-2. **`scripts/build-icon.mjs` 只產生 `.ico` 和 `.png`。** macOS 要 `.icns`。可在 macOS 上用 `iconutil`，或直接產生 `icon.iconset` 目錄讓 electron-builder 轉。
-3. **必須在 macOS 上建置。** Windows runner 做不出完整的 mac 產物，CI 要加一個 `macos-latest` job。
-4. **簽章與公證。** 沒有 Apple Developer ID 的話，使用者下載後會被 Gatekeeper 隔離，而且比 Windows SmartScreen 更難繞過。這是要花錢的決定，建議先確認要不要做再開工。
-5. **MCP bridge 找不到 runtime manifest。** `desktop/mcp-server.cjs` 只查 `%APPDATA%` 與 `%LOCALAPPDATA%` 兩個 Windows 環境變數。macOS 要加 `~/Library/Application Support/Knowledge Card Cabinet/runtime.json`。（桌面端寫入用的是 `app.getPath("appData")`，本來就跨平台，所以只有讀取端要補。）
-6. 產品名是中文（`知識卡冊`）。appId `com.knowledgecard.cabinet` 沒問題，但 bundle 名稱與路徑要實機確認一次。
+1. **簽章與公證。** 沒有 Apple Developer ID 的話使用者會被 Gatekeeper 隔離，比 Windows SmartScreen 更難繞過。這是要花錢的決定。
+2. **Windows 防火牆。** 第一次啟用區網分享時，Windows 會跳出允許 `知識卡冊.exe` 監聽的提示。使用者按了「取消」就會靜靜地連不上。目前只在 README 說明，沒有程式處理（加防火牆規則要管理員權限）。
+3. **Windows 沒有 mDNS。** 需要 Apple Bonjour 才有 `dns-sd.exe`。目前的做法是誠實回報並要使用者掃 QR code——這是可接受的，因為 QR 本來就帶了位址。若要補齊，就是用 `dgram` 寫一個純 Node 的 mDNS responder，**不要**改成叫系統工具。
+4. **產品名是中文（`知識卡冊`）。** appId 沒問題，但兩邊的 bundle 路徑都要實機確認過才算數。
 
-順序建議：先做 1、2、3 產出可跑的未簽章版本，確認功能正常，再決定 4。
+**在哪台機器上驗證什麼：** 平台相關的改動不能只靠 CI。`lan-certificate.test.mjs` 兩邊都會跑（以前是 `skip: process.platform !== "darwin"`，等於 Windows 完全沒有覆蓋——**不要再把測試依平台 skip 掉**，要嘛寫成跨平台，要嘛注入假的 `networkInterfaces`）。
 
 ---
 
@@ -198,29 +212,30 @@ node_modules/electron/dist/electron.exe desktop/main.cjs --remote-debugging-port
 
 ### 已經打好的基礎
 
-- API 路由已有版本前綴 `/api/v1/`
-- 根路徑會回報 `capabilities` 陣列，客戶端可以協商功能
-- API 本身已經是 Bearer token 認證
-- CORS 已有 allowlist（`corsOrigins`，預設只允許 localhost:3000）
-- 已有稽核記錄（`audit.jsonl`）
+主機端該有的東西大致齊了：
 
-### 動工前必須先解決的（照順序）
+- API 路由已有版本前綴 `/api/v1/`，根路徑回報 `capabilities` 陣列供協商
+- **裝置配對**：`desktop/device-auth.cjs`。桌面端產生一次性配對碼（十分鐘、只能換一把鑰匙），手機端拿 `kcc_dv_…` 長期 token，可個別撤銷；資料庫只存 SHA-256
+- **權限分級**：裝置 token 只能碰卡片相關路由，主機管理一律 403（見 1.8）
+- **傳輸**：`startLanApi` 在 8443 開一個獨立的 HTTPS server，憑證自簽、**要求手機端 pin 指紋**（`pairing_requires_fingerprint`）。桌面 loopback server 完全不受影響
+- **配對 QR code**：帶 `{host, certificate_fingerprint, pairing_code}`，所以手機不需要 mDNS 也能連
+- 已有稽核記錄（`audit.jsonl`），裝置的動作記成 `device:<id>`
 
-**第一優先：認證。** 這是硬前提。今天的模型是「權杖只存在伺服器端，介面完全不做認證」——因為介面只在 loopback 上。手機客戶端一旦存在，就有一個**在網路另一端、需要自己持有憑證**的東西。需要：
+**這條紅線仍然有效：不要為了讓手機連上而放寬 `KCC_HOST` 或 CORS。** 手機該走的是上面這條配對過的 TLS 通道，不是把 loopback server 打開。
 
-- 裝置配對流程（桌面端顯示配對碼 → 手機端輸入）
-- 每台裝置一組長期 token，可個別撤銷
-- 裝置列表與撤銷介面
+### 動工前還要解決的
 
-**在這件事完成前，不要為了讓手機連上而放寬 `KCC_HOST` 或 CORS。** 那等於把整個卡片庫公開。
+**第一：憑證信任模型要在 iOS 端落實。** 主機端已經把指紋交出去了，但那只有在客戶端**真的去比對**時才有意義。iOS 端請用 `URLSessionDelegate` 做 pinning，比對 `certificate_fingerprint_sha256`。**不要**用 `NSAllowsArbitraryLoads` 了事——那會讓整套配對機制變成裝飾。
 
-**第二：傳輸。** loopback 之外需要 TLS，或明確要求走 Tailscale / WireGuard。後者省事而且更安全，建議先做這個，並在文件寫清楚。
+**第二：token 存 Keychain。** 桌面端不會顯示也不會保存裝置 token，發出去就只有手機有。存錯地方就沒有第二次機會。
 
-**第三：API 契約穩定化。** 手機端一旦發布就不能隨時改 API。建議：
+**第三：API 契約穩定化。** 手機端一旦發布就不能隨時改 API：
 
 - 保持**只增不改**（additive）
 - 新能力一律加進 `capabilities`，讓舊客戶端能優雅降級
 - `/api/v1/` 之下的既有欄位不刪不改語意
+
+**第四：離線與換網路。** 憑證的 SAN 綁的是啟用當下的區網位址，換一個 Wi-Fi 就不再相符（指紋 pinning 仍然有效，但主機位址會變）。手機端要能處理「找不到主機」，而不是卡住。
 
 ### 不需要做的事
 
@@ -236,6 +251,7 @@ node_modules/electron/dist/electron.exe desktop/main.cjs --remote-debugging-port
 - **不要把範例卡片自動塞進全新安裝。** 全新安裝是空的，這是刻意的決定。範例卡只在明確要求時載入。
 - **不要在沒實測的情況下宣稱修好了。** 這個專案有過「改了設定檔就以為修好」的紀錄。前端改動請照第 4 節實際抓畫面。
 - **不要相信自己對現況的記憶。** 寫文件或回報前，先去讀程式碼。README 曾經在多個 commit 中悄悄與現實脫節。
+- **不要只在自己這台機器上驗平台相關的功能。** 在 macOS 上寫的區網分享曾經寫死 OpenSSL 路徑與 `/usr/bin/dns-sd`，在 Windows 上是「按下去就整個 main process 掛掉」。改到 `desktop/` 裡任何碰到檔案系統、網路介面或子行程的地方，先問「另一個平台上這個東西存在嗎」。
 
 ---
 

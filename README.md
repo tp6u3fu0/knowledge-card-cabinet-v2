@@ -67,6 +67,19 @@ npm run desktop:dist
 
 安裝包會輸出到 `release/`：Windows 產生 NSIS 安裝程式，macOS 產生目前 CPU 架構的 `.dmg` 與 `.zip`。`desktop:dist` 會先跑 `models:bundle` 把內建的 embedding 權重抓下來（約 130 MB，已存在就略過）。桌面版使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型，加入 Hugging Face 上的其他模型，或改用自訂 API。
 
+### 裝置配對與區網分享
+
+收藏頁「模型設定 → 裝置配對」可以把這台電腦分享給同一個 Wi-Fi 上的手機，Windows 與 macOS 行為一致。
+
+啟用後會**另外**開一個 HTTPS server（連接埠 8443）；原本的桌面 API 仍然只在 loopback，不受影響。分享的位址取自路由表上實際在用的那張網卡，所以 VPN、VirtualBox、VMware、WSL 之類的虛擬網卡不會被誤選。
+
+配對流程：桌面端產生一次性配對碼（十分鐘失效，只能換一把鑰匙），手機掃描 QR code 或手動輸入。手機拿到的是自己的長期權杖，桌面端不顯示也不保存它，隨時可以單獨撤銷。憑證是自簽的，**手機端必須比對畫面上的 SHA-256 指紋**。裝置權杖只能讀寫卡片，模型、設定與資料庫管理一律拒絕。
+
+兩件事要知道：
+
+- **Windows 第一次啟用時會跳出防火牆提示**，要允許「知識卡冊」在私人網路監聽，按取消就會連不上。
+- **mDNS（Bonjour）自動探索在 Windows 上要另外裝 Apple Bonjour。** 沒有也沒關係——QR code 本來就帶了位址，介面會告訴你目前是哪種情況。
+
 ## 常駐主機版（樹莓派、家用伺服器）
 
 同一份 runtime 也可以不透過 Electron 執行，適合放在一台常開的機器上，讓手機或其他電腦連進來。

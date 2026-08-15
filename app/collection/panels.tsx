@@ -266,7 +266,7 @@ function DeviceManagementPanel({
       <section className="device-list-card">
         <div className="device-list-card__heading">
           <div>
-            <span className="model-settings-kicker">03 / LOCAL NETWORK</span>
+            <span className="model-settings-kicker">02 / LOCAL NETWORK</span>
             <h3>同一 Wi‑Fi 直連</h3>
           </div>
           <button className={lanSharing?.enabled ? "settings-danger-button" : "create-card-submit"} type="button" onClick={lanSharing?.enabled ? onDisableLan : onEnableLan} disabled={isLanSharingChanging}>
@@ -275,7 +275,11 @@ function DeviceManagementPanel({
         </div>
         {lanSharing?.enabled ? (
           <div className="device-lan-details">
-            <p>Bonjour 已啟用。iPhone 可選擇主機，並輸入下列憑證指紋完成安全配對。</p>
+            <p>
+              {lanSharing.discovery_active
+                ? "Bonjour 已啟用，iPhone 可直接在清單中選到這台主機。"
+                : lanSharing.discovery_detail || "這台電腦沒有 mDNS 服務，iPhone 請掃描上方 QR code 或手動輸入下列位址。"}
+            </p>
             {lanSharing.api_urls.map((url) => <code key={url}>{url}</code>)}
             <code>{lanSharing.certificate_fingerprint_sha256}</code>
           </div>
@@ -285,7 +289,7 @@ function DeviceManagementPanel({
       <section className="device-list-card">
         <div className="device-list-card__heading">
           <div>
-            <span className="model-settings-kicker">02 / PAIRED DEVICES</span>
+            <span className="model-settings-kicker">03 / PAIRED DEVICES</span>
             <h3>已配對裝置</h3>
           </div>
           <span>{isLoading ? "讀取中…" : `${devices.length} 台`}</span>
@@ -326,7 +330,7 @@ function PairingQRCode({ payload }: { payload: string }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt="iPhone 配對 QR code" />
       ) : <span>產生 QR code 中…</span>}
-      <p>在 iPhone 點選「掃描 Mac 配對碼」；QR 不包含裝置 token，且配對碼只能使用一次。</p>
+      <p>在 iPhone 點選「掃描主機配對碼」；QR 不包含裝置 token，且配對碼只能使用一次。</p>
     </div>
   );
 }
