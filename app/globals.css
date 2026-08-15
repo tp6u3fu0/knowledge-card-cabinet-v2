@@ -2121,30 +2121,8 @@ a:focus-visible {
 }
 
 .background-task-panel__actions button,
-.model-option__tools button {
-  background: transparent;
-  border: 1px solid rgba(33, 31, 39, 0.2);
-  border-radius: 7px;
-  color: var(--ink);
-  cursor: pointer;
-  font: inherit;
-  font-size: 9px;
-  padding: 6px 9px;
-  transition: background 180ms ease, border-color 180ms ease;
-}
-
 .background-task-panel__actions button:hover,
-.model-option__tools button:hover:not(:disabled) {
-  background: var(--paper);
-  border-color: rgba(33, 31, 39, 0.42);
-}
-
 .background-task-panel__actions button:disabled,
-.model-option__tools button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
 .background-task-panel.is-failed .background-task-panel__progress span {
   background: #a34f48;
 }
@@ -2202,88 +2180,6 @@ a:focus-visible {
 .simple-picker {
   display: grid;
   gap: 26px;
-}
-
-.simple-picker__heading h3 {
-  margin: 4px 0 2px;
-}
-
-.simple-picker__heading p {
-  color: var(--muted);
-  font-size: 0.76rem;
-  margin: 0 0 14px;
-  max-width: 68ch;
-}
-
-.simple-choice-row {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-}
-
-.simple-choice {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  display: grid;
-  gap: 6px;
-  padding: 15px;
-}
-
-.simple-choice.is-active {
-  border-color: color-mix(in srgb, var(--accent-mint) 62%, var(--line));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-mint) 15%, transparent);
-}
-
-.simple-choice strong {
-  font-size: 1.05rem;
-}
-
-.simple-choice__headline {
-  color: var(--muted);
-  font-size: 0.73rem;
-}
-
-.simple-choice p {
-  font-size: 0.75rem;
-  margin: 2px 0 4px;
-}
-
-.simple-choice__caveat {
-  color: color-mix(in srgb, var(--accent-coral) 82%, var(--ink));
-}
-
-.simple-choice small {
-  color: var(--muted);
-  font-size: 0.68rem;
-}
-
-.simple-choice button {
-  background: var(--ink);
-  border: 0;
-  border-radius: 999px;
-  color: var(--paper);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.73rem;
-  justify-self: start;
-  margin-top: 6px;
-  padding: 7px 16px;
-}
-
-.simple-choice button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.simple-choice__state {
-  color: var(--accent-mint);
-  font-size: 0.73rem;
-  margin-top: 6px;
-}
-
-.simple-choice--wide {
-  margin-top: 14px;
 }
 
 .simple-picker__axes {
@@ -2476,10 +2372,6 @@ a:focus-visible {
   justify-self: start;
 }
 
-.model-option.is-custom {
-  border-style: dashed;
-}
-
 .settings-provider-probe {
   align-items: center;
   display: flex;
@@ -2548,199 +2440,6 @@ a:focus-visible {
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.14em;
-}
-
-.model-settings-group {
-  margin-top: 30px;
-}
-
-.model-settings-group--embedding {
-  border-top: 1px solid var(--line);
-  padding-top: 28px;
-}
-
-.model-settings-group__heading {
-  align-items: end;
-  display: flex;
-  gap: 22px;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.model-settings-group__heading h3 {
-  font-family: Georgia, "Noto Serif TC", serif;
-  font-size: 24px;
-  font-weight: 400;
-  letter-spacing: -0.05em;
-  margin: 6px 0 0;
-}
-
-.model-settings-group__heading p {
-  color: var(--muted);
-  font-size: 11px;
-  margin: 0 0 4px;
-}
-
-.model-options-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.model-option {
-  background: rgba(251, 250, 247, 0.54);
-  border: 1px solid rgba(33, 31, 39, 0.11);
-  border-radius: 13px;
-  display: flex;
-  flex-direction: column;
-  min-height: 232px;
-  padding: 15px;
-  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease,
-    transform 180ms ease;
-}
-
-.model-option:hover {
-  background: rgba(251, 250, 247, 0.9);
-  border-color: rgba(33, 31, 39, 0.21);
-  box-shadow: 0 9px 20px rgba(33, 31, 39, 0.06);
-  transform: translateY(-2px);
-}
-
-.model-option.is-active {
-  background: color-mix(in srgb, var(--mint) 24%, var(--paper));
-  border-color: color-mix(in srgb, var(--mint-deep) 92%, var(--ink));
-  box-shadow: inset 0 3px 0 #4d9b8e;
-}
-
-.model-option__topline {
-  align-items: center;
-  color: var(--muted);
-  display: flex;
-  font-size: 9px;
-  justify-content: space-between;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.model-option__topline b {
-  background: var(--butter);
-  border-radius: 99px;
-  color: var(--ink);
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0;
-  padding: 4px 6px;
-  text-transform: none;
-}
-
-.model-option h3 {
-  font-family: Georgia, "Noto Serif TC", serif;
-  font-size: 20px;
-  font-weight: 400;
-  letter-spacing: -0.05em;
-  margin: 17px 0 8px;
-}
-
-.model-option > p {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.7;
-  margin: 0;
-}
-
-.model-option__meta {
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 9px;
-  gap: 5px 9px;
-  line-height: 1.5;
-  margin-top: 14px;
-}
-
-.model-option__meta span + span {
-  border-left: 1px solid var(--line);
-  padding-left: 9px;
-}
-
-.model-option__storage {
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 9px;
-  gap: 5px 9px;
-  margin-top: 8px;
-}
-
-.model-option__storage span + span {
-  border-left: 1px solid var(--line);
-  padding-left: 9px;
-}
-
-.model-option__error {
-  color: #9b5548;
-  font-size: 9px;
-  line-height: 1.5;
-  margin-top: 8px;
-}
-
-.model-option__actions {
-  align-items: center;
-  display: flex;
-  margin-top: auto;
-  padding-top: 18px;
-}
-
-.model-option__actions button {
-  background: var(--ink);
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  color: var(--paper);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 8px 10px;
-  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
-}
-
-.model-option__actions button:hover {
-  background: transparent;
-  color: var(--ink);
-  transform: translateY(-2px);
-}
-
-.model-option__actions button:disabled {
-  cursor: wait;
-  opacity: 0.46;
-}
-
-.model-option__actions button:disabled:hover {
-  background: var(--ink);
-  color: var(--paper);
-  transform: none;
-}
-
-.model-option__tools {
-  display: flex;
-  gap: 7px;
-  margin-top: 10px;
-}
-
-.model-option__tools button:last-child {
-  color: #a34f48;
-}
-
-.model-option__active,
-.model-option__pending {
-  color: #3d897c;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.model-option__pending {
-  color: var(--muted);
-  font-weight: 400;
 }
 
 .model-settings-footnote {
@@ -4842,16 +4541,6 @@ a:focus-visible {
     grid-column: 1 / -1;
   }
 
-  .model-settings-group__heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .model-options-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .collection-card {
     padding: 8px;
   }
@@ -4866,14 +4555,6 @@ a:focus-visible {
 
   .model-hardware-note p {
     grid-column: auto;
-  }
-
-  .model-options-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .model-option {
-    min-height: 0;
   }
 
   .background-task-panel {
@@ -4900,4 +4581,464 @@ a:focus-visible {
     display: block;
     margin-top: 35px;
   }
+}
+
+/* ── Settings, told in cards ───────────────────────────────────────────────
+   The settings page reuses .collection-card so a model reads as the same kind
+   of object as a knowledge card. These rules only add what a settings card
+   needs on top: the caption and tags the collection deliberately hides, a
+   smaller footprint, and the slot the active card sits in. */
+
+.setting-card {
+  aspect-ratio: 0.74;
+  padding: 11px;
+}
+
+.setting-card--compact {
+  aspect-ratio: 0.82;
+  box-shadow: none;
+}
+
+/* Non-interactive cards (the ones sitting in a slot) must not look pressable. */
+.setting-card--static {
+  cursor: default;
+}
+
+.setting-card--static:hover {
+  box-shadow: 0 8px 18px rgba(33, 31, 39, 0.055);
+  transform: none;
+}
+
+.setting-card:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
+/* The collection hides these to keep a wall of cards calm; here they carry the
+   information the choice is actually made on. */
+.setting-card .collection-card__copy {
+  gap: 5px;
+  padding: 9px 3px 5px;
+}
+
+.setting-card .collection-card__copy strong {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.setting-card .collection-card__copy span {
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 10.5px;
+  line-height: 1.65;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.setting-card .collection-card__tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 3px;
+}
+
+.setting-card--compact .collection-card__copy span {
+  -webkit-line-clamp: 2;
+}
+
+.setting-card__state {
+  background: color-mix(in srgb, var(--domain-color) 20%, var(--paper));
+  border-radius: 99px;
+  color: var(--ink);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  margin-left: auto;
+  padding: 5px 9px;
+}
+
+.setting-card.is-active .setting-card__state {
+  background: var(--domain-color);
+  color: var(--paper);
+}
+
+/* ── The slot ── */
+
+.settings-slot-row {
+  align-items: stretch;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 180px)) minmax(0, 1fr);
+  margin: 20px 0 22px;
+}
+
+.card-slot {
+  display: grid;
+  gap: 9px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.card-slot__label {
+  display: grid;
+  gap: 3px;
+}
+
+.card-slot__label strong {
+  font-family: Georgia, "Noto Serif TC", serif;
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.card-slot__label small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+/* An empty slot keeps the shape of the missing card rather than collapsing,
+   so a slot with nothing in it reads as a state and not as a layout failure. */
+.card-slot__well {
+  align-items: center;
+  background: rgba(33, 31, 39, 0.028);
+  border: 1px dashed rgba(33, 31, 39, 0.18);
+  border-radius: 20px;
+  display: flex;
+  justify-content: center;
+  min-height: 190px;
+  padding: 9px;
+}
+
+.card-slot__well.is-filled {
+  background: rgba(33, 31, 39, 0.045);
+  border-style: solid;
+}
+
+.card-slot__well > .collection-card {
+  width: 100%;
+}
+
+.card-slot__empty {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.model-hardware-note {
+  align-content: start;
+  background: rgba(251, 250, 247, 0.64);
+  border: 1px solid rgba(33, 31, 39, 0.11);
+  border-radius: 14px;
+  display: grid;
+  gap: 5px;
+  padding: 16px 18px;
+}
+
+.model-hardware-note strong {
+  font-family: Georgia, "Noto Serif TC", serif;
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.model-hardware-note span,
+.model-hardware-note p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* ── Card walls ── */
+
+.settings-block {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 26px;
+}
+
+.settings-block__heading {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-block__heading h3 {
+  font-family: Georgia, "Noto Serif TC", serif;
+  font-size: 23px;
+  font-weight: 400;
+  margin: 0;
+}
+
+.settings-block__heading p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.model-card-wall {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+}
+
+.model-card-wall--single {
+  grid-template-columns: minmax(0, 210px);
+}
+
+.model-card-wall__item {
+  display: grid;
+  gap: 7px;
+}
+
+.model-card-wall__tier {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.model-card-wall__note {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.model-card-wall__note.is-caveat {
+  color: var(--accent-coral);
+}
+
+.model-card {
+  display: grid;
+  gap: 7px;
+}
+
+.model-card__error {
+  color: var(--accent-coral);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.model-card__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-card__tools button {
+  background: transparent;
+  border: 1px solid rgba(33, 31, 39, 0.16);
+  border-radius: 99px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 10px;
+}
+
+.model-card__tools button:hover:not(:disabled) {
+  border-color: rgba(33, 31, 39, 0.34);
+  color: var(--ink);
+}
+
+.model-card__tools button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ── Glossary cards ── */
+
+.glossary-row {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 16px;
+  margin-top: 30px;
+  padding-top: 22px;
+}
+
+.glossary-row__heading {
+  display: grid;
+  gap: 5px;
+}
+
+.glossary-row__heading p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.glossary-row__wall {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+/* FlipCard is sized for the reading view; inside a glossary row it has to come
+   down to the size of the other cards on the page. */
+.glossary-card__shell .card-flip {
+  max-width: none;
+  width: 100%;
+}
+
+.glossary-card__shell .card-viewer__hint {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  margin: 0 0 8px;
+}
+
+.glossary-card__shell .card-flip__toggle {
+  font-size: 10px;
+  margin-top: 9px;
+}
+
+.glossary-card {
+  aspect-ratio: 0.68;
+  height: 100%;
+  padding: 11px;
+}
+
+.glossary-card .collection-card__copy strong {
+  font-size: 18px;
+}
+
+.glossary-card .collection-card__copy span {
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 10.5px;
+  line-height: 1.6;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.glossary-card .collection-card__tags {
+  display: flex;
+  gap: 4px;
+  padding: 0 3px;
+}
+
+.glossary-card--back .glossary-card__copy {
+  padding: 0 3px;
+}
+
+.glossary-card--back .collection-card__plain-lead {
+  -webkit-line-clamp: 6;
+  font-size: 11.5px;
+  line-height: 1.72;
+}
+
+.glossary-card--back .collection-card__plain-body {
+  -webkit-line-clamp: 5;
+  font-size: 10.5px;
+}
+
+/* ── Tidied forms ── */
+
+.model-add-form__row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.model-add-form__kind {
+  border: 1px solid rgba(33, 31, 39, 0.16);
+  border-radius: 99px;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.model-add-form__kind button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 7px 14px;
+}
+
+.model-add-form__kind button.is-active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.model-add-form__row input.model-add-form__id {
+  border: 1px solid rgba(33, 31, 39, 0.16);
+  border-radius: 10px;
+  flex: 1 1 260px;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  padding: 9px 12px;
+}
+
+.model-add-form__fallback {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.model-add-form__fallback p {
+  color: var(--accent-coral);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.settings-provider-probe--dimensions {
+  border-top: 1px dashed rgba(33, 31, 39, 0.14);
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.device-list__actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.device-list__actions > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* The hardware note is a single column of facts. It inherited a two-column
+   grid from the layout it used to sit in, which put its heading and its RAM
+   figure side by side. */
+.model-hardware-note {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Where a model runs is a choice between two things, so it gets two cards. */
+.settings-source-choice {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin: 14px 0 4px;
+  max-width: 460px;
+}
+
+/* One surface treatment for every block on every settings tab, so the four
+   tabs read as one page rather than four. */
+.settings-provider-card,
+.settings-data-card,
+.device-pairing-card,
+.device-list-card {
+  background: rgba(251, 250, 247, 0.64);
+  border: 1px solid rgba(33, 31, 39, 0.11);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.settings-data-card .settings-block__heading,
+.device-list-card .settings-block__heading {
+  gap: 4px;
+}
+
+.settings-block__heading + .settings-data-actions {
+  margin-top: 14px;
 }

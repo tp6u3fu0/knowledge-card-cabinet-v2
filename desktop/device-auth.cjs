@@ -116,6 +116,23 @@ function createDeviceAuth({ storagePath }) {
       }
       return publicDevice(device);
     },
+
+    /**
+     * Drops a revoked device from the list entirely.
+     *
+     * Revocation is kept as a separate, prior step on purpose: it is the part
+     * that actually cuts the phone off, and it leaves a visible record that it
+     * happened. Removing the record is only tidying up afterwards, so a device
+     * that is still live cannot be made to disappear in one click.
+     */
+    forget(id) {
+      const index = devices.findIndex((candidate) => candidate.id === id);
+      if (index === -1) return { ok: false, code: "not_found" };
+      if (!devices[index].revoked_at) return { ok: false, code: "still_active" };
+      const [removed] = devices.splice(index, 1);
+      save();
+      return { ok: true, device: publicDevice(removed) };
+    },
   };
 }
 

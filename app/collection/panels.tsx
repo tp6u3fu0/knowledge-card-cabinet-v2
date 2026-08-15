@@ -3,8 +3,13 @@
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import QRCode from "qrcode";
 
+import type { CoverMotif } from "../cover-art";
+import { CardSlot, GlossaryCard, SettingCard } from "./setting-cards";
+import { glossaryFor } from "./glossary";
+
 import type {
   ApiProbeResult,
+  EmbeddingProbeResult,
   BackgroundTask,
   CardDraft,
   DimensionGuideEntry,
@@ -97,10 +102,39 @@ export function TrashPanel({
   );
 }
 
+/** Which glyph stands for a kind of model on its cover. */
+export function modelGlyph(model: ModelOption): CoverMotif["shape"] {
+  if (model.kind === "summary") return "steps";
+  return (model.dimensions ?? 0) >= 1024 ? "constellation" : "target";
+}
+
+function modelTags(model: ModelOption): string[] {
+  const tags = [model.size_label];
+  if (model.kind === "embedding" && model.dimensions) tags.push(`${model.dimensions} 維`);
+  if (model.custom) tags.push("自訂");
+  return tags;
+}
+
+function modelState(model: ModelOption, isBusy: boolean): string {
+  if (model.active) return "使用中";
+  if (model.status === "downloading" || isBusy) return "準備中…";
+  if (model.installed) return "已下載";
+  return model.size_label ? `下載 ${model.size_label}` : "未下載";
+}
+
+/**
+ * A model as a card you pick up, rather than a row in a list.
+ *
+ * Pressing the card is the whole primary interaction: it selects an installed
+ * model, or starts the download for one that is not. File maintenance lives on
+ * a separate strip underneath, because those are things you do to a model
+ * occasionally and choosing one is what you came here for.
+ */
 export function ModelOptionCard({
   model,
   actionId,
   isTaskRunning,
+  showTools = true,
   onDownload,
   onSelect,
   onInspect,
@@ -110,6 +144,7 @@ export function ModelOptionCard({
   model: ModelOption;
   actionId: string;
   isTaskRunning: boolean;
+  showTools?: boolean;
   onDownload: (id: string) => void;
   onSelect: (kind: ModelKind, id: string) => void;
   onInspect: (id: string) => void;
@@ -117,47 +152,31 @@ export function ModelOptionCard({
   onRemoveCustom: (id: string) => void;
 }) {
   const isBusy = actionId === model.id;
+  const isPending = model.status === "downloading" || isBusy;
+
   return (
-    <article className={`model-option${model.active ? " is-active" : ""}${model.custom ? " is-custom" : ""}`}>
-      <div className="model-option__topline">
-        <span>{model.short_label}</span>
-        {model.recommended ? <b>依硬體推薦</b> : null}
-      </div>
-      <h3>{model.label}</h3>
-      <p>{model.description}</p>
-      <div className="model-option__meta">
-        <span>{model.size_label}</span>
-        <span>{model.tier}</span>
-        <span>{model.languages}</span>
-        {model.kind === "embedding" && model.dimensions ? <span>{model.dimensions} 維</span> : null}
-      </div>
-      <div className="model-option__storage">
-        <span>檔案：{model.storage?.size_label ?? (model.builtin ? "不需下載" : "尚未檢查")}</span>
-        <span>{model.storage?.status === "partial" ? "可續傳" : model.storage?.status === "ready" ? "檔案完整" : model.builtin ? "內建" : "尚未下載"}</span>
-      </div>
+    <div className={`model-card${model.active ? " is-active" : ""}`}>
+      <SettingCard
+        accent={model.kind === "summary" ? "amber" : "sky"}
+        glyph={modelGlyph(model)}
+        number={model.short_label}
+        meta={model.recommended ? "依硬體推薦" : model.kind === "summary" ? "整理" : "向量"}
+        title={model.label}
+        caption={model.description}
+        tags={modelTags(model)}
+        state={modelState(model, isBusy)}
+        active={model.active}
+        disabled={isTaskRunning || isPending}
+        onClick={() => (model.installed ? onSelect(model.kind, model.id) : onDownload(model.id))}
+      />
       {model.error ? (
-        <small className="model-option__error">
+        <small className="model-card__error">
           上次載入失敗{model.error_code ? `（${model.error_code}）` : ""}：{model.error}
           {model.error_hint ? ` ${model.error_hint}` : ""}
         </small>
       ) : null}
-      <div className="model-option__actions">
-        {model.active ? (
-          <span className="model-option__active">目前使用中</span>
-        ) : model.status === "downloading" || isBusy ? (
-          <span className="model-option__pending">下載／準備中…</span>
-        ) : model.installed ? (
-          <button type="button" onClick={() => onSelect(model.kind, model.id)} disabled={isTaskRunning}>
-            啟用這個模型
-          </button>
-        ) : (
-          <button type="button" onClick={() => onDownload(model.id)} disabled={isTaskRunning}>
-            下載模型
-          </button>
-        )}
-      </div>
-      {!model.builtin ? (
-        <div className="model-option__tools">
+      {showTools && !model.builtin ? (
+        <div className="model-card__tools">
           <button type="button" onClick={() => onInspect(model.id)} disabled={isTaskRunning}>檢查檔案</button>
           {!model.active ? <button type="button" onClick={() => onRemove(model.id)} disabled={isTaskRunning || isBusy}>清理檔案</button> : null}
           {model.custom && !model.active ? (
@@ -165,7 +184,41 @@ export function ModelOptionCard({
           ) : null}
         </div>
       ) : null}
-    </article>
+    </div>
+  );
+}
+
+/**
+ * The plain-language answers for one tab, kept at the bottom of it.
+ *
+ * Below the controls rather than above: someone who already knows what an
+ * embedding is should not have to scroll past an explanation of one every time
+ * they come to change a setting.
+ */
+function GlossaryRow({ scope }: { scope: "local" | "api" | "data" | "devices" }) {
+  const entries = glossaryFor(scope);
+  if (entries.length === 0) return null;
+  return (
+    <section className="glossary-row">
+      <div className="glossary-row__heading">
+        <span className="model-settings-kicker">PLAIN LANGUAGE / 這些詞是什麼意思</span>
+        <p>這一頁用到的詞，翻到背面有白話說明。這些是說明卡，不會出現在你的收藏裡。</p>
+      </div>
+      <div className="glossary-row__wall">
+        {entries.map((entry) => (
+          <GlossaryCard
+            key={entry.id}
+            accent={entry.accent}
+            glyph={entry.glyph}
+            number={entry.number}
+            term={entry.term}
+            question={entry.question}
+            answer={entry.answer}
+            aside={entry.aside}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -222,6 +275,7 @@ function DeviceManagementPanel({
   revokingId,
   onIssueCode,
   onRevoke,
+  onForget,
   lanSharing,
   isLanSharingChanging,
   onEnableLan,
@@ -234,6 +288,7 @@ function DeviceManagementPanel({
   revokingId: string;
   onIssueCode: () => void;
   onRevoke: (id: string) => void;
+  onForget: (id: string) => void;
   lanSharing: LanSharingStatus | null;
   isLanSharingChanging: boolean;
   onEnableLan: () => void;
@@ -265,7 +320,7 @@ function DeviceManagementPanel({
 
       <section className="device-list-card">
         <div className="device-list-card__heading">
-          <div>
+          <div className="settings-block__heading">
             <span className="model-settings-kicker">02 / LOCAL NETWORK</span>
             <h3>同一 Wi‑Fi 直連</h3>
           </div>
@@ -288,7 +343,7 @@ function DeviceManagementPanel({
 
       <section className="device-list-card">
         <div className="device-list-card__heading">
-          <div>
+          <div className="settings-block__heading">
             <span className="model-settings-kicker">03 / PAIRED DEVICES</span>
             <h3>已配對裝置</h3>
           </div>
@@ -302,12 +357,25 @@ function DeviceManagementPanel({
                   <strong>{device.name}</strong>
                   <small>加入於 {new Date(device.created_at).toLocaleString("zh-TW")}{device.last_used_at ? ` · 最近使用 ${new Date(device.last_used_at).toLocaleString("zh-TW")}` : ""}</small>
                 </div>
-                {device.revoked_at ? <span>已撤銷</span> : <button className="settings-danger-button" type="button" onClick={() => onRevoke(device.id)} disabled={revokingId === device.id}>{revokingId === device.id ? "撤銷中…" : "撤銷"}</button>}
+                {device.revoked_at ? (
+                  <div className="device-list__actions">
+                    <span>已撤銷</span>
+                    <button className="settings-danger-button" type="button" onClick={() => onForget(device.id)} disabled={revokingId === device.id}>
+                      {revokingId === device.id ? "刪除中…" : "刪除紀錄"}
+                    </button>
+                  </div>
+                ) : (
+                  <button className="settings-danger-button" type="button" onClick={() => onRevoke(device.id)} disabled={revokingId === device.id}>
+                    {revokingId === device.id ? "撤銷中…" : "撤銷"}
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
       </section>
+
+      <GlossaryRow scope="devices" />
     </div>
   );
 }
@@ -372,7 +440,7 @@ export function DataManagementPanel({
       </div>
 
       <section className="settings-data-card">
-        <div>
+        <div className="settings-block__heading">
           <span className="model-settings-kicker">01 / BACKUP</span>
           <h3>匯出本機資料</h3>
           <p>包含卡片內容、封面資料、embedding、垃圾桶內容與卡片關聯。API 金鑰不會寫入備份檔。匯入會取代目前本機資料。</p>
@@ -433,9 +501,14 @@ export function DataManagementPanel({
 }
 
 /**
- * Adding a model by Hugging Face id. Deliberately not a curated dropdown: the
- * useful set changes faster than this app ships, so the field takes anything
- * the runtime can actually run, and the backend explains why when it cannot.
+ * Adding a model from Hugging Face, reduced to the one thing only you know.
+ *
+ * The id is the whole input. Everything else the form used to ask for — the
+ * display name, the vector width — the backend already reads out of the repo's
+ * own config.json when it validates the id, so asking up front was asking
+ * people to look up something the app was about to look up anyway. The extra
+ * fields still exist, but only appear once detection has actually failed, which
+ * in practice means being offline.
  */
 function AddModelForm({
   actionId,
@@ -448,75 +521,81 @@ function AddModelForm({
   const [modelId, setModelId] = useState("");
   const [label, setLabel] = useState("");
   const [dimensions, setDimensions] = useState("");
+  const [needsDetail, setNeedsDetail] = useState(false);
   const isAdding = actionId === "custom-add";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!modelId.trim()) return;
     const added = await onAdd({ kind, model_id: modelId.trim(), label: label.trim(), dimensions });
-    if (!added) return;
+    if (!added) {
+      // The usual cause is that the width could not be read, so offer the
+      // fields rather than leaving the person to guess what went wrong.
+      if (kind === "embedding" && !dimensions) setNeedsDetail(true);
+      return;
+    }
     setModelId("");
     setLabel("");
     setDimensions("");
+    setNeedsDetail(false);
   };
 
   return (
     <form className="model-add-form" onSubmit={submit}>
       <div className="model-add-form__heading">
         <span className="model-settings-kicker">ADD FROM HUGGING FACE</span>
-        <strong>加入其他開源模型</strong>
+        <strong>貼上模型 id 就好</strong>
         <p>
-          填入 Hugging Face 模型 id（<code>作者/模型名稱</code>）即可加入清單。本機 runtime 只能執行 ONNX 權重，
-          所以請選擇有 ONNX 版本的模型——<code>Xenova</code> 與 <code>onnx-community</code> 轉檔的模型都可以。
+          填 <code>作者/模型名稱</code>，其餘資訊會自動從 Hugging Face 讀取。本機只跑得動 ONNX 權重，
+          所以請挑有 ONNX 版本的模型——<code>Xenova</code> 與 <code>onnx-community</code> 轉檔的都可以。
         </p>
       </div>
-      <div className="model-add-form__fields">
-        <label>
-          <span>用途</span>
-          <select value={kind} onChange={(event) => setKind(event.target.value as ModelKind)}>
-            <option value="embedding">語意向量</option>
-            <option value="summary">摘要整理</option>
-          </select>
-        </label>
-        <label className="model-add-form__id">
-          <span>模型 id</span>
-          <input
-            type="text"
-            value={modelId}
-            onChange={(event) => setModelId(event.target.value)}
-            placeholder={kind === "embedding" ? "例如：Xenova/multilingual-e5-base" : "例如：Xenova/LaMini-Flan-T5-783M"}
-            required
-          />
-        </label>
-        <label>
-          <span>顯示名稱 <em>選填</em></span>
-          <input type="text" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="留白就用模型名稱" />
-        </label>
-        {kind === "embedding" ? (
-          <label>
-            <span>向量維度 <em>離線時必填</em></span>
-            <input
-              type="number"
-              min={1}
-              value={dimensions}
-              onChange={(event) => setDimensions(event.target.value)}
-              placeholder="自動偵測"
-            />
-          </label>
-        ) : null}
+      <div className="model-add-form__row">
+        <div className="model-add-form__kind" role="group" aria-label="用途">
+          <button className={kind === "embedding" ? "is-active" : ""} type="button" onClick={() => setKind("embedding")}>語意向量</button>
+          <button className={kind === "summary" ? "is-active" : ""} type="button" onClick={() => setKind("summary")}>摘要整理</button>
+        </div>
+        <input
+          className="model-add-form__id"
+          type="text"
+          value={modelId}
+          onChange={(event) => setModelId(event.target.value)}
+          placeholder={kind === "embedding" ? "Xenova/multilingual-e5-base" : "Xenova/LaMini-Flan-T5-783M"}
+          aria-label="Hugging Face 模型 id"
+          required
+        />
+        <button className="create-card-submit" type="submit" disabled={isAdding || !modelId.trim()}>
+          {isAdding ? "檢查中…" : "加入"}
+        </button>
       </div>
-      <button className="create-card-submit" type="submit" disabled={isAdding || !modelId.trim()}>
-        {isAdding ? "檢查模型中…" : "加入清單"}
-      </button>
+      {needsDetail ? (
+        <div className="model-add-form__fallback">
+          <p>讀不到這個模型的資訊（離線時會這樣）。補上這兩欄就能手動加入。</p>
+          <label>
+            <span>顯示名稱 <em>選填</em></span>
+            <input type="text" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="留白就用模型名稱" />
+          </label>
+          {kind === "embedding" ? (
+            <label>
+              <span>向量維度</span>
+              <input type="number" min={1} value={dimensions} onChange={(event) => setDimensions(event.target.value)} placeholder="例如 768" />
+            </label>
+          ) : null}
+        </div>
+      ) : null}
     </form>
   );
 }
 
 /**
- * The default view of the local-models tab: pick a size for tidying and a
- * language for search, and let the app choose the checkpoint. Everything the
- * advanced view offers is still reachable — this only changes what has to be
- * decided first.
+ * The default view: pick a size for tidying and a language for search, and let
+ * the app choose the checkpoint.
+ *
+ * It renders the same card component as the advanced view on purpose. The two
+ * used to be laid out differently, which made switching between them feel like
+ * arriving at an unrelated screen rather than seeing more of the same thing.
+ * Simple shows the shortlist; advanced shows everything. That is the only
+ * difference there should be.
  */
 function SimpleModelPicker({
   choices,
@@ -544,87 +623,60 @@ function SimpleModelPicker({
   const byId = new Map(models.map((model) => [model.id, model]));
   const selected = choices.embedding.find((choice) => choice.language === language && choice.dimensions === dimensions);
   const selectedModel = selected ? byId.get(selected.model_id) : undefined;
-
-  const action = (model: ModelOption | undefined, kind: ModelKind) => {
-    if (!model) return null;
-    if (model.active) return <span className="simple-choice__state">目前使用中</span>;
-    if (model.status === "downloading" || actionId === model.id) return <span className="simple-choice__state">下載／準備中…</span>;
-    return (
-      <button
-        type="button"
-        onClick={() => (model.installed ? onSelect(kind, model.id) : onDownload(model.id))}
-        disabled={isTaskRunning}
-      >
-        {model.installed ? "使用這個" : `下載並使用（${model.size_label}）`}
-      </button>
-    );
-  };
+  const cardProps = { actionId, isTaskRunning, showTools: false, onDownload, onSelect, onInspect: () => {}, onRemove: () => {}, onRemoveCustom: () => {} };
 
   return (
     <div className="simple-picker">
-      <div className="simple-picker__group">
-        <div className="simple-picker__heading">
+      <div className="settings-block">
+        <div className="settings-block__heading">
           <span className="model-settings-kicker">01 / 整理筆記</span>
           <h3>要多大的整理模型？</h3>
           <p>模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。隨時可以改。</p>
         </div>
-        <div className="simple-choice-row">
+        <div className="model-card-wall">
           {choices.summary.map((choice) => {
             const model = byId.get(choice.model_id);
+            if (!model) return null;
             return (
-              <article className={`simple-choice${choice.model_id === activeSummary ? " is-active" : ""}`} key={choice.tier}>
-                <strong>{choice.label}</strong>
-                <span className="simple-choice__headline">{choice.headline}</span>
-                <p>{choice.note}</p>
-                {choice.model_label === choice.headline ? null : <small>{choice.model_label}</small>}
-                {action(model, "summary")}
-              </article>
+              <div className="model-card-wall__item" key={choice.tier}>
+                <span className="model-card-wall__tier">{choice.label}</span>
+                <ModelOptionCard model={{ ...model, active: choice.model_id === activeSummary }} {...cardProps} />
+                <p className="model-card-wall__note">{choice.note}</p>
+              </div>
             );
           })}
         </div>
       </div>
 
-      <div className="simple-picker__group">
-        <div className="simple-picker__heading">
+      <div className="settings-block">
+        <div className="settings-block__heading">
           <span className="model-settings-kicker">02 / 搜尋與關聯</span>
           <h3>你的筆記主要用什麼語言？</h3>
           <p>這會決定卡片之間的語意距離。維度必須全庫一致，換了會重建所有卡片的向量。</p>
         </div>
         <div className="simple-picker__axes">
           <div className="simple-axis" role="group" aria-label="語言">
-            {choices.embedding.length > 0
-              ? [...new Map(choices.embedding.map((choice) => [choice.language, choice.language_label])).entries()].map(([value, label]) => (
-                <button
-                  className={language === value ? "is-active" : ""}
-                  key={value}
-                  type="button"
-                  onClick={() => setLanguage(value)}
-                >
-                  {label}
-                </button>
-              ))
-              : null}
+            {[...new Map(choices.embedding.map((choice) => [choice.language, choice.language_label])).entries()].map(([value, label]) => (
+              <button className={language === value ? "is-active" : ""} key={value} type="button" onClick={() => setLanguage(value)}>
+                {label}
+              </button>
+            ))}
           </div>
           <div className="simple-axis" role="group" aria-label="向量維度">
             {[384, 1024].map((value) => (
-              <button
-                className={dimensions === value ? "is-active" : ""}
-                key={value}
-                type="button"
-                onClick={() => setDimensions(value)}
-              >
+              <button className={dimensions === value ? "is-active" : ""} key={value} type="button" onClick={() => setDimensions(value)}>
                 {value} 維{value === 384 ? "（小而快）" : "（較準）"}
               </button>
             ))}
           </div>
         </div>
-        {selected ? (
-          <article className={`simple-choice simple-choice--wide${selectedModel?.active ? " is-active" : ""}`}>
-            <strong>{selected.model_label}</strong>
-            <span className="simple-choice__headline">{selected.dimensions} 維 · {selected.size_label}</span>
-            {selected.note ? <p className="simple-choice__caveat">{selected.note}</p> : <p>{selectedModel?.description}</p>}
-            {action(selectedModel, "embedding")}
-          </article>
+        {selected && selectedModel ? (
+          <div className="model-card-wall model-card-wall--single">
+            <div className="model-card-wall__item">
+              <ModelOptionCard model={selectedModel} {...cardProps} />
+              {selected.note ? <p className="model-card-wall__note is-caveat">{selected.note}</p> : null}
+            </div>
+          </div>
         ) : null}
       </div>
     </div>
@@ -695,6 +747,7 @@ export function ModelSettingsPanel({
   onAddCustomModel,
   onRemoveCustomModel,
   onProbeApi,
+  onProbeEmbedding,
   onCancelTask,
   onRetryTask,
   onDismissTask,
@@ -708,6 +761,7 @@ export function ModelSettingsPanel({
   onResetDatabase,
   onIssuePairingCode,
   onRevokeDevice,
+  onForgetDevice,
   lanSharing,
   isLanSharingChanging,
   onEnableLan,
@@ -742,6 +796,7 @@ export function ModelSettingsPanel({
   onAddCustomModel: (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => Promise<boolean>;
   onRemoveCustomModel: (id: string) => void;
   onProbeApi: (kind: ModelKind) => Promise<ApiProbeResult>;
+  onProbeEmbedding: () => Promise<EmbeddingProbeResult>;
   onCancelTask: () => void;
   onRetryTask: () => void;
   onDismissTask: () => void;
@@ -755,6 +810,7 @@ export function ModelSettingsPanel({
   onResetDatabase: () => void;
   onIssuePairingCode: () => void;
   onRevokeDevice: (id: string) => void;
+  onForgetDevice: (id: string) => void;
   lanSharing: LanSharingStatus | null;
   isLanSharingChanging: boolean;
   onEnableLan: () => void;
@@ -762,8 +818,12 @@ export function ModelSettingsPanel({
 }) {
   const summaryModels = catalog?.models.filter((model) => model.kind === "summary") ?? [];
   const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
+  const activeSummaryModel = summaryModels.find((model) => model.id === catalog?.active.summary);
+  const activeEmbeddingModel = embeddingModels.find((model) => model.id === catalog?.active.embedding);
   const [probeResults, setProbeResults] = useState<Record<ModelKind, ApiProbeResult | null>>({ summary: null, embedding: null });
   const [probing, setProbing] = useState<ModelKind | "">("");
+  const [dimensionProbe, setDimensionProbe] = useState<EmbeddingProbeResult | null>(null);
+  const [isMeasuring, setMeasuring] = useState(false);
   // Simple by default: naming a checkpoint is a decision most people have no
   // basis to make on first run.
   const [isAdvanced, setIsAdvanced] = useState(false);
@@ -776,28 +836,39 @@ export function ModelSettingsPanel({
     const probe = probeResults[kind];
     return (
       <div className="settings-provider-card">
-        <div className="settings-provider-card__heading">
-          <div>
-            <span className="model-settings-kicker">{kind === "summary" ? "01 / SUMMARY" : "02 / EMBEDDING"}</span>
-            <h3>{label}</h3>
-          </div>
+        <div className="settings-block__heading">
+          <span className="model-settings-kicker">{kind === "summary" ? "01 / SUMMARY" : "02 / EMBEDDING"}</span>
+          <h3>{label}</h3>
           <p>{description}</p>
         </div>
-        <div className="settings-provider-card__mode">
-          <label>
-            <span>執行方式</span>
-            <select
-              value={draft.source}
-              onChange={(event) => onDraftChange(kind, "source", event.target.value)}
-            >
-              <option value="local">本機模型</option>
-              <option value="api">自訂 API</option>
-            </select>
-          </label>
-          <div className={`settings-provider-status${setting?.source === "api" ? " is-api" : ""}`}>
-            <span>{setting?.source === "api" ? "目前使用自訂 API" : "目前使用本機模型"}</span>
-            {setting?.model ? <strong>{setting.model}</strong> : null}
-          </div>
+        {/* Where the work happens is a choice between two things, so it is two
+            cards — the same gesture as picking a model on the previous tab,
+            rather than a dropdown that hides one option until opened. */}
+        <div className="settings-source-choice">
+          <SettingCard
+            accent={kind === "summary" ? "amber" : "sky"}
+            glyph="folder"
+            number="LOCAL"
+            meta="本機"
+            title="本機模型"
+            caption="用這台電腦的 CPU 計算，卡片內容完全不離開這裡。"
+            tags={setting?.source !== "api" ? ["目前使用中"] : []}
+            active={draft.source === "local"}
+            compact
+            onClick={() => onDraftChange(kind, "source", "local")}
+          />
+          <SettingCard
+            accent="lavender"
+            glyph="link"
+            number="API"
+            meta="外部服務"
+            title="自訂 API"
+            caption="送到你指定的服務計算。Ollama、LM Studio 也走這裡，但它們在本機執行。"
+            tags={setting?.source === "api" && setting?.model ? [setting.model] : []}
+            active={draft.source === "api"}
+            compact
+            onClick={() => onDraftChange(kind, "source", "api")}
+          />
         </div>
         {isApi ? (
           <div className="settings-provider-fields">
@@ -869,6 +940,35 @@ export function ModelSettingsPanel({
                 </span>
               ) : null}
             </div>
+            {kind === "embedding" ? (
+              <div className="settings-provider-probe settings-provider-probe--dimensions">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMeasuring(true);
+                    setDimensionProbe(null);
+                    setDimensionProbe(await onProbeEmbedding());
+                    setMeasuring(false);
+                  }}
+                  disabled={isMeasuring || !draft.api_url || !draft.model}
+                >
+                  {isMeasuring ? "測量中…" : "測量維度"}
+                </button>
+                {dimensionProbe ? (
+                  <span className={dimensionProbe.ok && dimensionProbe.matches_store !== false ? "is-ok" : "is-error"}>
+                    {!dimensionProbe.ok
+                      ? `測不到維度：${dimensionProbe.detail}`
+                      : dimensionProbe.matches_store === false
+                        ? `這個服務回傳 ${dimensionProbe.dimensions} 維，但你的 ${dimensionProbe.card_count} 張卡片是 ${dimensionProbe.store_dimensions} 維。存下去會重建全部向量。`
+                        : dimensionProbe.matches_store === null
+                          ? `這個服務回傳 ${dimensionProbe.dimensions} 維。卡冊還沒有向量，這個寬度會成為之後的基準。`
+                          : `這個服務回傳 ${dimensionProbe.dimensions} 維，和現有卡片一致。`}
+                  </span>
+                ) : (
+                  <span>送一小段文字過去，數回傳幾個數字——服務不會用別的方式告訴你這件事。</span>
+                )}
+              </div>
+            ) : null}
             {kind === "embedding" ? (
               <label>
                 <span>回傳格式</span>
@@ -951,25 +1051,29 @@ export function ModelSettingsPanel({
           revokingId={revokingDeviceId}
           onIssueCode={onIssuePairingCode}
           onRevoke={onRevokeDevice}
+          onForget={onForgetDevice}
           lanSharing={lanSharing}
           isLanSharingChanging={isLanSharingChanging}
           onEnableLan={onEnableLan}
           onDisableLan={onDisableLan}
         />
       ) : settingsTab === "data" ? (
-        <DataManagementPanel
-          isExporting={isDatabaseExporting}
-          isImporting={isDatabaseImporting}
-          isResetting={isDatabaseResetting}
-          hasBackup={hasDatabaseBackup}
-          backupAcknowledged={databaseBackupAcknowledged}
-          resetConfirmation={databaseResetConfirmation}
-          onExport={onExportDatabase}
-          onImport={onImportDatabase}
-          onBackupAcknowledgedChange={onDatabaseBackupAcknowledgedChange}
-          onResetConfirmationChange={onDatabaseResetConfirmationChange}
-          onReset={onResetDatabase}
-        />
+        <>
+          <DataManagementPanel
+            isExporting={isDatabaseExporting}
+            isImporting={isDatabaseImporting}
+            isResetting={isDatabaseResetting}
+            hasBackup={hasDatabaseBackup}
+            backupAcknowledged={databaseBackupAcknowledged}
+            resetConfirmation={databaseResetConfirmation}
+            onExport={onExportDatabase}
+            onImport={onImportDatabase}
+            onBackupAcknowledgedChange={onDatabaseBackupAcknowledgedChange}
+            onResetConfirmationChange={onDatabaseResetConfirmationChange}
+            onReset={onResetDatabase}
+          />
+          <GlossaryRow scope="data" />
+        </>
       ) : settingsTab === "api" ? (
         <form className="settings-api-form" onSubmit={onSaveSettings}>
           <div className="settings-api-intro">
@@ -989,19 +1093,52 @@ export function ModelSettingsPanel({
               {isSettingsSaving ? "儲存並重建中…" : "儲存並套用"}
             </button>
           </div>
+          <GlossaryRow scope="api" />
         </form>
       ) : isLoading && !catalog ? (
         <div className="model-settings-empty">正在讀取本機硬體與模型狀態…</div>
       ) : catalog ? (
         <>
-          <div className="model-hardware-note">
-            <div>
+          <div className="settings-slot-row">
+            <CardSlot
+              kicker="ACTIVE / 整理"
+              label="整理卡槽"
+              hint="貼上筆記時，由這張卡負責拆成欄位。"
+              card={activeSummaryModel ? (
+                <SettingCard
+                  accent="amber"
+                  glyph={modelGlyph(activeSummaryModel)}
+                  number={activeSummaryModel.short_label}
+                  meta="整理"
+                  title={activeSummaryModel.label}
+                  tags={[activeSummaryModel.size_label]}
+                  compact
+                />
+              ) : null}
+            />
+            <CardSlot
+              kicker="ACTIVE / 向量"
+              label="向量卡槽"
+              hint="搜尋與關聯圖的語意距離由這張卡決定。"
+              card={activeEmbeddingModel ? (
+                <SettingCard
+                  accent="sky"
+                  glyph={modelGlyph(activeEmbeddingModel)}
+                  number={activeEmbeddingModel.short_label}
+                  meta="向量"
+                  title={activeEmbeddingModel.label}
+                  tags={activeEmbeddingModel.dimensions ? [`${activeEmbeddingModel.dimensions} 維`] : []}
+                  compact
+                />
+              ) : null}
+            />
+            <div className="model-hardware-note">
               <span className="model-settings-kicker">YOUR HARDWARE</span>
               <strong>{catalog.hardware.label}</strong>
+              <span>{catalog.hardware.memory_gb} GB RAM · {catalog.hardware.cpu_cores} CPU cores</span>
+              {catalog.storage ? <span>{catalog.storage.path_label} · 可用 {catalog.storage.free_size_label}</span> : null}
+              <p>{catalog.hardware.note}</p>
             </div>
-            <span>{catalog.hardware.memory_gb} GB RAM · {catalog.hardware.cpu_cores} CPU cores</span>
-            {catalog.storage ? <span>{catalog.storage.path_label} · 可用 {catalog.storage.free_size_label}</span> : null}
-            <p>{catalog.hardware.note}</p>
           </div>
           <div className="model-mode-switch" role="group" aria-label="設定模式">
             <button className={isAdvanced ? "" : "is-active"} type="button" onClick={() => setIsAdvanced(false)}>簡易</button>
@@ -1021,38 +1158,39 @@ export function ModelSettingsPanel({
             />
           ) : (
           <>
-          <div className="model-settings-group">
-            <div className="model-settings-group__heading">
-              <div>
-                <span className="model-settings-kicker">01 / SUMMARY</span>
-                <h3>摘要與欄位整理</h3>
-              </div>
+          <div className="settings-block">
+            <div className="settings-block__heading">
+              <span className="model-settings-kicker">01 / SUMMARY</span>
+              <h3>摘要與欄位整理</h3>
               <p>決定「先貼上筆記」時，模型如何幫你整理卡片。</p>
             </div>
-            <div className="model-options-grid">
+            <div className="model-card-wall">
               {summaryModels.map((model) => (
-                <ModelOptionCard key={model.id} model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
+                <div className="model-card-wall__item" key={model.id}>
+                  <ModelOptionCard model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
+                </div>
               ))}
             </div>
           </div>
-          <div className="model-settings-group model-settings-group--embedding">
-            <div className="model-settings-group__heading">
-              <div>
-                <span className="model-settings-kicker">02 / EMBEDDING</span>
-                <h3>語意向量與關聯圖</h3>
-              </div>
+          <div className="settings-block">
+            <div className="settings-block__heading">
+              <span className="model-settings-kicker">02 / EMBEDDING</span>
+              <h3>語意向量與關聯圖</h3>
               <p>決定卡片之間的語意距離與搜尋結果。</p>
             </div>
             <DimensionGuide entries={catalog.dimension_guide ?? []} active={runtimeSettings?.embedding.dimensions} />
-            <div className="model-options-grid">
+            <div className="model-card-wall">
               {embeddingModels.map((model) => (
-                <ModelOptionCard key={model.id} model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
+                <div className="model-card-wall__item" key={model.id}>
+                  <ModelOptionCard model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
+                </div>
               ))}
             </div>
           </div>
           <AddModelForm actionId={actionId} onAdd={onAddCustomModel} />
           </>
           )}
+          <GlossaryRow scope="local" />
           <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
         </>
       ) : null}

@@ -58,3 +58,33 @@ test("covers are stable for a given embedding", async () => {
   assert.deepEqual(buildCover(embedding), buildCover(embedding));
   assert.notDeepEqual(buildCover(embedding), buildCover(hashEmbedding("另一張卡", 384)));
 });
+
+test("the settings glossary is coherent and draws only real glyphs", async () => {
+  const drawable = await drawableGlyphs();
+  const source = await readFile(new URL("../app/collection/glossary.ts", import.meta.url), "utf8");
+
+  const glyphs = [...source.matchAll(/glyph: "([^"]+)"/gu)].map((match) => match[1]);
+  assert.ok(glyphs.length >= 8, `expected a glossary of some size, found ${glyphs.length} entries`);
+  for (const glyph of glyphs) {
+    // A glossary card naming an unknown glyph silently falls back to the same
+    // default shape as every other card, which is exactly the failure that made
+    // a whole cabinet of covers identical once already.
+    assert.ok(drawable.has(glyph), `glossary glyph "${glyph}" is not in the frontend glyph library`);
+  }
+
+  const numbers = [...source.matchAll(/number: "([^"]+)"/gu)].map((match) => match[1]);
+  assert.equal(new Set(numbers).size, numbers.length, "two glossary cards share a number");
+
+  const accents = [...source.matchAll(/accent: "([^"]+)"/gu)].map((match) => match[1]);
+  const types = await readFile(new URL("../app/collection/types.ts", import.meta.url), "utf8");
+  const known = new Set([...(types.match(/visualAccents = \[([^\]]+)\]/u)?.[1] ?? "").matchAll(/"([^"]+)"/gu)].map((match) => match[1]));
+  for (const accent of accents) {
+    assert.ok(known.has(accent), `glossary accent "${accent}" has no rule in globals.css`);
+  }
+
+  // Every settings tab has terms worth explaining; a scope with none means a
+  // tab quietly lost its plain-language row.
+  for (const scope of ["local", "api", "data", "devices"]) {
+    assert.ok(source.includes(`scope: "${scope}"`), `no glossary entry for the ${scope} tab`);
+  }
+});

@@ -128,6 +128,24 @@ describe("authentication", () => {
     await ok("DELETE", `/devices/${paired.body.device.id}`);
     assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 401);
   });
+
+  it("only removes a device record once the device has been revoked", async () => {
+    const issued = await ok("POST", "/devices/pairing-code");
+    const paired = await call("POST", "/devices/pair", { code: issued.code, name: "刪除測試裝置" });
+    const id = paired.body.device.id;
+
+    // Removing the record is tidying up, not the thing that cuts a phone off.
+    // Skipping revocation would let a live device vanish from the list.
+    const early = await call("DELETE", `/devices/${id}?purge=1`);
+    assert.equal(early.status, 409);
+    assert.ok((await ok("GET", "/devices")).some((device) => device.id === id));
+
+    await ok("DELETE", `/devices/${id}`);
+    const removed = await ok("DELETE", `/devices/${id}?purge=1`);
+    assert.equal(removed.status, "removed");
+    assert.ok(!(await ok("GET", "/devices")).some((device) => device.id === id));
+    assert.equal((await call("DELETE", `/devices/${id}?purge=1`)).status, 404);
+  });
 });
 
 describe("audit log", () => {

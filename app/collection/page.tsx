@@ -27,6 +27,7 @@ import type {
   ProviderSettingsDraft,
   RelationEdge,
   RuntimeSettings,
+  EmbeddingProbeResult,
   SettingsDraft,
   SettingsTab,
   PairedDevice,
@@ -975,6 +976,22 @@ export default function CollectionPage() {
     }
   };
 
+  /** Removes the record of a device that has already been revoked. */
+  const handleForgetDevice = async (id: string) => {
+    setRevokingDeviceId(id);
+    setModelError("");
+    try {
+      const response = await fetch(`/api/devices/${encodeURIComponent(id)}?purge=1`, { method: "DELETE" });
+      const result = (await response.json()) as { detail?: string };
+      if (!response.ok) throw new Error(result.detail ?? "裝置紀錄刪除失敗。");
+      await loadDevices();
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "裝置紀錄刪除失敗，請稍後再試。");
+    } finally {
+      setRevokingDeviceId("");
+    }
+  };
+
   const setLanSharingEnabled = async (enabled: boolean) => {
     setIsLanSharingChanging(true);
     setModelError("");
@@ -1123,6 +1140,30 @@ export default function CollectionPage() {
       return result;
     } catch {
       return { ok: false, endpoint: "", models: [], detail: "無法連線到本機 API。" };
+    }
+  };
+
+  /**
+   * Measures the vector width of the embedding API currently in the draft.
+   *
+   * Uses the draft rather than the saved settings on purpose: the point is to
+   * find out what a service does *before* committing to it, since saving an
+   * incompatible width is what forces every card's vector to be rebuilt.
+   */
+  const handleProbeEmbedding = async (): Promise<EmbeddingProbeResult> => {
+    const draft = settingsDraft.embedding;
+    const failure = (detail: string): EmbeddingProbeResult => ({ ok: false, dimensions: 0, detail, store_dimensions: 0, matches_store: null, card_count: 0 });
+    try {
+      const response = await fetch("/api/models/api/probe-embedding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_url: draft.api_url, api_key: draft.api_key, model: draft.model, api_format: draft.api_format }),
+      });
+      const result = (await response.json()) as EmbeddingProbeResult & { detail?: string };
+      if (!response.ok) return failure(result.detail ?? "測量失敗。");
+      return result;
+    } catch {
+      return failure("無法連線到本機 API。");
     }
   };
 
@@ -1922,6 +1963,7 @@ export default function CollectionPage() {
               onAddCustomModel={handleAddCustomModel}
               onRemoveCustomModel={(id) => void handleRemoveCustomModel(id)}
               onProbeApi={handleProbeApi}
+              onProbeEmbedding={handleProbeEmbedding}
               onCancelTask={() => void handleCancelTask()}
               onRetryTask={() => void handleRetryTask()}
               onDismissTask={() => setBackgroundTask(null)}
@@ -1935,6 +1977,7 @@ export default function CollectionPage() {
               onResetDatabase={() => void handleResetDatabase()}
               onIssuePairingCode={() => void handleIssuePairingCode()}
               onRevokeDevice={(id) => void handleRevokeDevice(id)}
+              onForgetDevice={(id) => void handleForgetDevice(id)}
               lanSharing={lanSharing}
               isLanSharingChanging={isLanSharingChanging}
               onEnableLan={() => void setLanSharingEnabled(true)}

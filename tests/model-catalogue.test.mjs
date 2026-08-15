@@ -265,3 +265,76 @@ test("the built-in catalogue stays internally consistent", () => {
   }
   assert.ok(DIMENSION_GUIDE.length >= 2);
 });
+
+test("an embedding API's vector width can be measured before it is saved", async () => {
+  // A stand-in for Ollama/LM Studio: OpenAI-compatible, 1024 wide. The point of
+  // the probe is that nothing else on the wire reveals this — /models lists
+  // names, not shapes — so the only honest answer comes from embedding
+  // something and counting.
+  const { createServer } = await import("node:http");
+  let seenBody = null;
+  const service = createServer((request, response) => {
+    let text = "";
+    request.on("data", (chunk) => { text += chunk; });
+    request.on("end", () => {
+      seenBody = JSON.parse(text);
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [{ embedding: Array.from({ length: 1024 }, (_, index) => index / 1024) }] }));
+    });
+  });
+  await new Promise((resolve) => service.listen(0, "127.0.0.1", resolve));
+  const endpoint = `http://127.0.0.1:${service.address().port}/v1/embeddings`;
+
+  try {
+    await withRuntime(async ({ json }) => {
+      const probe = await json("/models/api/probe-embedding", {
+        method: "POST",
+        body: JSON.stringify({ api_url: endpoint, model: "bge-m3", api_format: "openai" }),
+      });
+      assert.equal(probe.status, 200);
+      assert.equal(probe.body.ok, true);
+      assert.equal(probe.body.dimensions, 1024, "the probe must report the width the service actually returned");
+      assert.equal(seenBody.model, "bge-m3", "the chosen model name has to reach the service, or the width is another model's");
+      // An empty library has no width to clash with, so there is nothing to
+      // warn about — matches_store stays null rather than pretending to know.
+      assert.equal(probe.body.store_dimensions, 0);
+      assert.equal(probe.body.matches_store, null);
+
+      await json("/cards", {
+        method: "POST",
+        body: JSON.stringify({ id: "dimension-probe", number: "D1", topic: "測試主題", category: "測試分類", title: "維度測試", question: "這張卡在問什麼？", summary: "一句話摘要。", analogy: "像是某個比喻。", detail: "比較長的說明內容。", source: "catalogue-test", tags: ["測試"] }),
+      });
+      const after = await json("/models/api/probe-embedding", {
+        method: "POST",
+        body: JSON.stringify({ api_url: endpoint, model: "bge-m3", api_format: "openai" }),
+      });
+      assert.equal(after.body.store_dimensions, 384, "a stored card fixes the library's width");
+      assert.equal(after.body.matches_store, false, "1024 against a 384 library must be reported as incompatible");
+    });
+  } finally {
+    await new Promise((resolve) => service.close(resolve));
+  }
+});
+
+test("a probe against something that is not an embeddings endpoint fails clearly", async () => {
+  const { createServer } = await import("node:http");
+  const service = createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ choices: [{ message: { content: "hello" } }] }));
+  });
+  await new Promise((resolve) => service.listen(0, "127.0.0.1", resolve));
+
+  try {
+    await withRuntime(async ({ json }) => {
+      const probe = await json("/models/api/probe-embedding", {
+        method: "POST",
+        body: JSON.stringify({ api_url: `http://127.0.0.1:${service.address().port}/v1/chat/completions`, model: "x" }),
+      });
+      assert.equal(probe.body.ok, false);
+      assert.equal(probe.body.dimensions, 0);
+      assert.match(probe.body.detail, /沒有回傳向量/u);
+    });
+  } finally {
+    await new Promise((resolve) => service.close(resolve));
+  }
+});

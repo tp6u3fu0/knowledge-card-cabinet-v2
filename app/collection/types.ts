@@ -280,6 +280,22 @@ export type SettingsDraft = {
 
 export type SettingsTab = "local" | "api" | "data" | "devices";
 
+/**
+ * What one test embedding revealed about a custom API.
+ *
+ * `matches_store` is deliberately nullable: an empty library has no width to
+ * clash with, and reporting that as "compatible" would be answering a question
+ * nobody asked.
+ */
+export type EmbeddingProbeResult = {
+  ok: boolean;
+  dimensions: number;
+  detail: string;
+  store_dimensions: number;
+  matches_store: boolean | null;
+  card_count: number;
+};
+
 export type PairedDevice = {
   id: string;
   name: string;
@@ -307,6 +323,7 @@ export type LanSharingStatus = {
 
 /** Must match PALETTES in desktop/local-api.cjs and the accent rules in globals.css. */
 export const visualAccents = ["coral", "sky", "lavender", "mint", "amber", "rose", "indigo", "moss"] as const;
+export type VisualAccent = (typeof visualAccents)[number];
 export const visualPatterns = ["orbit", "grid", "ladder", "shelf"] as const;
 export type CollectionView = "cards" | "relations" | "table";
 export type RelationFilter = "all" | "semantic" | "manual";

@@ -661,6 +661,54 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     return { ok: false, endpoint: "", models: [], detail: lastDetail || "無法連線到這個服務" };
   }
 
+  /**
+   * Ask an embedding API how wide its vectors actually are, by embedding one
+   * short string and counting what comes back.
+   *
+   * There is no other way to know. An OpenAI-compatible service does not
+   * advertise its width anywhere — `/models` lists names, not shapes — so
+   * before this existed the width was discovered on the first real card and
+   * enforced only from then on. Getting it wrong is not a small error: a
+   * library built at one width cannot be compared against vectors of another,
+   * so the choice has to be checkable *before* it is saved.
+   */
+  async function probeApiEmbedding({ api_url: apiUrl, api_key: apiKey = "", model = "", api_format: apiFormat = "openai" }) {
+    const endpoint = String(apiUrl || "").trim();
+    if (!/^https?:\/\//u.test(endpoint)) throw new Error("API 位址必須使用 http:// 或 https://");
+    // A blank key in the draft means "keep using the saved one", the same way
+    // saving does — otherwise probing would fail on every already-configured
+    // service the moment the user reopens the form.
+    const key = String(apiKey || "") || settings.custom.embedding.api_key || "";
+    const headers = { "Content-Type": "application/json" };
+    if (key) headers.Authorization = `Bearer ${key}`;
+    const probeText = "知識卡冊維度測試 dimension probe";
+    const body = apiFormat === "tei" ? { inputs: [probeText] } : { model: String(model || ""), input: probeText };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) {
+        const detail = await response.text().then((text) => text.slice(0, 300)).catch(() => "");
+        return { ok: false, dimensions: 0, detail: `服務回應 ${response.status}${detail ? `：${detail}` : ""}` };
+      }
+      const payload = await response.json();
+      const vector = apiFormat === "tei" ? payload?.[0] : payload?.data?.[0]?.embedding;
+      if (!Array.isArray(vector) || vector.length === 0) {
+        return { ok: false, dimensions: 0, detail: "服務有回應，但沒有回傳向量。請確認位址是 embeddings 端點，以及回傳格式選對了。" };
+      }
+      if (vector.some((value) => !Number.isFinite(Number(value)))) {
+        return { ok: false, dimensions: 0, detail: "回傳的向量含有非數字內容。" };
+      }
+      return { ok: true, dimensions: vector.length, detail: "" };
+    } catch (error) {
+      return { ok: false, dimensions: 0, detail: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   function getActive(kind) {
     const id = kind === "summary" ? settings.summary_model_id : settings.embedding_model_id;
     return findModel(id) || findModel(kind === "summary" ? BUILTIN_SUMMARY_MODEL : BUILTIN_EMBEDDING_MODEL);
@@ -1188,6 +1236,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     addCustomModel,
     removeCustomModel,
     probeApi,
+    probeApiEmbedding,
     download,
     select,
     embed,

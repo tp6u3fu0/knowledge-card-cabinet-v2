@@ -2,11 +2,13 @@ import { backendFetch, forwardBackend } from "../../_lib/backend";
 
 export const dynamic = "force-dynamic";
 
-export async function DELETE(_: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   try {
     const { id } = await context.params;
-    return forwardBackend(await backendFetch(`/devices/${encodeURIComponent(id)}`, { method: "DELETE", cache: "no-store" }));
+    // Without ?purge=1 this only revokes; with it, the record is removed too.
+    const purge = new URL(request.url).searchParams.get("purge") === "1" ? "?purge=1" : "";
+    return forwardBackend(await backendFetch(`/devices/${encodeURIComponent(id)}${purge}`, { method: "DELETE", cache: "no-store" }));
   } catch {
-    return Response.json({ detail: "無法撤銷裝置，請稍後再試。" }, { status: 503 });
+    return Response.json({ detail: "無法更新裝置，請稍後再試。" }, { status: 503 });
   }
 }

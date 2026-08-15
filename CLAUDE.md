@@ -148,6 +148,9 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | README 提到的 npm script | `package.json` 必須真的有 | `tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
 | `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
+| `setting-cards.tsx` 的卡片結構 | `globals.css` 的 `.setting-card` 覆寫（`.collection-card__copy span` 與 `__tags` 在收藏頁是 `display:none`） | 設定卡的說明與標籤整片消失 |
+| `glossary.ts` 的 `glyph` / `accent` | 必須是 `cover-art.tsx` 畫得出來的 glyph、`visualAccents` 裡有的顏色 | `tests/cover-art.test.mjs` 會失敗（刻意的）；否則會靜靜退回同一個圖案 |
+| 新增設定分頁 | `glossary.ts` 要有對應 `scope` 的條目 | 測試會失敗；使用者少一整區白話說明 |
 | 新增 `desktop/` 的執行期相依 | `desktop/package.json`（打包用，鎖定版號）**與**根 `package.json`（CI 測試用） | CI 綠、打包版 require 失敗，或反過來 |
 
 ---
@@ -160,9 +163,9 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
 | `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |
-| `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣 |
 | `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重 |
 | `category-colour.test.mjs` | 同分類同色、分布平均、既有分類不變色、三方一致 |
+| `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣；術語卡的 glyph／顏色／編號一致 |
 | `lan-certificate.test.mjs` | 選對網卡（含 Windows 虛擬網卡）、憑證指紋穩定、mDNS 缺席不會炸、LAN TLS 真的服務 v1 |
 | `rendered-html.test.mjs` | 前端能 render、雙平台打包設定、README 指令存在、CLAUDE.md 引用的檔案存在 |
 
@@ -186,6 +189,7 @@ node_modules/electron/dist/electron.exe desktop/main.cjs --remote-debugging-port
 
 另外兩個實際踩過的坑：
 
+- **CDP target 出現 ≠ 頁面可以操作。** `/json` 一列出 page target 就去點按鈕，會什麼都找不到——收藏頁還沒 hydrate。實測要再等約 15 秒。找不到元素時先 dump `document.body.innerText` 確認畫面到哪了，不要直接以為選擇器寫錯。
 - **React 狀態更新是非同步的。** 派送事件後立刻讀 DOM 會讀到舊值，看起來像功能壞掉。等一個 frame 再讀。我因此兩次誤判「拖曳功能壞了」。
 - 用 `KCC_DATA_DIR` 與 `KCC_MODELS_DIR` 指到暫存目錄再測，否則會動到使用者真實資料，而且會繼承他們已選的模型（看起來像「全新安裝的預設值不對」）。
 

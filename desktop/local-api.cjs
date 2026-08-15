@@ -120,6 +120,31 @@ function cosine(first, second) {
 }
 
 /** A card can be compared only if it carries a vector of the width in use now. */
+/**
+ * The width this library's vectors actually are, read from the cards.
+ *
+ * Deliberately not taken from the active model's declared dimensions: the
+ * question a dimension probe answers is "will this API's output be comparable
+ * to what I already have", and the only authority on that is the stored data.
+ * The most common width wins, so one stray card cannot misreport the library.
+ */
+function storeEmbeddingDimensions(store) {
+  const counts = new Map();
+  for (const card of store.cards) {
+    if (!Array.isArray(card.embedding) || card.embedding.length === 0) continue;
+    counts.set(card.embedding.length, (counts.get(card.embedding.length) || 0) + 1);
+  }
+  let width = 0;
+  let seen = 0;
+  for (const [candidate, count] of counts) {
+    if (count > seen) {
+      width = candidate;
+      seen = count;
+    }
+  }
+  return width;
+}
+
 function hasUsableEmbedding(card, dimensions) {
   if (!Array.isArray(card?.embedding) || card.embedding.length === 0) return false;
   return !dimensions || card.embedding.length === dimensions;
@@ -1052,7 +1077,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke"] });
       return;
     }
 
@@ -1085,6 +1110,22 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (request.method === "DELETE" && segments[0] === "devices" && segments.length === 2) {
+      // ?purge=1 removes the record; without it the device is only revoked.
+      // Two steps, because only the first one is what actually locks a phone
+      // out, and it should stay visible that it happened.
+      if (requestUrl.searchParams.get("purge") === "1") {
+        const result = deviceAuth?.forget(segments[1]) || { ok: false, code: "not_found" };
+        if (result.code === "not_found") {
+          sendJson(response, 404, { detail: "找不到裝置。" });
+          return;
+        }
+        if (result.code === "still_active") {
+          sendJson(response, 409, { detail: "請先撤銷這台裝置，再刪除紀錄。" });
+          return;
+        }
+        sendJson(response, 200, { status: "removed", device: result.device });
+        return;
+      }
       const device = deviceAuth?.revoke(segments[1]);
       if (!device) {
         sendJson(response, 404, { detail: "找不到裝置。" });
@@ -1340,6 +1381,34 @@ function createApiServer(store, dataFile, modelRuntime, {
       return;
     }
 
+    // Embeds one short string and counts the result, so the width of a custom
+    // API is a fact the user can check before saving rather than something the
+    // first stored card discovers. See storeEmbeddingDimensions below for why
+    // the comparison is against the cards rather than against the setting.
+    if (request.method === "POST" && segments[0] === "models" && segments[1] === "api" && segments[2] === "probe-embedding" && segments.length === 3) {
+      const body = await readBody(request);
+      try {
+        const result = await modelRuntime.probeApiEmbedding({
+          api_url: String(body.api_url || ""),
+          api_key: String(body.api_key || ""),
+          model: String(body.model || ""),
+          api_format: String(body.api_format || "openai"),
+        });
+        const stored = storeEmbeddingDimensions(store);
+        sendJson(response, 200, {
+          ...result,
+          store_dimensions: stored,
+          // No stored vectors yet means nothing can clash: whatever the API
+          // returns simply becomes this library's width.
+          matches_store: !result.ok || !stored ? null : result.dimensions === stored,
+          card_count: store.cards.length,
+        });
+      } catch (error) {
+        sendJson(response, 400, { detail: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
     if (request.method === "POST" && segments[0] === "models" && segments[1] && !["select", "custom", "api"].includes(segments[1]) && segments.length === 2) {
       try {
         const task = startDownloadTask(segments[1]);
@@ -1427,6 +1496,7 @@ function createApiServer(store, dataFile, modelRuntime, {
           "/models/custom": { post: {} },
           "/models/custom/{id}": { delete: {} },
           "/models/api/probe": { post: {} },
+          "/models/api/probe-embedding": { post: {} },
           "/settings": { get: {}, put: {} },
           "/devices": { get: {} },
           "/devices/pairing-code": { post: {} },
