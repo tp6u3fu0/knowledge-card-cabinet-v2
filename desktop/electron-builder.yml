@@ -19,6 +19,13 @@ extraResources:
     to: kcc-web/dist
   - from: public
     to: kcc-web/public
+  # The embedding weights that make a fresh install semantic without a download.
+  # Populated by scripts/fetch-bundled-model.mjs; the app falls back to the hash
+  # embedding when this is missing, so the build still succeeds without it.
+  - from: build/models
+    to: kcc-models
+    filter:
+      - "**/*"
 win:
   target:
     - nsis

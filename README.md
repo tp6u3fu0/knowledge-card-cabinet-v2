@@ -65,7 +65,7 @@ npm run desktop:dev
 npm run desktop:dist
 ```
 
-安裝包會輸出到 `release/`。桌面版預設使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型及自訂 API 設定。
+安裝包會輸出到 `release/`；`desktop:dist` 會先跑 `models:bundle` 把內建的 embedding 權重抓下來（約 130 MB，已存在就略過）。桌面版使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型，加入 Hugging Face 上的其他模型，或改用自訂 API。
 
 ## 常駐主機版（樹莓派、家用伺服器）
 
@@ -100,9 +100,26 @@ Alpine 映像檔不適用：embedding 模型依賴的 `onnxruntime-node` 只提�
 
 新增卡片時，可以貼上筆記，讓摘要模型產生標題、問題、摘要與標籤草稿，確認後再寫入資料庫。embedding 會在新增或編輯卡片後重新建立，並更新語意關聯與封面。
 
-可選的 embedding 模型：Hash 384（內建、免下載）、all-MiniLM-L6-v2（384 維、英文）、Multilingual MiniLM（384 維、中英）、**BGE-M3（1024 維、約 570 MB）**。Hash 384 是離線 deterministic fallback，不是語意模型——它只能處理詞彙重疊，正式使用請下載真正的模型。記憶體 16 GB 以上的機器預設推薦 BGE-M3。
+**桌面安裝包內建 Multilingual MiniLM（384 維）的權重**，所以裝好就有真正的語意搜尋與關聯，不需要先下載任何東西，也不需要連網。內建的 Hash 384 仍然保留作為最後的離線 fallback，但它不是語意模型——只能處理詞彙重疊。（`npm run build` 這類沒跑過 `npm run models:bundle` 的建置會退回 Hash 384，行為與以前相同。）
 
-向量維度由啟用的模型決定，自訂 embedding API 則由第一次成功的回應決定，之後必須維持一致——維度不符會被拒絕，不會混進資料庫。切換模型會在背景重建所有向量與關聯，不會刪除卡片文字。API key 只保存在本機，設定讀取時只回傳是否已設定。
+模型清單不是固定的：設定頁可以填入任何 Hugging Face 模型 id 加入清單，加入前會檢查該 repo 是否有 ONNX 權重、並自動讀出向量維度。內建可選項包含 all-MiniLM-L6-v2（384 維、英文）、Multilingual MiniLM（384 維、中英）、**BGE-M3（1024 維、約 570 MB）**。記憶體 16 GB 以上的機器預設推薦 BGE-M3。
+
+### 384 維還是 1024 維？
+
+不是越大越好，是取捨，設定頁會把兩邊都列出來：
+
+| | 384 維 | 1024 維（BGE-M3） |
+| --- | --- | --- |
+| 下載 | 90–140 MB | 約 570 MB |
+| 每張卡片 | 1.5 KB | 4 KB |
+| 中文語意 | 尚可，長句與跨領域較弱 | 明顯較好，支援長文 |
+| CPU 負擔 | 最低，樹莓派可行 | 較高，建議 8 GB 以上記憶體 |
+
+維度必須全庫一致；切換模型會在背景重建所有向量與關聯，不會刪除卡片文字。自訂 embedding API 的維度由第一次成功的回應決定，之後必須維持一致——維度不符會被拒絕，不會混進資料庫。API key 只保存在本機，設定讀取時只回傳是否已設定。
+
+### 雲端與本機 API
+
+除了本機模型，也可以接任何 OpenAI-compatible 服務。設定頁提供 **Ollama**、**LM Studio**、OpenAI 與 Hugging Face TEI 的預設位址，選好供應商後按「偵測可用模型」就會列出該服務已經載入的模型。用 Ollama 或 LM Studio 這類本機服務時，卡片內容不會離開這台電腦。
 
 ## 資料管理
 
@@ -173,6 +190,7 @@ npm run desktop:mcp
 npm run dev              # 前端開發伺服器（需搭配 dev:api）
 npm run dev:api          # 本機 API，供開發用
 npm run build            # 建立前端 standalone build
+npm run models:bundle    # 下載安裝包內建的 embedding 權重（約 130 MB）
 npm test                 # 建置並執行全部測試
 npm run test:api         # 只跑 API 行為契約（較快）
 npm run lint             # ESLint

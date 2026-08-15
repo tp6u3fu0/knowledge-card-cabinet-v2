@@ -11,6 +11,7 @@ import {
 import { defaultRelationEdges, relationEdgeKey, relationKey } from "./relations";
 import type {
   ApiCard,
+  ApiProbeResult,
   ApiRelation,
   BackgroundTask,
   BatchOrganizeResult,
@@ -985,6 +986,66 @@ export default function CollectionPage() {
     }
   };
 
+  const handleAddCustomModel = async (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => {
+    setModelActionId("custom-add");
+    setModelError("");
+    try {
+      const response = await fetch("/api/models/custom", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: input.kind,
+          model_id: input.model_id,
+          label: input.label,
+          dimensions: Number(input.dimensions) || 0,
+        }),
+      });
+      const result = (await response.json()) as { detail?: string; models?: ModelCatalog; model?: ModelOption };
+      if (!response.ok || !result.models) throw new Error(result.detail ?? "無法加入這個模型。");
+      setModelCatalog(result.models);
+      setCreateSuccess(`已加入「${result.model?.label ?? input.model_id}」，可以在清單中下載它。`);
+      return true;
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "無法加入這個模型，請稍後再試。");
+      return false;
+    } finally {
+      setModelActionId("");
+    }
+  };
+
+  const handleRemoveCustomModel = async (modelId: string) => {
+    if (!window.confirm("確定要從清單中移除這個模型嗎？已下載的檔案也會一併清理，卡片資料不會被刪除。")) return;
+    setModelActionId(modelId);
+    setModelError("");
+    try {
+      const response = await fetch(`/api/models/custom/${encodeURIComponent(modelId)}`, { method: "DELETE" });
+      const result = (await response.json()) as { detail?: string; models?: ModelCatalog };
+      if (!response.ok || !result.models) throw new Error(result.detail ?? "無法移除這個模型。");
+      setModelCatalog(result.models);
+      setCreateSuccess("已從清單中移除這個模型。");
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "無法移除這個模型，請稍後再試。");
+    } finally {
+      setModelActionId("");
+    }
+  };
+
+  const handleProbeApi = async (kind: ModelKind): Promise<ApiProbeResult> => {
+    const draft = settingsDraft[kind];
+    try {
+      const response = await fetch("/api/models/api/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_url: draft.api_url, api_key: draft.api_key }),
+      });
+      const result = (await response.json()) as ApiProbeResult & { detail?: string };
+      if (!response.ok) return { ok: false, endpoint: "", models: [], detail: result.detail ?? "偵測失敗。" };
+      return result;
+    } catch {
+      return { ok: false, endpoint: "", models: [], detail: "無法連線到本機 API。" };
+    }
+  };
+
   const handleSaveSettings = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isBackgroundTaskRunning) return;
@@ -1773,6 +1834,9 @@ export default function CollectionPage() {
               onSelect={(kind, id) => void handleSelectModel(kind, id)}
               onInspect={(id) => void handleInspectModel(id)}
               onRemove={(id) => void handleRemoveModel(id)}
+              onAddCustomModel={handleAddCustomModel}
+              onRemoveCustomModel={(id) => void handleRemoveCustomModel(id)}
+              onProbeApi={handleProbeApi}
               onCancelTask={() => void handleCancelTask()}
               onRetryTask={() => void handleRetryTask()}
               onDismissTask={() => setBackgroundTask(null)}

@@ -5,10 +5,49 @@ const path = require("node:path");
 
 const BUILTIN_SUMMARY_MODEL = "summary-template";
 const BUILTIN_EMBEDDING_MODEL = "embedding-hash-384";
+/**
+ * The embedding whose weights ship inside the installer, so a fresh cabinet has
+ * real semantics before anything is downloaded. Falls back to the hash
+ * embedding when the files are not there (a plain `npm run build`, or a build
+ * where scripts/fetch-bundled-model.mjs was skipped).
+ */
+const BUNDLED_EMBEDDING_MODEL = "embedding-multilingual-384";
 /** Width of the built-in hash embedding. Not the width of every model. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
 const SETTINGS_VERSION = 1;
 
+/**
+ * What "384 or 1024" actually costs, so the choice can be made from the
+ * settings page instead of from folklore. Dimension is not quality on its own —
+ * it is the model that differs — but width is the part that follows the vector
+ * into storage, memory and every comparison, so the two are worth stating
+ * together. Measured on this project's own runtime, not quoted from a paper.
+ */
+const DIMENSION_GUIDE = [
+  {
+    dimensions: 384,
+    label: "384 維",
+    headline: "小、快、夠用",
+    download: "90–140 MB",
+    per_card: "1.5 KB／張",
+    strengths: ["下載與首次載入最快", "CPU 推論負擔最低，樹莓派也跑得動", "資料庫與記憶體占用最小"],
+    limits: ["中文長句與跨領域概念的區辨力較弱", "同義但用詞不同的卡片較容易漏抓"],
+  },
+  {
+    dimensions: 1024,
+    label: "1024 維",
+    headline: "中文語意明顯較準",
+    download: "約 570 MB",
+    per_card: "4 KB／張",
+    strengths: ["中文與多語言關聯品質明顯較好", "支援長文，整段筆記不會被截斷", "跨領域的相似判斷比較穩"],
+    limits: ["下載大約是 384 維模型的四倍", "CPU 上每張卡片的處理時間較長", "建議 8 GB 以上記憶體"],
+  },
+];
+
+/**
+ * The models that ship with the app. Anything the user adds by Hugging Face id
+ * is merged on top of this at runtime — see customModels().
+ */
 const MODEL_CATALOG = [
   {
     id: BUILTIN_SUMMARY_MODEL,
@@ -150,6 +189,99 @@ const MODEL_CATALOG = [
   },
 ];
 
+/**
+ * Presets for the services people actually run, so "bring your own model" does
+ * not start with guessing a URL. Ollama and LM Studio both speak the
+ * OpenAI-compatible shape, so they need no new request format — only the right
+ * endpoint and a way to list what is already installed locally.
+ */
+const API_PROVIDERS = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    summary_url: "https://api.openai.com/v1/chat/completions",
+    embedding_url: "https://api.openai.com/v1/embeddings",
+    api_format: "openai",
+    key_required: true,
+    note: "需要 API 金鑰，內容會送到 OpenAI。",
+  },
+  {
+    id: "ollama",
+    label: "Ollama（本機）",
+    summary_url: "http://127.0.0.1:11434/v1/chat/completions",
+    embedding_url: "http://127.0.0.1:11434/v1/embeddings",
+    api_format: "openai",
+    key_required: false,
+    note: "在本機執行，內容不會離開這台電腦。請先 ollama pull 你要用的模型。",
+  },
+  {
+    id: "lmstudio",
+    label: "LM Studio（本機）",
+    summary_url: "http://127.0.0.1:1234/v1/chat/completions",
+    embedding_url: "http://127.0.0.1:1234/v1/embeddings",
+    api_format: "openai",
+    key_required: false,
+    note: "在本機執行，需先在 LM Studio 啟動 Local Server。",
+  },
+  {
+    id: "tei",
+    label: "Text Embeddings Inference",
+    summary_url: "",
+    embedding_url: "http://127.0.0.1:8080/embed",
+    api_format: "tei",
+    key_required: false,
+    note: "Hugging Face TEI 伺服器，只提供 embedding。",
+  },
+  {
+    id: "custom",
+    label: "其他 OpenAI-compatible 服務",
+    summary_url: "",
+    embedding_url: "",
+    api_format: "openai",
+    key_required: false,
+    note: "任何相容 OpenAI 格式的服務都可以填在這裡。",
+  },
+];
+
+const BUNDLED_MODEL_REPOSITORY = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+
+/**
+ * Where the bundled weights live: beside the packaged resources in an installed
+ * app, in build/models during development. Returns "" when nothing is bundled,
+ * which is what every code path treats as "behave exactly as before".
+ */
+function bundledModelsDir() {
+  const candidates = [
+    process.env.KCC_BUNDLED_MODELS_DIR,
+    process.resourcesPath ? path.join(process.resourcesPath, "kcc-models") : "",
+    path.resolve(__dirname, "..", "build", "models"),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, BUNDLED_MODEL_REPOSITORY, "config.json"))) return candidate;
+  }
+  return "";
+}
+
+function directorySize(directory) {
+  let total = 0;
+  const walk = (current, depth = 0) => {
+    if (depth > 6) return;
+    let entries = [];
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(fullPath, depth + 1);
+      else try { total += fs.statSync(fullPath).size; } catch { /* Vanished mid-scan. */ }
+    }
+  };
+  walk(directory);
+  return total;
+}
+
+function slugify(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 60);
+}
+
 function readJson(filePath, fallback) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -163,6 +295,84 @@ function writeJson(filePath, value) {
   const temporaryPath = `${filePath}.tmp`;
   fs.writeFileSync(temporaryPath, JSON.stringify(value, null, 2), "utf8");
   fs.renameSync(temporaryPath, filePath);
+}
+
+function customModelId(kind, modelId) {
+  return `custom-${kind}-${slugify(modelId)}`;
+}
+
+/** A user-added model, shaped exactly like a catalogue entry so nothing downstream cares. */
+function describeCustomModel(entry) {
+  const isEmbedding = entry.kind === "embedding";
+  return {
+    id: customModelId(entry.kind, entry.model_id),
+    kind: entry.kind,
+    label: entry.label || entry.model_id,
+    short_label: "自訂",
+    provider: "transformers.js",
+    model_id: entry.model_id,
+    task: isEmbedding ? "feature-extraction" : "text2text-generation",
+    dtype: entry.dtype || "q8",
+    ...(isEmbedding ? { dimensions: Number(entry.dimensions) || 0 } : {}),
+    size_label: entry.size_label || "大小依模型而定",
+    download_size_bytes: Number(entry.download_size_bytes) || 0,
+    min_memory_gb: 0,
+    tier: "自訂",
+    languages: entry.languages || "依模型而定",
+    description: entry.description || `由 Hugging Face 加入：${entry.model_id}`,
+    builtin: false,
+    custom: true,
+    added_at: entry.added_at || "",
+  };
+}
+
+/**
+ * Ask Hugging Face what a model id actually is before adding it.
+ *
+ * Two things have to be true for a model to work here: the repository must
+ * carry ONNX weights (transformers.js cannot run raw PyTorch), and an embedding
+ * model must have a knowable width. Width is not cosmetic — a model whose
+ * vectors are a different size than the store's will be rejected at embed time,
+ * so it is far kinder to find out now than after a download.
+ */
+async function lookupHuggingFace(modelId, { timeoutMs = 8000 } = {}) {
+  // Not encodeURIComponent: the id is "org/name" and escaping that slash makes
+  // the API answer 400 for every namespaced model. Callers validate the shape.
+  const repository = String(modelId).split("/").map((part) => encodeURIComponent(part)).join("/");
+  const signal = AbortSignal.timeout(timeoutMs);
+  const response = await fetch(`https://huggingface.co/api/models/${repository}`, { signal });
+  // Hugging Face answers 401 for a repository that does not exist as well as
+  // for one that is private, and it is the same problem either way: this app
+  // cannot fetch it.
+  if ([401, 403, 404].includes(response.status)) {
+    const error = new Error(`Hugging Face 上找不到「${modelId}」，或這是一個非公開的模型`);
+    error.code = "MODEL_NOT_FOUND";
+    throw error;
+  }
+  if (!response.ok) throw new Error(`Hugging Face 回應 ${response.status}`);
+  const info = await response.json();
+  const files = Array.isArray(info?.siblings) ? info.siblings.map((file) => String(file?.rfilename || "")) : [];
+  const hasOnnx = files.some((file) => file.toLowerCase().endsWith(".onnx"));
+
+  let dimensions = 0;
+  try {
+    const configResponse = await fetch(`https://huggingface.co/${repository}/raw/main/config.json`, { signal });
+    if (configResponse.ok) {
+      const config = await configResponse.json();
+      dimensions = Number(config?.hidden_size || config?.d_model || config?.dim || 0);
+    }
+  } catch {
+    // Width stays unknown; the caller decides whether that is fatal.
+  }
+
+  return {
+    model_id: info?.id || modelId,
+    has_onnx: hasOnnx,
+    dimensions,
+    pipeline_tag: String(info?.pipeline_tag || ""),
+    downloads: Number(info?.downloads || 0),
+    likes: Number(info?.likes || 0),
+  };
 }
 
 function hardwareProfile() {
@@ -206,6 +416,10 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
   const settingsPath = path.join(modelsDir, "settings.json");
   fs.mkdirSync(cacheDir, { recursive: true });
 
+  // Resolved once: whether this build carries embedding weights inside it.
+  const bundledDir = bundledModelsDir();
+  const isBundled = (model) => Boolean(bundledDir) && model?.id === BUNDLED_EMBEDDING_MODEL;
+
   // Learned from the first successful custom-API response, or seeded from the
   // width the existing cards already use so a restart keeps the same contract.
   let observedApiDimensions = Number(apiDimensions) || 0;
@@ -217,18 +431,34 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
   // Falling back to the built-in model is a real downgrade: every vector gets
   // rebuilt at 384 dimensions and semantic search quietly gets worse. It has to
   // be visible, so record it as a model error the settings page can surface.
+  // Models the user added by Hugging Face id. They are part of the catalogue
+  // from here on, so a selection pointing at one survives a restart.
+  const savedCustomModels = Array.isArray(savedSettings.custom_models) ? savedSettings.custom_models : [];
+  const customModels = savedCustomModels
+    .filter((entry) => entry && (entry.kind === "summary" || entry.kind === "embedding") && entry.model_id)
+    .map((entry) => ({ ...entry, model_id: String(entry.model_id) }));
+
+  /** Built-in catalogue plus whatever the user has added. */
+  const allModels = () => [...MODEL_CATALOG, ...customModels.map(describeCustomModel)];
+  const knows = (id, kind) => allModels().some((model) => model.id === id && model.kind === kind);
+
   const droppedEmbedding = savedSettings.embedding_model_id
-    && !MODEL_CATALOG.some((model) => model.id === savedSettings.embedding_model_id && model.kind === "embedding")
+    && !knows(savedSettings.embedding_model_id, "embedding")
     ? String(savedSettings.embedding_model_id)
     : "";
   let settings = {
     version: SETTINGS_VERSION,
-    summary_model_id: MODEL_CATALOG.some((model) => model.id === savedSettings.summary_model_id && model.kind === "summary")
+    summary_model_id: knows(savedSettings.summary_model_id, "summary")
       ? savedSettings.summary_model_id
       : BUILTIN_SUMMARY_MODEL,
-    embedding_model_id: MODEL_CATALOG.some((model) => model.id === savedSettings.embedding_model_id && model.kind === "embedding")
+    // A fresh cabinet starts on the bundled semantic model when this build has
+    // one. Falling back to the hash embedding by default would mean search and
+    // relations are word-overlap until someone changes a setting they have no
+    // reason to know about.
+    embedding_model_id: knows(savedSettings.embedding_model_id, "embedding")
       ? savedSettings.embedding_model_id
-      : BUILTIN_EMBEDDING_MODEL,
+      : bundledModelsDir() ? BUNDLED_EMBEDDING_MODEL : BUILTIN_EMBEDDING_MODEL,
+    custom_models: customModels,
     installed: savedSettings.installed && typeof savedSettings.installed === "object" ? savedSettings.installed : {},
     sources: {
       summary: savedSources.summary === "api" ? "api" : "local",
@@ -262,7 +492,109 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
   let transformersPromise;
 
   function findModel(id) {
-    return MODEL_CATALOG.find((model) => model.id === id);
+    return allModels().find((model) => model.id === id);
+  }
+
+  /**
+   * Add a Hugging Face model to the catalogue.
+   *
+   * The repository is checked before it is accepted: transformers.js can only
+   * run ONNX weights, and an embedding model has to declare a width, because a
+   * vector of the wrong size is refused at embed time and would otherwise only
+   * fail after a long download.
+   */
+  async function addCustomModel({ kind, model_id: modelId, label = "", dimensions = 0 }) {
+    if (kind !== "summary" && kind !== "embedding") throw new Error("模型類型必須是 summary 或 embedding");
+    const trimmed = String(modelId || "").trim().replace(/^https?:\/\/huggingface\.co\//u, "").replace(/\/+$/u, "");
+    if (!/^[\w.-]+\/[\w.-]+$/u.test(trimmed)) throw new Error("請填入 Hugging Face 模型 id，格式為「作者/模型名稱」");
+    const id = customModelId(kind, trimmed);
+    if (findModel(id)) throw new Error("這個模型已經在清單裡了");
+    if (MODEL_CATALOG.some((model) => model.model_id === trimmed && model.kind === kind)) {
+      throw new Error("這個模型已經內建在清單裡了");
+    }
+
+    let resolved = { has_onnx: true, dimensions: Number(dimensions) || 0, pipeline_tag: "" };
+    let checked = false;
+    try {
+      resolved = await lookupHuggingFace(trimmed);
+      checked = true;
+    } catch (error) {
+      if (error?.code === "MODEL_NOT_FOUND") throw error;
+      // Offline or Hugging Face unreachable: fall back to what the caller
+      // supplied rather than blocking someone who already knows the model.
+      if (kind === "embedding" && !Number(dimensions)) {
+        throw new Error("目前無法連線到 Hugging Face 確認模型維度，請手動填入向量維度後再加入");
+      }
+    }
+
+    if (checked && !resolved.has_onnx) {
+      throw new Error("這個模型沒有 ONNX 權重，本機 runtime 無法執行。請改用標題有 ONNX／transformers.js 支援的版本（例如 Xenova 或 onnx-community 的轉檔）。");
+    }
+    const width = Number(dimensions) || Number(resolved.dimensions) || 0;
+    if (kind === "embedding" && !width) {
+      throw new Error("無法判斷這個模型的向量維度，請手動填入後再加入");
+    }
+
+    const entry = {
+      kind,
+      model_id: trimmed,
+      label: String(label || "").trim() || trimmed.split("/").pop(),
+      dimensions: kind === "embedding" ? width : 0,
+      languages: resolved.pipeline_tag ? `Hugging Face · ${resolved.pipeline_tag}` : "依模型而定",
+      added_at: new Date().toISOString(),
+    };
+    customModels.push(entry);
+    settings.custom_models = customModels;
+    saveSettings();
+    return describeModel(describeCustomModel(entry));
+  }
+
+  function removeCustomModel(id) {
+    const index = customModels.findIndex((entry) => customModelId(entry.kind, entry.model_id) === id);
+    if (index < 0) throw new Error("找不到這個自訂模型");
+    const entry = customModels[index];
+    if (settings.sources[entry.kind] === "local" && getActive(entry.kind).id === id) {
+      throw new Error("目前使用中的模型不能移除，請先切換到其他模型");
+    }
+    // Cached weights go too, otherwise removing a model leaves its download behind.
+    try { removeModel(id); } catch { /* Nothing cached yet, or already gone. */ }
+    customModels.splice(index, 1);
+    settings.custom_models = customModels;
+    delete settings.installed[id];
+    saveSettings();
+    return { removed: id };
+  }
+
+  /**
+   * Ask an OpenAI-compatible service what it can offer, so people can pick a
+   * model name from a list instead of typing one and hoping. Ollama is tried
+   * through its native endpoint too, because older builds do not serve /v1.
+   */
+  async function probeApi({ api_url: apiUrl, api_key: apiKey = "" }) {
+    const trimmed = String(apiUrl || "").trim();
+    if (!/^https?:\/\//u.test(trimmed)) throw new Error("API 位址必須使用 http:// 或 https://");
+    const base = trimmed.replace(/\/(chat\/completions|completions|embeddings|embed)\/?$/u, "");
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    const attempts = [
+      { url: `${base}/models`, pick: (payload) => (payload?.data || []).map((model) => String(model?.id || "")) },
+      { url: `${base.replace(/\/v1$/u, "")}/api/tags`, pick: (payload) => (payload?.models || []).map((model) => String(model?.name || "")) },
+    ];
+
+    let lastDetail = "";
+    for (const attempt of attempts) {
+      try {
+        const response = await fetch(attempt.url, { headers, signal: AbortSignal.timeout(6000) });
+        if (!response.ok) {
+          lastDetail = `${attempt.url} 回應 ${response.status}`;
+          continue;
+        }
+        const models = attempt.pick(await response.json()).filter(Boolean).sort();
+        return { ok: true, endpoint: attempt.url, models, detail: models.length ? "" : "服務有回應，但沒有列出任何模型" };
+      } catch (error) {
+        lastDetail = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return { ok: false, endpoint: "", models: [], detail: lastDetail || "無法連線到這個服務" };
   }
 
   function getActive(kind) {
@@ -271,7 +603,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
   }
 
   function isInstalled(model) {
-    return Boolean(model?.builtin || settings.installed[model?.id]);
+    // Bundled weights are already on disk, so the model is ready without ever
+    // having been "downloaded".
+    return Boolean(model?.builtin || isBundled(model) || settings.installed[model?.id]);
   }
 
   function humanSize(bytes) {
@@ -292,6 +626,10 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     if (!model) throw new Error("找不到指定模型");
     if (model.builtin) {
       return { model_id: modelId, status: "ready", installed: true, files: 0, bytes: 0, size_label: "不需下載", download_size_bytes: 0, resumable: false };
+    }
+    if (isBundled(model)) {
+      const bytes = directorySize(path.join(bundledDir, BUNDLED_MODEL_REPOSITORY));
+      return { model_id: modelId, status: "ready", installed: true, files: 0, bytes, size_label: `${humanSize(bytes)}（隨應用程式安裝）`, download_size_bytes: 0, resumable: false };
     }
     const tokens = modelPathTokens(model);
     let files = 0;
@@ -345,6 +683,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     const model = findModel(modelId);
     if (!model) throw new Error("找不到指定模型");
     if (model.builtin) throw new Error("內建模型沒有可清理的檔案");
+    if (isBundled(model)) throw new Error("這個模型隨應用程式一起安裝，沒有可清理的快取");
     if (settings.sources[model.kind] === "local" && getActive(model.kind).id === modelId) throw new Error("目前使用中的模型不能清理，請先切換到其他模型");
     if (downloadPromises.has(modelId)) throw new Error("模型仍在下載中，請先取消下載任務");
     const tokens = modelPathTokens(model);
@@ -384,6 +723,12 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
         }
         const transformersModule = isPackaged ? require(packagedModulePath) : require("@huggingface/transformers");
         transformersModule.env.cacheDir = cacheDir;
+        if (bundledDir) {
+          // Weights that ship with the app are read straight from disk; anything
+          // else still resolves remotely and lands in the cache as before.
+          transformersModule.env.localModelPath = bundledDir;
+          transformersModule.env.allowLocalModels = true;
+        }
         transformersModule.env.allowRemoteModels = true;
         transformersModule.env.useFSCache = true;
         transformersModule.env.useWasmCache = true;
@@ -455,6 +800,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       active,
       installed,
       recommended: hardware.recommended_summary === model.id || hardware.recommended_embedding === model.id,
+      bundled: isBundled(model),
       status: operation?.status || (installed ? "ready" : "available"),
       error,
       error_code: errorCode,
@@ -472,7 +818,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       },
       active_source: { ...settings.sources },
       storage: storageInfo(),
-      models: MODEL_CATALOG.map(describeModel),
+      models: allModels().map(describeModel),
+      dimension_guide: DIMENSION_GUIDE,
+      api_providers: API_PROVIDERS,
     };
   }
 
@@ -766,6 +1114,9 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     catalog,
     inspect: inspectModel,
     remove: removeModel,
+    addCustomModel,
+    removeCustomModel,
+    probeApi,
     download,
     select,
     embed,
@@ -783,8 +1134,11 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
 }
 
 module.exports = {
+  API_PROVIDERS,
   BUILTIN_EMBEDDING_MODEL,
   BUILTIN_SUMMARY_MODEL,
+  DIMENSION_GUIDE,
   MODEL_CATALOG,
   createModelRuntime,
+  lookupHuggingFace,
 };

@@ -1,10 +1,12 @@
 "use client";
 
-import { useRef, type FormEvent } from "react";
+import { useState, useRef, type FormEvent } from "react";
 
 import type {
+  ApiProbeResult,
   BackgroundTask,
   CardDraft,
+  DimensionGuideEntry,
   ModelCatalog,
   ModelKind,
   ModelOption,
@@ -97,6 +99,7 @@ export function ModelOptionCard({
   onSelect,
   onInspect,
   onRemove,
+  onRemoveCustom,
 }: {
   model: ModelOption;
   actionId: string;
@@ -105,10 +108,11 @@ export function ModelOptionCard({
   onSelect: (kind: ModelKind, id: string) => void;
   onInspect: (id: string) => void;
   onRemove: (id: string) => void;
+  onRemoveCustom: (id: string) => void;
 }) {
   const isBusy = actionId === model.id;
   return (
-    <article className={`model-option${model.active ? " is-active" : ""}`}>
+    <article className={`model-option${model.active ? " is-active" : ""}${model.custom ? " is-custom" : ""}`}>
       <div className="model-option__topline">
         <span>{model.short_label}</span>
         {model.recommended ? <b>依硬體推薦</b> : null}
@@ -119,6 +123,7 @@ export function ModelOptionCard({
         <span>{model.size_label}</span>
         <span>{model.tier}</span>
         <span>{model.languages}</span>
+        {model.kind === "embedding" && model.dimensions ? <span>{model.dimensions} 維</span> : null}
       </div>
       <div className="model-option__storage">
         <span>檔案：{model.storage?.size_label ?? (model.builtin ? "不需下載" : "尚未檢查")}</span>
@@ -149,6 +154,9 @@ export function ModelOptionCard({
         <div className="model-option__tools">
           <button type="button" onClick={() => onInspect(model.id)} disabled={isTaskRunning}>檢查檔案</button>
           {!model.active ? <button type="button" onClick={() => onRemove(model.id)} disabled={isTaskRunning || isBusy}>清理檔案</button> : null}
+          {model.custom && !model.active ? (
+            <button type="button" onClick={() => onRemoveCustom(model.id)} disabled={isTaskRunning || isBusy}>從清單移除</button>
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -297,6 +305,120 @@ export function DataManagementPanel({
   );
 }
 
+/**
+ * Adding a model by Hugging Face id. Deliberately not a curated dropdown: the
+ * useful set changes faster than this app ships, so the field takes anything
+ * the runtime can actually run, and the backend explains why when it cannot.
+ */
+function AddModelForm({
+  actionId,
+  onAdd,
+}: {
+  actionId: string;
+  onAdd: (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => Promise<boolean>;
+}) {
+  const [kind, setKind] = useState<ModelKind>("embedding");
+  const [modelId, setModelId] = useState("");
+  const [label, setLabel] = useState("");
+  const [dimensions, setDimensions] = useState("");
+  const isAdding = actionId === "custom-add";
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!modelId.trim()) return;
+    const added = await onAdd({ kind, model_id: modelId.trim(), label: label.trim(), dimensions });
+    if (!added) return;
+    setModelId("");
+    setLabel("");
+    setDimensions("");
+  };
+
+  return (
+    <form className="model-add-form" onSubmit={submit}>
+      <div className="model-add-form__heading">
+        <span className="model-settings-kicker">ADD FROM HUGGING FACE</span>
+        <strong>加入其他開源模型</strong>
+        <p>
+          填入 Hugging Face 模型 id（<code>作者/模型名稱</code>）即可加入清單。本機 runtime 只能執行 ONNX 權重，
+          所以請選擇有 ONNX 版本的模型——<code>Xenova</code> 與 <code>onnx-community</code> 轉檔的模型都可以。
+        </p>
+      </div>
+      <div className="model-add-form__fields">
+        <label>
+          <span>用途</span>
+          <select value={kind} onChange={(event) => setKind(event.target.value as ModelKind)}>
+            <option value="embedding">語意向量</option>
+            <option value="summary">摘要整理</option>
+          </select>
+        </label>
+        <label className="model-add-form__id">
+          <span>模型 id</span>
+          <input
+            type="text"
+            value={modelId}
+            onChange={(event) => setModelId(event.target.value)}
+            placeholder={kind === "embedding" ? "例如：Xenova/multilingual-e5-base" : "例如：Xenova/LaMini-Flan-T5-783M"}
+            required
+          />
+        </label>
+        <label>
+          <span>顯示名稱 <em>選填</em></span>
+          <input type="text" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="留白就用模型名稱" />
+        </label>
+        {kind === "embedding" ? (
+          <label>
+            <span>向量維度 <em>離線時必填</em></span>
+            <input
+              type="number"
+              min={1}
+              value={dimensions}
+              onChange={(event) => setDimensions(event.target.value)}
+              placeholder="自動偵測"
+            />
+          </label>
+        ) : null}
+      </div>
+      <button className="create-card-submit" type="submit" disabled={isAdding || !modelId.trim()}>
+        {isAdding ? "檢查模型中…" : "加入清單"}
+      </button>
+    </form>
+  );
+}
+
+/** The 384-versus-1024 decision, stated with both sides. */
+function DimensionGuide({ entries, active }: { entries: DimensionGuideEntry[]; active?: number }) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="dimension-guide">
+      <span className="model-settings-kicker">384 vs 1024 / 該選哪一個</span>
+      <p className="dimension-guide__lede">
+        維度不是越大越好，是兩種取捨。維度必須全庫一致，切換會重建所有卡片的向量與關聯。
+      </p>
+      <div className="dimension-guide__grid">
+        {entries.map((entry) => (
+          <article className={`dimension-guide__card${active === entry.dimensions ? " is-active" : ""}`} key={entry.dimensions}>
+            <div className="dimension-guide__topline">
+              <strong>{entry.label}</strong>
+              {active === entry.dimensions ? <span className="dimension-guide__badge">目前使用</span> : null}
+            </div>
+            <p className="dimension-guide__headline">{entry.headline}</p>
+            <dl>
+              <div><dt>下載</dt><dd>{entry.download}</dd></div>
+              <div><dt>每張卡片</dt><dd>{entry.per_card}</dd></div>
+            </dl>
+            <ul className="dimension-guide__list dimension-guide__list--good">
+              {entry.strengths.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+            <ul className="dimension-guide__list dimension-guide__list--cost">
+              {entry.limits.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ModelSettingsPanel({
   catalog,
   runtimeSettings,
@@ -319,6 +441,9 @@ export function ModelSettingsPanel({
   onSelect,
   onInspect,
   onRemove,
+  onAddCustomModel,
+  onRemoveCustomModel,
+  onProbeApi,
   onCancelTask,
   onRetryTask,
   onDismissTask,
@@ -352,6 +477,9 @@ export function ModelSettingsPanel({
   onSelect: (kind: ModelKind, id: string) => void;
   onInspect: (id: string) => void;
   onRemove: (id: string) => void;
+  onAddCustomModel: (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => Promise<boolean>;
+  onRemoveCustomModel: (id: string) => void;
+  onProbeApi: (kind: ModelKind) => Promise<ApiProbeResult>;
   onCancelTask: () => void;
   onRetryTask: () => void;
   onDismissTask: () => void;
@@ -366,11 +494,15 @@ export function ModelSettingsPanel({
 }) {
   const summaryModels = catalog?.models.filter((model) => model.kind === "summary") ?? [];
   const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
+  const [probeResults, setProbeResults] = useState<Record<ModelKind, ApiProbeResult | null>>({ summary: null, embedding: null });
+  const [probing, setProbing] = useState<ModelKind | "">("");
 
   const providerFields = (kind: ModelKind, label: string, description: string) => {
     const setting = runtimeSettings?.[kind];
     const draft = settingsDraft[kind];
     const isApi = draft.source === "api";
+    const providers = (catalog?.api_providers ?? []).filter((provider) => kind === "embedding" || provider.summary_url || provider.id === "custom");
+    const probe = probeResults[kind];
     return (
       <div className="settings-provider-card">
         <div className="settings-provider-card__heading">
@@ -399,6 +531,24 @@ export function ModelSettingsPanel({
         {isApi ? (
           <div className="settings-provider-fields">
             <label>
+              <span>供應商</span>
+              <select
+                value=""
+                onChange={(event) => {
+                  const provider = providers.find((candidate) => candidate.id === event.target.value);
+                  if (!provider) return;
+                  const url = kind === "summary" ? provider.summary_url : provider.embedding_url;
+                  if (url) onDraftChange(kind, "api_url", url);
+                  if (kind === "embedding") onDraftChange(kind, "api_format", provider.api_format);
+                }}
+              >
+                <option value="">選擇供應商以自動填入位址…</option>
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>{provider.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
               <span>API endpoint</span>
               <input
                 type="url"
@@ -415,9 +565,39 @@ export function ModelSettingsPanel({
                 value={draft.model}
                 onChange={(event) => onDraftChange(kind, "model", event.target.value)}
                 placeholder={kind === "summary" ? "例如：gpt-4o-mini" : "例如：text-embedding-3-small"}
+                list={`${kind}-probe-models`}
                 required
               />
+              {probe?.models.length ? (
+                <datalist id={`${kind}-probe-models`}>
+                  {probe.models.map((name) => <option key={name} value={name} />)}
+                </datalist>
+              ) : null}
             </label>
+            <div className="settings-provider-probe">
+              <button
+                type="button"
+                onClick={async () => {
+                  setProbing(kind);
+                  setProbeResults((current) => ({ ...current, [kind]: null }));
+                  const result = await onProbeApi(kind);
+                  setProbeResults((current) => ({ ...current, [kind]: result }));
+                  setProbing("");
+                }}
+                disabled={probing === kind || !draft.api_url}
+              >
+                {probing === kind ? "偵測中…" : "偵測可用模型"}
+              </button>
+              {probe ? (
+                <span className={probe.ok ? "is-ok" : "is-error"}>
+                  {probe.ok
+                    ? probe.models.length
+                      ? `連線成功，找到 ${probe.models.length} 個模型，可在上方欄位選擇。`
+                      : probe.detail || "連線成功，但沒有列出模型。"
+                    : `連線失敗：${probe.detail}`}
+                </span>
+              ) : null}
+            </div>
             {kind === "embedding" ? (
               <label>
                 <span>回傳格式</span>
@@ -506,7 +686,11 @@ export function ModelSettingsPanel({
           <div className="settings-api-intro">
             <span className="model-settings-kicker">BRING YOUR OWN MODEL</span>
             <strong>接入你熟悉的模型供應商</strong>
-            <p>摘要使用 OpenAI-compatible Chat Completions；embedding 支援 OpenAI-compatible 或 TEI。只要填入 endpoint、模型名稱與金鑰，就能在本機流程中使用。</p>
+            <p>
+              支援 OpenAI-compatible 的服務，包含在本機執行的 <strong>Ollama</strong> 與 <strong>LM Studio</strong>，以及 Hugging Face TEI。
+              選擇供應商會自動填入位址，按「偵測可用模型」就能列出該服務已經載入的模型。
+              用本機供應商時，卡片內容不會離開這台電腦。
+            </p>
           </div>
           {providerFields("summary", "摘要與欄位整理", "用來把筆記整理成可檢查的知識卡草稿。")}
           {providerFields("embedding", "語意向量與關聯圖", "用來計算卡片相似度、搜尋結果與關聯圖連線。")}
@@ -540,7 +724,7 @@ export function ModelSettingsPanel({
             </div>
             <div className="model-options-grid">
               {summaryModels.map((model) => (
-                <ModelOptionCard key={model.id} model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} />
+                <ModelOptionCard key={model.id} model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
               ))}
             </div>
           </div>
@@ -552,12 +736,14 @@ export function ModelSettingsPanel({
               </div>
               <p>決定卡片之間的語意距離與搜尋結果。</p>
             </div>
+            <DimensionGuide entries={catalog.dimension_guide ?? []} active={runtimeSettings?.embedding.dimensions} />
             <div className="model-options-grid">
               {embeddingModels.map((model) => (
-                <ModelOptionCard key={model.id} model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} />
+                <ModelOptionCard key={model.id} model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
               ))}
             </div>
           </div>
+          <AddModelForm actionId={actionId} onAdd={onAddCustomModel} />
           <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
         </>
       ) : null}

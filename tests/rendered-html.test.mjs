@@ -108,7 +108,11 @@ test("local API exposes separate summary and embedding model choices", async (co
   assert.equal((await builtinInspection.json()).status, "ready");
 
   const health = await (await fetch(`${runtime.baseUrl}/health`)).json();
-  assert.equal(health.embedding_model, "embedding-hash-384");
+  // Which embedding a fresh cabinet starts on depends on whether this build
+  // bundled weights (see tests/model-catalogue.test.mjs); either way it is a
+  // 384-dim model, and summaries always start on the rule-based template.
+  assert.ok(["embedding-hash-384", "embedding-multilingual-384"].includes(health.embedding_model), health.embedding_model);
+  assert.equal(health.embedding_dimensions, 384);
   assert.equal(health.summary_model, "summary-template");
 
   const settingsResponse = await fetch(`${runtime.baseUrl}/settings`, { headers: auth });

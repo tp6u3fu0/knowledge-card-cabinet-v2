@@ -2102,6 +2102,204 @@ a:focus-visible {
   }
 }
 
+/* --- 384 vs 1024, and adding models beyond the shipped list --------------- */
+
+.dimension-guide {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 70%, var(--sky));
+  margin-bottom: 18px;
+  padding: 16px 18px 18px;
+}
+
+.dimension-guide__lede {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 6px 0 14px;
+}
+
+.dimension-guide__grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.dimension-guide__card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.dimension-guide__card.is-active {
+  border-color: color-mix(in srgb, var(--accent-sky) 60%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-sky) 16%, transparent);
+}
+
+.dimension-guide__topline {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.dimension-guide__badge {
+  background: color-mix(in srgb, var(--accent-sky) 18%, transparent);
+  border-radius: 999px;
+  color: var(--accent-sky);
+  font-size: 0.66rem;
+  padding: 2px 8px;
+}
+
+.dimension-guide__headline {
+  font-size: 0.82rem;
+  margin: 4px 0 10px;
+}
+
+.dimension-guide__card dl {
+  display: flex;
+  gap: 18px;
+  margin: 0 0 10px;
+}
+
+.dimension-guide__card dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.dimension-guide__card dd {
+  font-size: 0.76rem;
+  margin: 0;
+}
+
+.dimension-guide__list {
+  display: grid;
+  gap: 4px;
+  font-size: 0.72rem;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.dimension-guide__list li::before {
+  display: inline-block;
+  margin-right: 6px;
+  width: 0.9em;
+}
+
+.dimension-guide__list--good li::before {
+  color: var(--accent-mint);
+  content: "＋";
+}
+
+.dimension-guide__list--cost li::before {
+  color: var(--accent-coral);
+  content: "－";
+}
+
+.dimension-guide__list--cost {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.model-add-form {
+  border: 1px dashed color-mix(in srgb, var(--ink) 26%, var(--line));
+  border-radius: 14px;
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 18px;
+}
+
+.model-add-form__heading p {
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin: 6px 0 0;
+  max-width: 62ch;
+}
+
+.model-add-form__heading code {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border-radius: 4px;
+  font-size: 0.92em;
+  padding: 1px 5px;
+}
+
+.model-add-form__fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.model-add-form__id {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.model-add-form label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.74rem;
+}
+
+.model-add-form label em {
+  color: var(--muted);
+  font-size: 0.9em;
+  font-style: normal;
+}
+
+.model-add-form input,
+.model-add-form select {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.model-add-form .create-card-submit {
+  justify-self: start;
+}
+
+.model-option.is-custom {
+  border-style: dashed;
+}
+
+.settings-provider-probe {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.73rem;
+}
+
+.settings-provider-probe button {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.73rem;
+  padding: 6px 14px;
+}
+
+.settings-provider-probe button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.settings-provider-probe .is-ok {
+  color: var(--accent-mint);
+}
+
+.settings-provider-probe .is-error {
+  color: var(--accent-coral);
+}
+
 .model-hardware-note {
   align-items: center;
   background: color-mix(in srgb, var(--mint) 37%, var(--paper));

@@ -907,7 +907,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     request.kccActor = actor;
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local", intended_use: "local desktop runtime", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local", intended_use: "local desktop runtime", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset"] });
       return;
     }
 
@@ -1096,7 +1096,48 @@ function createApiServer(store, dataFile, modelRuntime, {
       return;
     }
 
-    if (request.method === "POST" && segments[0] === "models" && segments[1] && segments[1] !== "select" && segments.length === 2) {
+    // Adding a model reaches out to Hugging Face, so it can fail slowly and for
+    // reasons worth reading; the messages come back verbatim rather than as a
+    // generic 400.
+    if (request.method === "POST" && segments[0] === "models" && segments[1] === "custom" && segments.length === 2) {
+      const body = await readBody(request);
+      try {
+        const model = await modelRuntime.addCustomModel({
+          kind: String(body.kind || ""),
+          model_id: String(body.model_id || ""),
+          label: String(body.label || ""),
+          dimensions: Number(body.dimensions || 0),
+        });
+        sendJson(response, 201, { status: "added", model, models: modelRuntime.catalog() });
+      } catch (error) {
+        sendJson(response, 400, { detail: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (request.method === "DELETE" && segments[0] === "models" && segments[1] === "custom" && segments[2] && segments.length === 3) {
+      try {
+        sendJson(response, 200, { status: "removed", ...modelRuntime.removeCustomModel(segments[2]), models: modelRuntime.catalog() });
+      } catch (error) {
+        sendJson(response, 409, { detail: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    // Lists what an OpenAI-compatible service (Ollama, LM Studio, anything
+    // else) actually has loaded, so the model name can be chosen rather than
+    // typed from memory.
+    if (request.method === "POST" && segments[0] === "models" && segments[1] === "api" && segments[2] === "probe" && segments.length === 3) {
+      const body = await readBody(request);
+      try {
+        sendJson(response, 200, await modelRuntime.probeApi({ api_url: String(body.api_url || ""), api_key: String(body.api_key || "") }));
+      } catch (error) {
+        sendJson(response, 400, { detail: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "models" && segments[1] && !["select", "custom", "api"].includes(segments[1]) && segments.length === 2) {
       try {
         const task = startDownloadTask(segments[1]);
         sendJson(response, 202, { status: "accepted", task_id: task.task_id, model: modelRuntime.catalog().models.find((candidate) => candidate.id === segments[1]) });
@@ -1177,6 +1218,9 @@ function createApiServer(store, dataFile, modelRuntime, {
           "/models/{id}/inspect": { get: {} },
           "/models/{id}": { post: {}, delete: {} },
           "/models/select": { post: {} },
+          "/models/custom": { post: {} },
+          "/models/custom/{id}": { delete: {} },
+          "/models/api/probe": { post: {} },
           "/settings": { get: {}, put: {} }
         }
       });

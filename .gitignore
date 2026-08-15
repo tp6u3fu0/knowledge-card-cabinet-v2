@@ -24,6 +24,10 @@ tsconfig.tsbuildinfo
 *.pem
 /coverage
 
+# embedding weights fetched by `npm run models:bundle` for the installer.
+# build/icon.ico is committed; these are ~130 MB of downloadable files.
+/build/models/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

@@ -127,6 +127,9 @@ export type ModelOption = {
   languages: string;
   description: string;
   builtin: boolean;
+  /** Added by the user from a Hugging Face id rather than shipped with the app. */
+  custom?: boolean;
+  added_at?: string;
   active: boolean;
   installed: boolean;
   recommended: boolean;
@@ -173,6 +176,35 @@ export type ModelCatalog = {
     total_size_label: string;
   };
   models: ModelOption[];
+  dimension_guide?: DimensionGuideEntry[];
+  api_providers?: ApiProvider[];
+};
+
+export type DimensionGuideEntry = {
+  dimensions: number;
+  label: string;
+  headline: string;
+  download: string;
+  per_card: string;
+  strengths: string[];
+  limits: string[];
+};
+
+export type ApiProvider = {
+  id: string;
+  label: string;
+  summary_url: string;
+  embedding_url: string;
+  api_format: "openai" | "tei";
+  key_required: boolean;
+  note: string;
+};
+
+export type ApiProbeResult = {
+  ok: boolean;
+  endpoint: string;
+  models: string[];
+  detail: string;
 };
 
 export type BackgroundTask = {
