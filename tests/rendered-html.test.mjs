@@ -256,13 +256,24 @@ test("desktop packaging points to the local runtime", async () => {
   assert.equal(desktopPackage.dependencies["knowledge-card-cabinet"], undefined);
 });
 
-test("the README only documents scripts that exist", async () => {
+test("the docs only reference scripts and files that exist", async () => {
   // Documentation is the one part of the project no other test covers, so it
   // quietly fell behind the code more than once.
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  const readmes = await Promise.all(
-    ["../README.md", "../desktop/README.md"].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
+  const docs = ["../README.md", "../desktop/README.md", "../CLAUDE.md"];
+  const readmes = await Promise.all(docs.map((file) => readFile(new URL(file, import.meta.url), "utf8")));
+
+  // CLAUDE.md points at specific source files as the reason for its rules; a
+  // rule whose file has moved is worse than no rule, because it reads as
+  // authoritative.
+  const guide = readmes[docs.indexOf("../CLAUDE.md")];
+  const referenced = new Set(
+    [...guide.matchAll(/`((?:desktop|app|scripts|tests)\/[\w./[\]-]+?\.(?:cjs|mjs|tsx?|css|yml|json))`/gu)].map((match) => match[1]),
   );
+  assert.ok(referenced.size > 5, `CLAUDE.md referenced only ${referenced.size} source files`);
+  for (const file of referenced) {
+    await access(new URL(`../${file}`, import.meta.url));
+  }
 
   const documented = new Set(
     readmes.flatMap((text) => [...text.matchAll(/npm run ([a-z][a-z:]*)/g)].map((match) => match[1])),

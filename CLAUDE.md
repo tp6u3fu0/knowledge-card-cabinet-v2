@@ -1,0 +1,254 @@
+# 知識卡冊 — 開發指南
+
+寫給接手這個專案的人與 AI agent。目的只有一個：**讓你在不知道全部歷史的情況下，也不會踩到會靜靜壞掉的地方。**
+
+這裡列出的每一條都對應真實發生過的錯誤，不是預防性的空話。看到「這條寫成這樣是因為…」時，那就是實際壞過一次的紀錄。
+
+---
+
+## 0. 三十秒版本
+
+```
+一份 Node runtime，資料在本機 SQLite，模型在本機 CPU。
+desktop/local-api.cjs   ← 本機 API，資料與語意邏輯都在這
+desktop/model-runtime.cjs ← 模型目錄、下載、embedding、摘要
+desktop/store.cjs       ← SQLite 存取
+app/                    ← 前端（vinext，Next.js 相容）
+app/api/**/route.ts     ← 前端對本機 API 的代理層
+```
+
+動手前跑一次，動完再跑一次：
+
+```bash
+npm run lint && npm test && npm run release:check && npm run verify:runtime
+```
+
+---
+
+## 1. 絕對不要動的不變式
+
+這幾條被打破時**不會有錯誤訊息**，只會讓產品慢慢變成垃圾。這是它們危險的原因。
+
+### 1.1 全庫向量寬度必須一致
+
+一個 384 維向量和一個 1024 維向量之間沒有「相似度」可言。`cosine()` 在寬度不符時**直接丟例外**，這是刻意的：
+
+```js
+// desktop/local-api.cjs
+if (first.length !== second.length) throw new Error(`embedding 維度不符…`);
+```
+
+- 權威來源是 `expectedEmbeddingDimensions()`（`model-runtime.cjs`）。
+- 自訂 API 的寬度由**第一次成功的回應**決定，之後必須一致。
+- 加入自訂 embedding 模型時，維度必須在下載前就確定。做不到就擋下來，不要先下載再說。
+
+**不要**為了「讓它不要爆」而改成回傳 0 分或跳過。爆掉就是設計。
+
+### 1.2 hash embedding 不是語意模型，永遠不可以當替代品
+
+`embedding-hash-384` 是詞彙重疊的 deterministic fallback。把它混進由真模型建立的資料庫，會產生**看起來合理但毫無意義**的相似度分數——這比明顯的錯誤糟得多。
+
+`fallbackOrThrow()`（`model-runtime.cjs`）只在 hash 本身就是啟用中的 embedding 時才允許回退。不要放寬這個條件。
+
+### 1.3 語意分數是相對值，不是 cosine
+
+強多語言模型會把所有配對壓在很窄的高分帶裡（實測 0.698–0.908）。**絕對 cosine 門檻無法分辨「相關」與「兩者都是中文」。**
+
+所以 `semanticBaseline()` 會取樣這個收藏自己的分數分布，再把 cosine 映射成相對值。`RELATION_MIN_SCORE = 0.42` 是相對於這個分布的值，**不是 cosine**。
+
+- 看到 `0.42` 不要想成「cosine 0.42」。
+- 不要新增任何直接拿 `cosine()` 結果和常數比較的程式碼。
+- 樣本太少（<6）時 `scoreRange` 回傳 `null`，此時不標記「語意相似」——這是正確行為，不是 bug。
+
+### 1.4 封面圖案名稱必須存在於前端圖庫
+
+`app/cover-art.tsx` 的 `glyphLibrary` 對未知名稱的處理是：
+
+```tsx
+{(shape && glyphLibrary[shape]) ?? glyphLibrary.quad}
+```
+
+**不會報錯，只會全部變成同一個四方格。** 這個 bug 上線過一次，整櫃卡片的封面失去所有資訊而沒有任何人發現，直到有人用肉眼看出來。
+
+`tests/cover-art.test.mjs` 現在會擋下來。不要為了「加一個新圖案」只改後端。
+
+### 1.5 卡片顏色由分類決定，且指派後不可重算
+
+- 顏色記錄在 SQLite `meta` 的 `category_accents`。
+- 指派只發生一次；之後**永遠不重算**。
+- 原因：重算會讓「刪掉一個分類」把整櫃卡片重新上色。顏色是辨識的一部分。
+
+`assignCategoryAccents()` 只填沒有顏色的分類，並清掉已不存在的分類。不要改成「每次依目前分類列表重新分配」——那個版本試過，很好看，但使用者的卡片會莫名其妙變色。
+
+### 1.6 衍生資料改變時必須升版並補做遷移
+
+封面是從 embedding 算出來的衍生資料。`reindexStore` 只看 embedding 有沒有變，**會直接走過所有舊封面**。
+
+所以改動封面產生方式時：
+
+1. 升 `COVER_VERSION`
+2. 確認 `refreshStaleCovers()` 會抓到（它比對 version 與分類顏色）
+
+漏掉第 1 步的結果是：新安裝正常、舊使用者永遠看到舊版本，而且沒有任何錯誤訊息。
+
+### 1.7 `save()` 是唯一的寫入收斂點
+
+```js
+const save = (changedCards) => { … refreshStaleCovers(store) … db.save(store, { cards }) }
+```
+
+- 分類顏色在這裡定案，所以任何新增分類的操作都不會寫出錯的顏色。
+- `changedCards` 只寫指定的列。**重新上色的卡片必須併進這個集合**，否則變更會遺失。
+- API 回應要送 **store 裡的物件**，不是本地副本。`Object.assign(existing, card)` 之後 `card` 已經是另一個物件，回傳它會讓前端拿到 `save()` 重新上色前的舊值。這個 bug 真的發生過。
+
+### 1.8 安全邊界
+
+- 本機 API **只監聽 loopback**，權杖由前端在伺服器端代理，不經過網路。
+- **介面本身沒有登入機制。** `KCC_HOST=0.0.0.0` 等於讓所有能連到這個埠的人讀寫你的卡片。只能用在私人網路（Tailscale / WireGuard）。
+- 不要新增任何把權杖送到瀏覽器的程式碼。
+- 不要在沒有先做認證的情況下放寬 CORS 或監聽位址（見第 6 節）。
+
+### 1.9 版號只有一份
+
+`package.json` 是唯一來源。`scripts/release-check.mjs` 會掃 `desktop/*.cjs`，出現不一致的版號字面值就失敗。
+
+會這樣是因為 MCP bridge 曾寫死 `0.1.0` 對所有 AI 工具回報錯版本，而 OpenAPI 文件寫死 `0.4.0`——一個既不是 app 版本也不是路由 `v1` 的數字。
+
+### 1.10 備份校驗碼只能由產生它的實作驗證
+
+JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，JS 給 `0.0000492`）。跨工具的備份請**移除 `checksum_sha256` 欄位**再匯入；沒有校驗碼的 payload 會跳過該檢查。不要試圖「修好」跨 runtime 的校驗。
+
+---
+
+## 2. 連動地圖：改這裡，就一定要改那裡
+
+| 你改了 | 就必須同時改 | 不改的後果 |
+| --- | --- | --- |
+| `MOTIF_SHAPES`（local-api.cjs） | `app/cover-art.tsx` 的 `CoverGlyph` union + `glyphLibrary` | 封面靜默退回單一圖案 |
+| `PALETTES`（local-api.cjs） | `globals.css` 的 `--accent-*` 與 `.collection-card--*` 規則、`types.ts` 的 `visualAccents` | 卡片沒有顏色樣式 |
+| 封面產生邏輯 | `COVER_VERSION` +1 | 舊資料永不更新 |
+| 新增 API 路由 | `app/api/**/route.ts` 代理、`openapi.json` 的 paths、根路徑的 `capabilities` 陣列 | 前端 404；整合工具看不到新能力 |
+| `store.cjs` 的 `SCHEMA` | `load()`、`writeMeta()`、`STORE_VERSION` 遷移 | 欄位讀不回來或舊資料庫開不起來 |
+| `MODEL_CATALOG` 新增項目 | `size_tier`（summary）或 `language` + `dimensions`（embedding） | 簡易模式選不到它 |
+| `DIMENSION_GUIDE` 涵蓋範圍 | 任何新的 embedding 維度都要有對應條目 | `tests/model-catalogue.test.mjs` 會失敗（刻意的） |
+| `package.json` 版本 | 無（其他地方都用讀的） | — |
+| `electron-builder.yml` 的 extraResources | `main.cjs` 的路徑解析、`model-runtime.cjs` 的 `bundledModelsDir()` | 打包版找不到資源 |
+| README 提到的 npm script | `package.json` 必須真的有 | `tests/rendered-html.test.mjs` 會失敗（刻意的） |
+
+---
+
+## 3. 測試涵蓋什麼
+
+| 檔案 | 守住什麼 |
+| --- | --- |
+| `api-contract.test.mjs` | 認證、卡片生命週期、搜尋、關聯上限與去重、備份完整性 |
+| `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
+| `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
+| `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |
+| `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣 |
+| `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重 |
+| `category-colour.test.mjs` | 同分類同色、分布平均、既有分類不變色、三方一致 |
+| `rendered-html.test.mjs` | 前端能 render、打包設定、README 指令存在 |
+
+**加功能時請一起加測試。** 這個專案唯一沒有測試覆蓋的部分（文件）就曾經悄悄落後好幾個 commit。
+
+---
+
+## 4. 在這台機器上怎麼驗證前端
+
+**預覽窗格（Browser pane）的截圖會逾時**，因為它沒有 compositing。CSS 動畫和 rAF 也不前進。
+
+驗證前端請走 Electron + CDP：
+
+```bash
+# 1. 建置並用 CDP 開啟
+npm run build
+node_modules/electron/dist/electron.exe desktop/main.cjs --remote-debugging-port=9222
+# 2. 用 WebSocket 連 http://127.0.0.1:9222/json 的 page target
+#    Runtime.evaluate 讀 DOM、Page.captureScreenshot 抓畫面
+```
+
+另外兩個實際踩過的坑：
+
+- **React 狀態更新是非同步的。** 派送事件後立刻讀 DOM 會讀到舊值，看起來像功能壞掉。等一個 frame 再讀。我因此兩次誤判「拖曳功能壞了」。
+- 用 `KCC_DATA_DIR` 與 `KCC_MODELS_DIR` 指到暫存目錄再測，否則會動到使用者真實資料，而且會繼承他們已選的模型（看起來像「全新安裝的預設值不對」）。
+
+---
+
+## 5. macOS 版：目前實際缺什麼
+
+好消息是**核心不需要改**：`onnxruntime-node` 已附 `darwin/arm64` 與 `darwin/x64` 預編譯檔（`bin/napi-v3/darwin/`），不需要編譯；`node:sqlite` 是 Node 內建；`main.cjs:269` 已經處理 macOS 關窗不退出的語意；`app.getPath("documents")` 在 macOS 會落在 `~/Documents/知識卡冊`。
+
+需要補的是這些，都已確認：
+
+1. **`electron-builder.yml` 沒有 `mac:` 區塊。** 需要加 target（`dmg`、`zip`）、`category`、以及 `icon: build/icon.icns`。
+2. **`scripts/build-icon.mjs` 只產生 `.ico` 和 `.png`。** macOS 要 `.icns`。可在 macOS 上用 `iconutil`，或直接產生 `icon.iconset` 目錄讓 electron-builder 轉。
+3. **必須在 macOS 上建置。** Windows runner 做不出完整的 mac 產物，CI 要加一個 `macos-latest` job。
+4. **簽章與公證。** 沒有 Apple Developer ID 的話，使用者下載後會被 Gatekeeper 隔離，而且比 Windows SmartScreen 更難繞過。這是要花錢的決定，建議先確認要不要做再開工。
+5. **MCP bridge 找不到 runtime manifest。** `desktop/mcp-server.cjs` 只查 `%APPDATA%` 與 `%LOCALAPPDATA%` 兩個 Windows 環境變數。macOS 要加 `~/Library/Application Support/Knowledge Card Cabinet/runtime.json`。（桌面端寫入用的是 `app.getPath("appData")`，本來就跨平台，所以只有讀取端要補。）
+6. 產品名是中文（`知識卡冊`）。appId `com.knowledgecard.cabinet` 沒問題，但 bundle 名稱與路徑要實機確認一次。
+
+順序建議：先做 1、2、3 產出可跑的未簽章版本，確認功能正常，再決定 4。
+
+---
+
+## 6. iOS 版：先做對的事
+
+使用者的方向是「連到主機獲取資料」，這是對的——Electron 不能跑在 iOS 上，所以架構必然是**主機端 runtime + 手機端瘦客戶端**。
+
+### 已經打好的基礎
+
+- API 路由已有版本前綴 `/api/v1/`
+- 根路徑會回報 `capabilities` 陣列，客戶端可以協商功能
+- API 本身已經是 Bearer token 認證
+- CORS 已有 allowlist（`corsOrigins`，預設只允許 localhost:3000）
+- 已有稽核記錄（`audit.jsonl`）
+
+### 動工前必須先解決的（照順序）
+
+**第一優先：認證。** 這是硬前提。今天的模型是「權杖只存在伺服器端，介面完全不做認證」——因為介面只在 loopback 上。手機客戶端一旦存在，就有一個**在網路另一端、需要自己持有憑證**的東西。需要：
+
+- 裝置配對流程（桌面端顯示配對碼 → 手機端輸入）
+- 每台裝置一組長期 token，可個別撤銷
+- 裝置列表與撤銷介面
+
+**在這件事完成前，不要為了讓手機連上而放寬 `KCC_HOST` 或 CORS。** 那等於把整個卡片庫公開。
+
+**第二：傳輸。** loopback 之外需要 TLS，或明確要求走 Tailscale / WireGuard。後者省事而且更安全，建議先做這個，並在文件寫清楚。
+
+**第三：API 契約穩定化。** 手機端一旦發布就不能隨時改 API。建議：
+
+- 保持**只增不改**（additive）
+- 新能力一律加進 `capabilities`，讓舊客戶端能優雅降級
+- `/api/v1/` 之下的既有欄位不刪不改語意
+
+### 不需要做的事
+
+**不要在 iOS 上跑 embedding。** 主機端已經有模型，手機端只要送文字、拿結果。這樣可以完全避免第 1.1 條的維度問題——一旦手機端用了不同模型，向量就不相容了。
+
+**不要為了手機端複製一份資料邏輯。** 所有語意計算留在 `local-api.cjs`。手機端只做顯示與輸入。
+
+---
+
+## 7. 不要做的事
+
+- **不要加第二套推論引擎**（llama.cpp / GGUF）。使用者已明確要求本體輕量。需要 GGUF 的話，透過設定頁的 Ollama / LM Studio 供應商即可，那本來就是 llama.cpp。
+- **不要把範例卡片自動塞進全新安裝。** 全新安裝是空的，這是刻意的決定。範例卡只在明確要求時載入。
+- **不要在沒實測的情況下宣稱修好了。** 這個專案有過「改了設定檔就以為修好」的紀錄。前端改動請照第 4 節實際抓畫面。
+- **不要相信自己對現況的記憶。** 寫文件或回報前，先去讀程式碼。README 曾經在多個 commit 中悄悄與現實脫節。
+
+---
+
+## 8. 提交前檢查表
+
+```bash
+npm run lint            # 0 問題
+npm test                # 全綠（含 build）
+npm run release:check   # 版號一致
+npm run verify:runtime  # runtime 契約
+```
+
+- 改了前端 → 照第 4 節用 Electron + CDP 實際看過
+- 改了衍生資料的產生方式 → 升版本常數並確認遷移路徑
+- 改了 API → 代理層、openapi、capabilities 三處都補上
+- 改了行為 → 對應的測試也要改，並在 commit 訊息說明**為什麼**改，而不只是改了什麼

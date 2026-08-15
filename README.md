@@ -212,6 +212,7 @@ Installer 與後續自動更新功能的發佈基礎。
 
 ## 專案文件
 
+- [`CLAUDE.md`](CLAUDE.md)：開發指南——哪些不變式不能動、改哪裡會牽動哪裡、以及 macOS／iOS 版的前置工作
 - [`desktop/README.md`](desktop/README.md)：桌面版模型、安裝包與 MCP 詳細說明
 
 ## 授權
