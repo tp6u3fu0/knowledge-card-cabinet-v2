@@ -1189,7 +1189,10 @@ function createApiServer(store, dataFile, modelRuntime, {
     if (request.method === "GET" && segments[0] === "openapi.json") {
       sendJson(response, 200, {
         openapi: "3.0.0",
-        info: { title: "Knowledge Card Cabinet Local API", version: "0.4.0" },
+        // The app's version, not a number of its own: the compatibility
+        // contract is the "v1" in the route prefix, so a second independent
+        // version here only ever drifted away from both.
+        info: { title: "Knowledge Card Cabinet Local API", version: require("./package.json").version },
         security: [{ bearerLocal: [] }],
         components: { securitySchemes: { bearerLocal: { type: "http", scheme: "bearer", description: "由正在執行的桌面版 runtime manifest 提供，只限本機使用。" } } },
         paths: {

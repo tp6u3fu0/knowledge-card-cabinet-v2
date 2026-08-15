@@ -8,4 +8,17 @@ if (root.version !== desktop.version) {
 if (root.version === "0.0.0" || !/^\d+\.\d+\.\d+$/u.test(root.version)) {
   throw new Error(`invalid release version: ${root.version}`);
 }
+
+// Any other version literal in the shipped sources is a copy that will drift.
+// The MCP bridge carried one for a whole release before anyone noticed.
+const sources = ["../desktop/mcp-server.cjs", "../desktop/main.cjs", "../desktop/local-api.cjs"];
+for (const file of sources) {
+  const text = await readFile(new URL(file, import.meta.url), "utf8");
+  const literals = [...text.matchAll(/version:\s*"(\d+\.\d+\.\d+)"/gu)].map((match) => match[1]);
+  const stale = literals.filter((literal) => literal !== root.version);
+  if (stale.length > 0) {
+    throw new Error(`${file} hardcodes version ${stale.join(", ")} instead of reading ${root.version}`);
+  }
+}
+
 console.log(`Release metadata OK: Knowledge Card Cabinet ${root.version}`);

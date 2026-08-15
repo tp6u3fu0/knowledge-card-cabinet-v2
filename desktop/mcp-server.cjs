@@ -231,7 +231,9 @@ function registerTools(server) {
 }
 
 async function main() {
-  const server = new McpServer({ name: "knowledge-card-cabinet", version: "0.1.0" });
+  // Read, not repeated: a hardcoded copy here silently reported the wrong
+  // version to every AI tool as soon as the app was bumped.
+  const server = new McpServer({ name: "knowledge-card-cabinet", version: require("./package.json").version });
   registerTools(server);
   const transport = new StdioServerTransport();
   await server.connect(transport);
