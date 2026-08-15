@@ -159,7 +159,7 @@
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 20px 0 24px;
   padding-bottom: 8px;
 }
@@ -208,6 +208,27 @@
   gap: 7px;
   padding: 17px 18px;
 }
+
+.device-management { display: grid; gap: 14px; }
+.settings-api-intro--devices { background: color-mix(in srgb, var(--lavender) 30%, var(--paper)); border-color: color-mix(in srgb, var(--lavender-deep) 52%, var(--line)); }
+.device-pairing-card,
+.device-list-card { background: rgba(251, 250, 247, 0.64); border: 1px solid rgba(33, 31, 39, 0.11); border-radius: 14px; padding: 20px; }
+.device-pairing-card { align-items: center; display: flex; gap: 20px; justify-content: space-between; }
+.device-pairing-card > div { display: grid; gap: 7px; }
+.device-pairing-card p,
+.device-pairing-card small,
+.device-list-card p { color: var(--muted); font-size: 11px; line-height: 1.7; margin: 0; }
+.device-pairing-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 28px; letter-spacing: 0.1em; }
+.device-list-card__heading,
+.device-list__item { align-items: center; display: flex; gap: 16px; justify-content: space-between; }
+.device-list-card__heading h3 { font-family: Georgia, "Noto Serif TC", serif; font-size: 23px; font-weight: 400; margin: 6px 0 0; }
+.device-list-card__heading > span { color: var(--muted); font-size: 11px; }
+.device-list { border-top: 1px solid var(--line); display: grid; margin-top: 16px; }
+.device-list__item { border-bottom: 1px solid var(--line); padding: 13px 0; }
+.device-list__item > div { display: grid; gap: 4px; }
+.device-list__item small { color: var(--muted); font-size: 10px; }
+.device-lan-details { border-top: 1px solid var(--line); display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; }
+.device-lan-details code { background: rgba(33, 31, 39, 0.06); border-radius: 6px; font-size: 10px; overflow-wrap: anywhere; padding: 8px; }
 
 .settings-api-intro strong {
   font-family: Georgia, "Noto Serif TC", serif;

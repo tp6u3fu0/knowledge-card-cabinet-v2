@@ -278,7 +278,29 @@ export type SettingsDraft = {
   embedding: ProviderSettingsDraft;
 };
 
-export type SettingsTab = "local" | "api" | "data";
+export type SettingsTab = "local" | "api" | "data" | "devices";
+
+export type PairedDevice = {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+};
+
+export type PairingCode = {
+  code: string;
+  expires_at: string;
+};
+
+export type LanSharingStatus = {
+  enabled: boolean;
+  transport: string;
+  port: number | null;
+  api_urls: string[];
+  certificate_fingerprint_sha256: string;
+  pairing_requires_fingerprint: boolean;
+};
 
 /** Must match PALETTES in desktop/local-api.cjs and the accent rules in globals.css. */
 export const visualAccents = ["coral", "sky", "lavender", "mint", "amber", "rose", "indigo", "moss"] as const;

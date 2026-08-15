@@ -99,6 +99,35 @@ describe("authentication", () => {
     const response = await fetch(`${base}/cards`, { headers: { Authorization: "Bearer nope" } });
     assert.equal(response.status, 401);
   });
+
+  it("issues a one-time device pairing code without revealing stored device tokens", async () => {
+    const issued = await ok("POST", "/devices/pairing-code");
+    assert.match(issued.code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/u);
+    assert.ok(Date.parse(issued.expires_at) > Date.now());
+
+    const paired = await call("POST", "/devices/pair", { code: issued.code.replace("-", " "), name: "測試 iPhone" });
+    assert.equal(paired.status, 200);
+    assert.match(paired.body.token, /^kcc_dv_/u);
+    assert.equal(paired.body.device.name, "測試 iPhone");
+
+    const replay = await call("POST", "/devices/pair", { code: issued.code, name: "重試裝置" });
+    assert.equal(replay.status, 422, "a pairing code must only create one device token");
+
+    const devices = await ok("GET", "/devices");
+    assert.equal(devices.length, 1);
+    assert.ok(!("token" in devices[0]), "the device list must never return a token");
+  });
+
+  it("lets a device token access cards but not host administration, and supports revocation", async () => {
+    const issued = await ok("POST", "/devices/pairing-code");
+    const paired = await call("POST", "/devices/pair", { code: issued.code, name: "撤銷測試裝置" });
+    const deviceHeaders = { Authorization: `Bearer ${paired.body.token}` };
+
+    assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 200);
+    assert.equal((await fetch(`${base}/settings`, { headers: deviceHeaders })).status, 403);
+    await ok("DELETE", `/devices/${paired.body.device.id}`);
+    assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 401);
+  });
 });
 
 describe("audit log", () => {

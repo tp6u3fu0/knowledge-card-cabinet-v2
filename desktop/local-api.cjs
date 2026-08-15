@@ -1,11 +1,15 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
 const { URL } = require("node:url");
 const { createModelRuntime } = require("./model-runtime.cjs");
 const { openStore, writeBackup } = require("./store.cjs");
 const { createTaskManager } = require("./task-manager.cjs");
+const { createDeviceAuth } = require("./device-auth.cjs");
+const { ensureLanCertificate, lanAddresses } = require("./lan-certificate.cjs");
+const { advertiseKnowledgeCardHost } = require("./bonjour.cjs");
 
 /** Width of the built-in hash embedding, and the width covers are drawn from. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
@@ -935,6 +939,9 @@ function createApiServer(store, dataFile, modelRuntime, {
   taskManager,
   auditLogPath = "",
   corsOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"],
+  deviceAuth,
+  networkController,
+  serverFactory = (handler) => http.createServer(handler),
   db,
 } = {}) {
   /**
@@ -1006,24 +1013,101 @@ function createApiServer(store, dataFile, modelRuntime, {
       return;
     }
 
-    const isPublic = segments[0] === "health" || segments[0] === "docs" || segments[0] === "openapi.json";
+    const isPairingExchange = request.method === "POST" && segments[0] === "devices" && segments[1] === "pair" && segments.length === 2;
+    const isPublic = segments[0] === "health" || segments[0] === "docs" || segments[0] === "openapi.json" || isPairingExchange || (isVersioned && segments.length === 0);
     // Recorded on the request so the audit hook on response.end can read the
     // actor we actually authenticated, not just guess from the header.
     let actor = "anonymous";
+    let authScope = "public";
     if (!isPublic && authToken) {
       const authorization = String(request.headers.authorization || "");
       const providedToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-      if (providedToken !== authToken) {
+      if (providedToken === authToken) {
+        // Keep the established audit label stable; external tools use it when
+        // distinguishing desktop activity from a paired device below.
+        actor = "api-token";
+        authScope = "local";
+      } else {
+        const device = deviceAuth?.authenticate(providedToken);
+        if (device) {
+          actor = `device:${device.id}`;
+          authScope = "device";
+        }
+      }
+      if (authScope === "public") {
         response.setHeader("WWW-Authenticate", "Bearer");
-        sendJson(response, 401, { detail: "需要本機 API 權杖" });
+        sendJson(response, 401, { detail: "需要有效的 API 或裝置權杖" });
         return;
       }
-      actor = "api-token";
     }
     request.kccActor = actor;
 
+    const deviceSafeRoute = ["cards", "categories", "search", "trash"].includes(segments[0]);
+    if (authScope === "device" && !deviceSafeRoute) {
+      sendJson(response, 403, { detail: "裝置權杖沒有這項主機管理權限。" });
+      return;
+    }
+
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local", intended_use: "local desktop runtime", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke"] });
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "devices" && segments[1] === "pairing-code" && segments.length === 2) {
+      if (!deviceAuth) {
+        sendJson(response, 503, { detail: "裝置配對服務尚未啟動。" });
+        return;
+      }
+      sendJson(response, 200, deviceAuth.issuePairingCode());
+      return;
+    }
+
+    if (isPairingExchange) {
+      if (!deviceAuth) {
+        sendJson(response, 503, { detail: "裝置配對服務尚未啟動。" });
+        return;
+      }
+      const result = deviceAuth.pair(await readBody(request));
+      if (!result.ok) {
+        sendJson(response, 422, { detail: result.detail });
+        return;
+      }
+      sendJson(response, 200, { token: result.token, device: result.device });
+      return;
+    }
+
+    if (request.method === "GET" && segments[0] === "devices" && segments.length === 1) {
+      sendJson(response, 200, deviceAuth?.list() || []);
+      return;
+    }
+
+    if (request.method === "DELETE" && segments[0] === "devices" && segments.length === 2) {
+      const device = deviceAuth?.revoke(segments[1]);
+      if (!device) {
+        sendJson(response, 404, { detail: "找不到裝置。" });
+        return;
+      }
+      sendJson(response, 200, { status: "revoked", device });
+      return;
+    }
+
+    if (request.method === "GET" && segments[0] === "network" && segments[1] === "lan" && segments.length === 2) {
+      sendJson(response, 200, networkController?.status() || { enabled: false, transport: "unavailable" });
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "network" && segments[1] === "lan" && segments.length === 2) {
+      try {
+        sendJson(response, 200, await networkController.enable());
+      } catch (error) {
+        sendJson(response, 500, { detail: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (request.method === "DELETE" && segments[0] === "network" && segments[1] === "lan" && segments.length === 2) {
+      await networkController.disable();
+      sendJson(response, 200, networkController.status());
       return;
     }
 
@@ -1340,7 +1424,12 @@ function createApiServer(store, dataFile, modelRuntime, {
           "/models/custom": { post: {} },
           "/models/custom/{id}": { delete: {} },
           "/models/api/probe": { post: {} },
-          "/settings": { get: {}, put: {} }
+          "/settings": { get: {}, put: {} },
+          "/devices": { get: {} },
+          "/devices/pairing-code": { post: {} },
+          "/devices/pair": { post: {} },
+          "/devices/{id}": { delete: {} }
+          ,"/network/lan": { get: {}, post: {}, delete: {} }
         }
       });
       return;
@@ -1687,7 +1776,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     sendJson(response, 404, { detail: "Not found" });
   }
 
-  return http.createServer((request, response) => {
+  return serverFactory((request, response) => {
     const requestOrigin = String(request.headers.origin || "");
     const allowOrigin = corsOrigins.includes("*") || corsOrigins.includes(requestOrigin) ? (requestOrigin || "*") : corsOrigins[0] || "";
     response.setHeader("Access-Control-Allow-Origin", allowOrigin);
@@ -1730,11 +1819,35 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
   }
   const resolvedAuthToken = authToken || crypto.randomBytes(32).toString("hex");
   const taskManager = createTaskManager({ storagePath: path.join(path.dirname(dataFile), "tasks.json") });
+  const deviceAuth = createDeviceAuth({ storagePath: path.join(path.dirname(dataFile), "devices.json") });
+  let lanRuntime = null;
+  let bonjourAdvertisement = null;
+  let lanCertificate = null;
+  const networkController = {
+    status: () => ({
+      enabled: Boolean(lanRuntime),
+      transport: "lan-https",
+      port: lanRuntime?.port || null,
+      api_urls: lanRuntime ? lanAddresses().map((address) => `https://${address}:${lanRuntime.port}/api/v1`) : [],
+      certificate_fingerprint_sha256: lanCertificate?.fingerprint_sha256 || "",
+      pairing_requires_fingerprint: true,
+    }),
+    enable: async () => {
+      if (lanRuntime) return networkController.status();
+      lanCertificate = ensureLanCertificate({ directory: path.join(path.dirname(dataFile), "lan-tls") });
+      await startLanApi({ keyPath: lanCertificate.key_path, certPath: lanCertificate.cert_path, port: 8443 });
+      bonjourAdvertisement = advertiseKnowledgeCardHost({ port: lanRuntime.port, fingerprint: lanCertificate.fingerprint_sha256 });
+      return networkController.status();
+    },
+    disable: async () => stopLanApi(),
+  };
   const server = createApiServer(store, dataFile, modelRuntime, {
     authToken: resolvedAuthToken,
     taskManager,
     auditLogPath: path.join(path.dirname(dataFile), "audit.jsonl"),
     corsOrigins,
+    deviceAuth,
+    networkController,
     db,
   });
   await new Promise((resolve, reject) => {
@@ -1743,6 +1856,42 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
   });
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
+  const startLanApi = async ({ keyPath, certPath, port: lanPort = 8443, hostname = "" } = {}) => {
+    if (!keyPath || !certPath) throw new Error("LAN 分享需要 TLS 憑證與私鑰。");
+    if (lanRuntime) await lanRuntime.close();
+    const lanServer = createApiServer(store, dataFile, modelRuntime, {
+      authToken: resolvedAuthToken,
+      taskManager,
+      auditLogPath: path.join(path.dirname(dataFile), "audit.jsonl"),
+      corsOrigins,
+      deviceAuth,
+      networkController,
+      serverFactory: (handler) => https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath), minVersion: "TLSv1.2" }, handler),
+      db,
+    });
+    await new Promise((resolve, reject) => {
+      lanServer.once("error", reject);
+      lanServer.listen(lanPort, "0.0.0.0", resolve);
+    });
+    const lanAddress = lanServer.address();
+    const actualLanPort = typeof lanAddress === "object" && lanAddress ? lanAddress.port : lanPort;
+    lanRuntime = {
+      server: lanServer,
+      port: actualLanPort,
+      baseUrl: hostname ? `https://${hostname}${actualLanPort === 443 ? "" : `:${actualLanPort}`}` : "",
+      close: async () => new Promise((resolve) => lanServer.close(() => resolve())),
+    };
+    return lanRuntime;
+  };
+
+  const stopLanApi = async () => {
+    bonjourAdvertisement?.stop();
+    bonjourAdvertisement = null;
+    if (!lanRuntime) return;
+    const current = lanRuntime;
+    lanRuntime = null;
+    await current.close();
+  };
   return {
     server,
     port: actualPort,
@@ -1751,7 +1900,11 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
     modelRuntime,
     taskManager,
     databaseFile: db.databaseFile,
+    startLanApi,
+    stopLanApi,
+    get lanRuntime() { return lanRuntime; },
     close: async () => {
+      await stopLanApi();
       await taskManager.close();
       await new Promise((resolve) => server.close(() => resolve()));
       db.close();

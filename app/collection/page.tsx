@@ -29,6 +29,9 @@ import type {
   RuntimeSettings,
   SettingsDraft,
   SettingsTab,
+  PairedDevice,
+  PairingCode,
+  LanSharingStatus,
   TrashCard,
 } from "./types";
 import {
@@ -534,6 +537,13 @@ export default function CollectionPage() {
   const [hasDatabaseBackup, setHasDatabaseBackup] = useState(false);
   const [databaseBackupAcknowledged, setDatabaseBackupAcknowledged] = useState(false);
   const [databaseResetConfirmation, setDatabaseResetConfirmation] = useState("");
+  const [devices, setDevices] = useState<PairedDevice[]>([]);
+  const [pairingCode, setPairingCode] = useState<PairingCode | null>(null);
+  const [isDevicesLoading, setIsDevicesLoading] = useState(false);
+  const [isPairingCodeIssuing, setIsPairingCodeIssuing] = useState(false);
+  const [revokingDeviceId, setRevokingDeviceId] = useState("");
+  const [lanSharing, setLanSharing] = useState<LanSharingStatus | null>(null);
+  const [isLanSharingChanging, setIsLanSharingChanging] = useState(false);
   const [modelError, setModelError] = useState("");
   const [modelActionId, setModelActionId] = useState("");
   const [backgroundTask, setBackgroundTask] = useState<BackgroundTask | null>(null);
@@ -899,6 +909,31 @@ export default function CollectionPage() {
     }
   };
 
+  const loadDevices = async () => {
+    setIsDevicesLoading(true);
+    try {
+      const response = await fetch("/api/devices", { cache: "no-store" });
+      const result = (await response.json()) as PairedDevice[] | { detail?: string };
+      if (!response.ok || !Array.isArray(result)) throw new Error("detail" in result ? result.detail ?? "裝置清單載入失敗。" : "裝置清單載入失敗。");
+      setDevices(result);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "裝置清單載入失敗，請稍後再試。");
+    } finally {
+      setIsDevicesLoading(false);
+    }
+  };
+
+  const loadLanSharing = async () => {
+    try {
+      const response = await fetch("/api/network/lan", { cache: "no-store" });
+      const result = (await response.json()) as LanSharingStatus | { detail?: string };
+      if (!response.ok || !("enabled" in result)) throw new Error("detail" in result ? result.detail ?? "區網狀態讀取失敗。" : "區網狀態讀取失敗。");
+      setLanSharing(result);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "區網狀態讀取失敗。");
+    }
+  };
+
   const openModels = () => {
     setIsModelsOpen(true);
     setIsCreateCardOpen(false);
@@ -907,7 +942,52 @@ export default function CollectionPage() {
     setHasDatabaseBackup(false);
     setDatabaseBackupAcknowledged(false);
     setDatabaseResetConfirmation("");
-    void Promise.all([loadModels(), loadRuntimeSettings(), loadBackgroundTasks()]);
+    void Promise.all([loadModels(), loadRuntimeSettings(), loadBackgroundTasks(), loadDevices(), loadLanSharing()]);
+  };
+
+  const handleIssuePairingCode = async () => {
+    setIsPairingCodeIssuing(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/devices/pairing-code", { method: "POST" });
+      const result = (await response.json()) as PairingCode | { detail?: string };
+      if (!response.ok || !("code" in result) || !("expires_at" in result)) throw new Error("detail" in result ? result.detail ?? "配對碼產生失敗。" : "配對碼產生失敗。");
+      setPairingCode(result);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "配對碼產生失敗，請稍後再試。");
+    } finally {
+      setIsPairingCodeIssuing(false);
+    }
+  };
+
+  const handleRevokeDevice = async (id: string) => {
+    setRevokingDeviceId(id);
+    setModelError("");
+    try {
+      const response = await fetch(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const result = (await response.json()) as { detail?: string };
+      if (!response.ok) throw new Error(result.detail ?? "裝置撤銷失敗。");
+      await loadDevices();
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "裝置撤銷失敗，請稍後再試。");
+    } finally {
+      setRevokingDeviceId("");
+    }
+  };
+
+  const setLanSharingEnabled = async (enabled: boolean) => {
+    setIsLanSharingChanging(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/network/lan", { method: enabled ? "POST" : "DELETE" });
+      const result = (await response.json()) as LanSharingStatus | { detail?: string };
+      if (!response.ok || !("enabled" in result)) throw new Error("detail" in result ? result.detail ?? "區網分享設定失敗。" : "區網分享設定失敗。");
+      setLanSharing(result);
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "區網分享設定失敗。");
+    } finally {
+      setIsLanSharingChanging(false);
+    }
   };
 
   const closeModels = () => {
@@ -1827,6 +1907,11 @@ export default function CollectionPage() {
               hasDatabaseBackup={hasDatabaseBackup}
               databaseBackupAcknowledged={databaseBackupAcknowledged}
               databaseResetConfirmation={databaseResetConfirmation}
+              devices={devices}
+              pairingCode={pairingCode}
+              isDevicesLoading={isDevicesLoading}
+              isPairingCodeIssuing={isPairingCodeIssuing}
+              revokingDeviceId={revokingDeviceId}
               error={modelError}
               actionId={modelActionId}
               onClose={closeModels}
@@ -1848,6 +1933,12 @@ export default function CollectionPage() {
               onDatabaseBackupAcknowledgedChange={setDatabaseBackupAcknowledged}
               onDatabaseResetConfirmationChange={setDatabaseResetConfirmation}
               onResetDatabase={() => void handleResetDatabase()}
+              onIssuePairingCode={() => void handleIssuePairingCode()}
+              onRevokeDevice={(id) => void handleRevokeDevice(id)}
+              lanSharing={lanSharing}
+              isLanSharingChanging={isLanSharingChanging}
+              onEnableLan={() => void setLanSharingEnabled(true)}
+              onDisableLan={() => void setLanSharingEnabled(false)}
             />
           </div>
         ) : null}

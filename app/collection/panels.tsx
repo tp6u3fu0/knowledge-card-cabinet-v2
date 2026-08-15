@@ -12,6 +12,9 @@ import type {
   SimpleChoices,
   ModelKind,
   ModelOption,
+  PairedDevice,
+  PairingCode,
+  LanSharingStatus,
   ProviderSettingsDraft,
   RuntimeSettings,
   SettingsDraft,
@@ -207,6 +210,96 @@ export function BackgroundTaskPanel({ task, onCancel, onRetry, onDismiss }: { ta
         {!isRunning ? <button type="button" onClick={onDismiss}>關閉</button> : null}
       </div>
     </section>
+  );
+}
+
+function DeviceManagementPanel({
+  devices,
+  pairingCode,
+  isLoading,
+  isIssuingCode,
+  revokingId,
+  onIssueCode,
+  onRevoke,
+  lanSharing,
+  isLanSharingChanging,
+  onEnableLan,
+  onDisableLan,
+}: {
+  devices: PairedDevice[];
+  pairingCode: PairingCode | null;
+  isLoading: boolean;
+  isIssuingCode: boolean;
+  revokingId: string;
+  onIssueCode: () => void;
+  onRevoke: (id: string) => void;
+  lanSharing: LanSharingStatus | null;
+  isLanSharingChanging: boolean;
+  onEnableLan: () => void;
+  onDisableLan: () => void;
+}) {
+  const expiry = pairingCode ? new Date(pairingCode.expires_at).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <div className="device-management">
+      <div className="settings-api-intro settings-api-intro--devices">
+        <span className="model-settings-kicker">DEVICE PAIRING / HOST ONLY</span>
+        <strong>讓你的裝置安全取得自己的憑證</strong>
+        <p>配對碼只可使用一次，十分鐘後失效。桌面版不會顯示或保存裝置 token；iPhone 應將 token 儲存在 Keychain。遠端連線仍須透過 TLS 或 Tailscale／WireGuard。</p>
+      </div>
+
+      <section className="device-pairing-card">
+        <div>
+          <span className="model-settings-kicker">01 / PAIRING CODE</span>
+          {pairingCode ? <strong className="device-pairing-code">{pairingCode.code}</strong> : <p>產生配對碼後，在 iPhone 的知識卡冊輸入即可。</p>}
+          {pairingCode ? <small>請在 {expiry} 前完成配對。每次產生新碼都會使舊碼失效。</small> : null}
+        </div>
+        <button className="create-card-submit" type="button" onClick={onIssueCode} disabled={isIssuingCode}>
+          {isIssuingCode ? "產生中…" : pairingCode ? "產生新配對碼" : "產生配對碼"}
+        </button>
+      </section>
+
+      <section className="device-list-card">
+        <div className="device-list-card__heading">
+          <div>
+            <span className="model-settings-kicker">03 / LOCAL NETWORK</span>
+            <h3>同一 Wi‑Fi 直連</h3>
+          </div>
+          <button className={lanSharing?.enabled ? "settings-danger-button" : "create-card-submit"} type="button" onClick={lanSharing?.enabled ? onDisableLan : onEnableLan} disabled={isLanSharingChanging}>
+            {isLanSharingChanging ? "處理中…" : lanSharing?.enabled ? "停止分享" : "啟用區網分享"}
+          </button>
+        </div>
+        {lanSharing?.enabled ? (
+          <div className="device-lan-details">
+            <p>Bonjour 已啟用。iPhone 可選擇主機，並輸入下列憑證指紋完成安全配對。</p>
+            {lanSharing.api_urls.map((url) => <code key={url}>{url}</code>)}
+            <code>{lanSharing.certificate_fingerprint_sha256}</code>
+          </div>
+        ) : <p>啟用後只會在同一個區網以 HTTPS 分享；原本桌面 API 仍維持 loopback。</p>}
+      </section>
+
+      <section className="device-list-card">
+        <div className="device-list-card__heading">
+          <div>
+            <span className="model-settings-kicker">02 / PAIRED DEVICES</span>
+            <h3>已配對裝置</h3>
+          </div>
+          <span>{isLoading ? "讀取中…" : `${devices.length} 台`}</span>
+        </div>
+        {isLoading ? <p>正在讀取裝置清單…</p> : devices.length === 0 ? <p>尚未有已配對裝置。</p> : (
+          <div className="device-list">
+            {devices.map((device) => (
+              <div className="device-list__item" key={device.id}>
+                <div>
+                  <strong>{device.name}</strong>
+                  <small>加入於 {new Date(device.created_at).toLocaleString("zh-TW")}{device.last_used_at ? ` · 最近使用 ${new Date(device.last_used_at).toLocaleString("zh-TW")}` : ""}</small>
+                </div>
+                {device.revoked_at ? <span>已撤銷</span> : <button className="settings-danger-button" type="button" onClick={() => onRevoke(device.id)} disabled={revokingId === device.id}>{revokingId === device.id ? "撤銷中…" : "撤銷"}</button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -555,6 +648,11 @@ export function ModelSettingsPanel({
   hasDatabaseBackup,
   databaseBackupAcknowledged,
   databaseResetConfirmation,
+  devices,
+  pairingCode,
+  isDevicesLoading,
+  isPairingCodeIssuing,
+  revokingDeviceId,
   error,
   actionId,
   onClose,
@@ -576,6 +674,12 @@ export function ModelSettingsPanel({
   onDatabaseBackupAcknowledgedChange,
   onDatabaseResetConfirmationChange,
   onResetDatabase,
+  onIssuePairingCode,
+  onRevokeDevice,
+  lanSharing,
+  isLanSharingChanging,
+  onEnableLan,
+  onDisableLan,
 }: {
   catalog: ModelCatalog | null;
   runtimeSettings: RuntimeSettings | null;
@@ -591,6 +695,11 @@ export function ModelSettingsPanel({
   hasDatabaseBackup: boolean;
   databaseBackupAcknowledged: boolean;
   databaseResetConfirmation: string;
+  devices: PairedDevice[];
+  pairingCode: PairingCode | null;
+  isDevicesLoading: boolean;
+  isPairingCodeIssuing: boolean;
+  revokingDeviceId: string;
   error: string;
   actionId: string;
   onClose: () => void;
@@ -612,6 +721,12 @@ export function ModelSettingsPanel({
   onDatabaseBackupAcknowledgedChange: (value: boolean) => void;
   onDatabaseResetConfirmationChange: (value: string) => void;
   onResetDatabase: () => void;
+  onIssuePairingCode: () => void;
+  onRevokeDevice: (id: string) => void;
+  lanSharing: LanSharingStatus | null;
+  isLanSharingChanging: boolean;
+  onEnableLan: () => void;
+  onDisableLan: () => void;
 }) {
   const summaryModels = catalog?.models.filter((model) => model.kind === "summary") ?? [];
   const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
@@ -787,11 +902,29 @@ export function ModelSettingsPanel({
           <span>03</span>
           資料管理
         </button>
+        <button className={settingsTab === "devices" ? "is-active" : ""} type="button" role="tab" aria-selected={settingsTab === "devices"} onClick={() => onSettingsTabChange("devices")}>
+          <span>04</span>
+          裝置配對
+        </button>
       </div>
 
       {backgroundTask ? <BackgroundTaskPanel task={backgroundTask} onCancel={onCancelTask} onRetry={onRetryTask} onDismiss={onDismissTask} /> : null}
       {error ? <p className="create-card-error" role="alert">{error}</p> : null}
-      {settingsTab === "data" ? (
+      {settingsTab === "devices" ? (
+        <DeviceManagementPanel
+          devices={devices}
+          pairingCode={pairingCode}
+          isLoading={isDevicesLoading}
+          isIssuingCode={isPairingCodeIssuing}
+          revokingId={revokingDeviceId}
+          onIssueCode={onIssuePairingCode}
+          onRevoke={onRevokeDevice}
+          lanSharing={lanSharing}
+          isLanSharingChanging={isLanSharingChanging}
+          onEnableLan={onEnableLan}
+          onDisableLan={onDisableLan}
+        />
+      ) : settingsTab === "data" ? (
         <DataManagementPanel
           isExporting={isDatabaseExporting}
           isImporting={isDatabaseImporting}

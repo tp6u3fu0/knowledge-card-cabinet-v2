@@ -1,6 +1,6 @@
 {
   "name": "knowledge-card-cabinet",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "知識卡冊桌面應用程式",
   "author": "Knowledge Card Cabinet",
@@ -26,7 +26,7 @@
     "serve": "node desktop/server.cjs",
     "test": "npm run test:unit && npm run test:api && npm run build && node --test tests/rendered-html.test.mjs",
     "test:unit": "node --test --experimental-strip-types tests/flip-math.test.mjs",
-    "test:api": "node --test tests/api-contract.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs tests/cover-art.test.mjs tests/model-catalogue.test.mjs tests/category-colour.test.mjs",
+    "test:api": "node --test tests/api-contract.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs tests/cover-art.test.mjs tests/model-catalogue.test.mjs tests/category-colour.test.mjs tests/lan-certificate.test.mjs",
     "verify:runtime": "node tests/runtime-contract.mjs",
     "release:check": "node scripts/release-check.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
