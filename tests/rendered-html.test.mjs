@@ -272,6 +272,27 @@ test("the README only documents scripts that exist", async () => {
   await access(new URL("../LICENSE", import.meta.url));
 });
 
+test("the card back bounds its copy as one region", async () => {
+  // Clamping the summary and the elaboration separately capped each paragraph
+  // but never their sum, so a long card overflowed the panel and the clip cut
+  // through the middle of a line. They have to share one bounded region.
+  const cardFace = await readFile(new URL("../app/card-face.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  const region = cardFace.match(/collection-card__plain-copy[\s\S]*?<\/span>/);
+  assert.ok(region, "the card back no longer wraps its copy in a bounded region");
+  assert.match(region[0], /collection-card__plain-lead/);
+  assert.match(region[0], /collection-card__plain-body/);
+
+  const rules = css.match(/\.collection-card__plain-copy \{([\s\S]*?)\n\}/);
+  assert.ok(rules, "globals.css no longer styles the card back's copy region");
+  assert.match(rules[1], /overflow:\s*hidden/);
+  assert.match(rules[1], /min-height:\s*0/);
+  // The fade is what turns an unavoidable cut into something that reads as
+  // deliberate rather than as a broken card.
+  assert.match(rules[1], /mask-image:\s*linear-gradient/);
+});
+
 test("collection success notices are transient", async () => {
   const collectionPage = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
 

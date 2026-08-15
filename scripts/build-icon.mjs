@@ -1,4 +1,4 @@
-// Renders public/favicon.svg into the multi-size Windows icon that
+// Renders public/app-icon.svg into the multi-size Windows icon that
 // electron-builder stamps onto the installer, the .exe and the shortcuts.
 //
 // The result (build/icon.ico) is committed, so a normal `npm run desktop:dist`
@@ -45,12 +45,12 @@ function icoFrom(images) {
   return Buffer.concat([header, directory, ...images.map((image) => image.data)]);
 }
 
-const source = await readFile(new URL("public/favicon.svg", projectRoot));
+const source = await readFile(new URL("public/app-icon.svg", projectRoot));
 const images = await Promise.all(
   SIZES.map(async (size) => ({
     size,
-    // density scales the SVG rasterisation; the mark is 24px wide by design.
-    data: await sharp(source, { density: (72 * size) / 24 })
+    // density scales the SVG rasterisation; the source is drawn at 512px.
+    data: await sharp(source, { density: (72 * size) / 512 })
       .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .png({ compressionLevel: 9 })
       .toBuffer(),
@@ -65,7 +65,7 @@ await writeFile(target, icoFrom(images));
 // A 512px PNG for the Linux/headless side and for README or store listings.
 await writeFile(
   new URL("icon.png", outputDir),
-  await sharp(source, { density: (72 * 512) / 24 }).resize(512, 512).png({ compressionLevel: 9 }).toBuffer(),
+  await sharp(source, { density: 72 }).resize(512, 512).png({ compressionLevel: 9 }).toBuffer(),
 );
 
 console.log(`wrote ${fileURLToPath(target)} (${SIZES.join(", ")})`);

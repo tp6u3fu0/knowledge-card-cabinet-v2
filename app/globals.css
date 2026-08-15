@@ -2987,10 +2987,12 @@ a:focus-visible {
   border-radius: 4.1cqw;
   display: flex;
   flex-direction: column;
-  gap: 4.1cqw;
+  /* Tightened along with the type below. The old spacing was generous enough
+     that a full-length summary consumed the whole panel on its own. */
+  gap: 3.2cqw;
   min-height: 0;
   overflow: hidden;
-  padding: 5.9cqw 5.3cqw;
+  padding: 4.8cqw;
   position: relative;
 }
 
@@ -3020,31 +3022,66 @@ a:focus-visible {
   width: 1.8cqw;
 }
 
+/*
+ * One bounded region for both paragraphs.
+ *
+ * Per-paragraph line clamps could not keep the card whole: the clamp caps how
+ * many lines the text uses, but nothing capped the sum, so a long summary plus
+ * a long body overflowed the panel and `overflow: hidden` sliced whichever line
+ * happened to straddle the edge — a half-height row of glyphs with the rule
+ * drawn through it. Bounding the pair together means the overflow is always at
+ * the bottom of this region, where the mask turns it into a fade.
+ */
+.collection-card__plain-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2.8cqw;
+  min-height: 0;
+  overflow: hidden;
+  /* The last visible line fades instead of being cut through the middle. The
+     fade is about half a line deep: enough to read as "this continues" — the
+     body is bounded by the space left over, so it rarely gets a clamp ellipsis
+     of its own — without dimming text that happens to end exactly at the edge. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 4.6cqw), transparent);
+}
+
 .collection-card__plain-lead {
   display: -webkit-box;
-  font-size: 5.9cqw;
+  /* Never gives up its lines to the body — see the body's flex note. */
+  flex: 0 0 auto;
+  font-size: 5.6cqw;
   font-weight: 500;
-  line-height: 1.6;
+  line-height: 1.55;
   margin: 0;
+  min-height: 0;
   overflow: hidden;
   text-wrap: pretty;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  /* Three lines, not four: the fourth left nothing for the elaboration below,
+     so the panel showed a blank band where the body should have been. */
+  -webkit-line-clamp: 3;
 }
 
 .collection-card__plain-rule {
   background: color-mix(in srgb, var(--cover-color) 18%, var(--line));
   display: block;
+  flex: none;
   height: 1px;
 }
 
 .collection-card__plain-body {
   color: color-mix(in srgb, var(--ink) 76%, transparent);
   display: -webkit-box;
+  /* Shrinks before the lead does: the one-line summary is the point of the
+     back, the elaboration is what can afford to be cut short. It keeps two
+     lines even when that pushes past the region — being faded out is a much
+     better failure than collapsing to nothing and leaving a blank band. */
+  flex: 1 1 auto;
   font-size: 4.3cqw;
-  line-height: 1.9;
+  line-height: 1.7;
   margin: 0;
-  min-height: 0;
+  min-height: 3.4em;
   overflow: hidden;
   text-wrap: pretty;
   -webkit-box-orient: vertical;

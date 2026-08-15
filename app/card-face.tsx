@@ -168,9 +168,22 @@ export function KnowledgeCardBack({
           <span className="collection-card__plain-dot" aria-hidden="true" />
           一句話
         </span>
-        <p className="collection-card__plain-lead">{lead}</p>
-        <span className="collection-card__plain-rule" aria-hidden="true" />
-        <p className="collection-card__plain-body">{body}</p>
+        {/*
+          The copy shares one bounded region rather than each paragraph owning a
+          fixed number of lines. A card whose summary runs long simply gives less
+          room to the body, and whatever does not fit fades out at the boundary —
+          the card is a summary, and the full text sits in the reading pane
+          beside it.
+        */}
+        <span className="collection-card__plain-copy">
+          <p className="collection-card__plain-lead">{lead}</p>
+          {body ? (
+            <>
+              <span className="collection-card__plain-rule" aria-hidden="true" />
+              <p className="collection-card__plain-body">{body}</p>
+            </>
+          ) : null}
+        </span>
         {tags.length > 0 ? (
           <span className="collection-card__plain-tags">
             {tags.map((tag) => (
