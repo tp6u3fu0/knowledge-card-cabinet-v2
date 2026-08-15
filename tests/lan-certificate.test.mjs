@@ -7,11 +7,35 @@ import { after, it } from "node:test";
 import https from "node:https";
 
 const require = createRequire(import.meta.url);
-const { ensureLanCertificate, findOpenSsl } = require("../desktop/lan-certificate.cjs");
+const { ensureLanCertificate, findOpenSsl, lanAddresses } = require("../desktop/lan-certificate.cjs");
 const { startLocalApi } = require("../desktop/local-api.cjs");
 
 const roots = [];
 after(async () => Promise.all(roots.map((root) => rm(root, { recursive: true, force: true }))));
+
+it("uses the current Wi-Fi or Ethernet interface for QR pairing instead of virtual networks", () => {
+  const addresses = lanAddresses({
+    preferredInterface: "en0",
+    networkInterfaces: {
+      feth123: [{ family: "IPv4", address: "192.168.194.11", internal: false }],
+      en0: [{ family: "IPv4", address: "192.168.68.111", internal: false }],
+      en10: [{ family: "IPv4", address: "169.254.23.248", internal: false }],
+      utun1: [{ family: "IPv4", address: "100.125.244.16", internal: false }],
+    },
+  });
+  assert.deepEqual(addresses, ["192.168.68.111"]);
+});
+
+it("falls back to a physical private LAN address when no default route is available", () => {
+  const addresses = lanAddresses({
+    networkInterfaces: {
+      bridge0: [{ family: "IPv4", address: "192.168.10.1", internal: false }],
+      en1: [{ family: "IPv4", address: "10.0.0.9", internal: false }],
+      en2: [{ family: "IPv4", address: "203.0.113.9", internal: false }],
+    },
+  });
+  assert.deepEqual(addresses, ["10.0.0.9"]);
+});
 
 it("creates a reusable local TLS certificate with a stable public fingerprint", { skip: process.platform !== "darwin" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "kcc-lan-certificate-"));

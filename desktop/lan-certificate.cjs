@@ -6,10 +6,45 @@ const { execFileSync } = require("node:child_process");
 
 const CERTIFICATE_DAYS = 3650;
 
-function lanAddresses() {
-  return Object.values(os.networkInterfaces()).flat()
-    .filter((entry) => entry && entry.family === "IPv4" && !entry.internal)
-    .map((entry) => entry.address)
+function defaultNetworkInterface() {
+  if (process.platform !== "darwin") return "";
+  try {
+    const output = execFileSync("/sbin/route", ["-n", "get", "default"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return output.match(/^\s*interface:\s*(\S+)\s*$/mu)?.[1] || "";
+  } catch {
+    return "";
+  }
+}
+
+function isPrivateLanAddress(address) {
+  const octets = address.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false;
+  return octets[0] === 10
+    || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+    || (octets[0] === 192 && octets[1] === 168);
+}
+
+function isVirtualOrOverlayInterface(name) {
+  return /^(?:utun|feth|vmnet|vboxnet|docker|bridge|llw|awdl)/iu.test(name);
+}
+
+/**
+ * The pairing QR code needs one address the phone can reach. On macOS the
+ * default-route interface is the current Wi-Fi/Ethernet network; virtual and
+ * overlay interfaces often have otherwise-valid private addresses but are not
+ * reachable by another device on that LAN.
+ */
+function lanAddresses({ networkInterfaces = os.networkInterfaces(), preferredInterface = defaultNetworkInterface() } = {}) {
+  const candidates = Object.entries(networkInterfaces)
+    .filter(([name]) => !isVirtualOrOverlayInterface(name))
+    .flatMap(([name, entries]) => (entries || []).map((entry) => ({ name, entry })))
+    .filter(({ entry }) => entry && entry.family === "IPv4" && !entry.internal && isPrivateLanAddress(entry.address));
+  const preferred = preferredInterface
+    ? candidates.filter(({ name }) => name === preferredInterface)
+    : [];
+  const selected = preferred.length > 0 ? preferred : candidates;
+  return selected
+    .map(({ entry }) => entry.address)
     .filter((address, index, all) => all.indexOf(address) === index);
 }
 
@@ -61,4 +96,4 @@ function ensureLanCertificate({ directory, opensslPath = "" } = {}) {
   return { key_path: keyPath, cert_path: certPath, ...certificateDetails(certPath) };
 }
 
-module.exports = { ensureLanCertificate, lanAddresses, certificateDetails, findOpenSsl };
+module.exports = { ensureLanCertificate, lanAddresses, certificateDetails, defaultNetworkInterface, findOpenSsl };
