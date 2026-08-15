@@ -50,22 +50,22 @@ npm run serve
 
 桌面版使用 Electron 啟動內嵌的本機 API 與前端 standalone server，完全離線可用。
 
-**剛裝好是空的**——不會預先塞入任何範例卡片。卡片存在「文件\知識卡冊」，你找得到也好備份，甚至可以直接把它放進同步資料夾；模型快取留在 Electron `userData`，因為那是可重新下載的東西，不值得備份。從舊版升級時，原本在 `userData` 的卡片會自動搬到新位置，舊檔保留不動。
+**剛裝好是空的**——不會預先塞入任何範例卡片。卡片存在「文件\知識卡冊」（Windows）或「文件／知識卡冊」（macOS），你找得到也好備份，甚至可以直接把它放進同步資料夾；模型快取留在 Electron `userData`，因為那是可重新下載的東西，不值得備份。從舊版升級時，原本在 `userData` 的卡片會自動搬到新位置，舊檔保留不動。
 
 資料位置可用 `KCC_DATA_DIR` 覆寫。
 
-```powershell
+```sh
 npm install
 npm run desktop:dev
 ```
 
-建立 Windows 安裝包：
+建立目前作業系統的桌面安裝包：
 
-```powershell
+```sh
 npm run desktop:dist
 ```
 
-安裝包會輸出到 `release/`；`desktop:dist` 會先跑 `models:bundle` 把內建的 embedding 權重抓下來（約 130 MB，已存在就略過）。桌面版使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型，加入 Hugging Face 上的其他模型，或改用自訂 API。
+安裝包會輸出到 `release/`：Windows 產生 NSIS 安裝程式，macOS 產生目前 CPU 架構的 `.dmg` 與 `.zip`。`desktop:dist` 會先跑 `models:bundle` 把內建的 embedding 權重抓下來（約 130 MB，已存在就略過）。桌面版使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型，加入 Hugging Face 上的其他模型，或改用自訂 API。
 
 ## 常駐主機版（樹莓派、家用伺服器）
 
@@ -207,8 +207,8 @@ npm run verify:runtime   # 驗證 runtime capability 契約
 ```
 
 GitHub Actions 會在 push／Pull Request 執行 lint、build、測試與 runtime contract；推送符合
-`vX.Y.Z` 的 tag 時，Windows runner 會建立並上傳桌面安裝包到 GitHub Release。這是目前
-Installer 與後續自動更新功能的發佈基礎。
+`vX.Y.Z` 的 tag 時，Windows runner 會建立安裝程式，macOS runner 會分別建立 Intel 與 Apple
+Silicon 的 DMG／ZIP，最後一起上傳至 GitHub Release。這是目前 Installer 與後續自動更新功能的發佈基礎。
 
 ## 專案文件
 

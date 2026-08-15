@@ -16,6 +16,13 @@ let localApiRuntime;
 let webProcess;
 let webBaseUrl = "";
 
+function developmentIconPath() {
+  const filename = process.platform === "win32"
+    ? "icon.ico"
+    : process.platform === "darwin" ? "icon.icns" : "icon.png";
+  return path.join(__dirname, "..", "build", filename);
+}
+
 function webRuntimeDirectory() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "kcc-web")
@@ -229,9 +236,9 @@ function createWindow() {
     minHeight: 720,
     backgroundColor: "#f3f0e9",
     show: false,
-    // Packaged builds take the icon from the .exe. This only matters for
-    // `npm run desktop:dev`, which would otherwise show Electron's own logo.
-    ...(app.isPackaged ? {} : { icon: path.join(__dirname, "..", "build", "icon.ico") }),
+    // Packaged builds take the icon from their app bundle. This only matters
+    // for `npm run desktop:dev`, which would otherwise show Electron's logo.
+    ...(app.isPackaged ? {} : { icon: developmentIconPath() }),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

@@ -3,7 +3,7 @@
 這是知識卡冊的獨立桌面應用程式。它會：
 
 1. 啟動內嵌的本機 API 與前端 standalone server。
-2. 將卡片保存到「文件\知識卡冊」的本機 SQLite，模型快取留在 Electron `userData`。
+2. 將卡片保存到「文件／知識卡冊」（macOS）或「文件\知識卡冊」（Windows）的本機 SQLite，模型快取留在 Electron `userData`。
 3. 從舊版升級時，把原本在 `userData/data` 的卡片搬到新位置，舊檔保留作為退路。
 4. 全新安裝時建立一個**空的**卡冊——範例卡片隨程式附帶，但不會自動載入。
 
@@ -11,7 +11,7 @@
 
 在專案根目錄執行：
 
-```powershell
+```sh
 npm install
 npm run desktop:dev
 ```
@@ -36,11 +36,11 @@ manifest，桌面程式關閉或 token 過期後不會繼續存取卡片。
 
 ## 建立安裝包
 
-```powershell
+```sh
 npm run desktop:dist
 ```
 
-安裝包會放在 `release/`。建立安裝包前會先產生前端 standalone build，並將它與本機 API runtime 一起放入安裝包。
+安裝包會放在 `release/`。Windows 會產生 NSIS 安裝程式；macOS 會產生目前 CPU 架構的 `.dmg` 與 `.zip`。建立安裝包前會先產生前端 standalone build，並將它與本機 API runtime 一起放入安裝包。
 
 桌面資料管理 API 支援版本化 JSON 匯出／匯入與重置。匯出格式含 SHA-256 校驗碼；匯入前
 會驗證資料結構，匯入／重置前會先把目前資料備份到資料夾下的 `backups/`，最多保留最近 10 份。
@@ -48,7 +48,7 @@ npm run desktop:dist
 
 ## 讓 AI 協作管理卡片
 
-桌面版現在提供一個僅限本機的 MCP Bridge。桌面應用程式執行時，會在目前 Windows 使用者的 AppData 寫入短期 runtime manifest；MCP Bridge 讀取該 manifest 後，透過 Bearer 權杖呼叫 `127.0.0.1` 的 versioned API。它不會把 API port 暴露到區域網路，也不會把卡片內容送到外部服務。
+桌面版現在提供一個僅限本機的 MCP Bridge。桌面應用程式執行時，會在 Windows 的 AppData 或 macOS 的 `~/Library/Application Support/Knowledge Card Cabinet/` 寫入短期 runtime manifest；MCP Bridge 讀取該 manifest 後，透過 Bearer 權杖呼叫 `127.0.0.1` 的 versioned API。它不會把 API port 暴露到區域網路，也不會把卡片內容送到外部服務。
 
 先開啟桌面版，再將以下 MCP server 設定加入支援 MCP 的 AI 工具。開發模式使用 Node 啟動 Bridge：
 
@@ -65,7 +65,7 @@ npm run desktop:dist
 
 在本機開發時，也可以從專案根目錄執行 `npm run desktop:mcp`，讓 MCP client 啟動這個 Bridge。桌面版關閉後，Bridge 會因找不到有效的 runtime 而停止提供工具。
 
-安裝包則應直接啟動桌面應用程式的 MCP 模式，這樣不需要另外安裝 Node。將 `command` 改成安裝後的 `知識卡冊.exe` 路徑，並把 `args` 改成 `["--mcp"]`：
+安裝包則應直接啟動桌面應用程式的 MCP 模式，這樣不需要另外安裝 Node。Windows 請將 `command` 改成安裝後的 `知識卡冊.exe` 路徑；macOS 則改成 `/Applications/知識卡冊.app/Contents/MacOS/知識卡冊`，並把 `args` 改成 `["--mcp"]`：
 
 ```json
 {

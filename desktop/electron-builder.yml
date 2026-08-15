@@ -34,6 +34,14 @@ win:
   # against the repo root, like the extraResources entries above.
   icon: build/icon.ico
   artifactName: "KnowledgeCardCabinet-${version}-Setup.${ext}"
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.productivity
+  # Generated from public/app-icon.svg by scripts/build-icon.mjs.
+  icon: build/icon.icns
+  artifactName: "KnowledgeCardCabinet-${version}-${arch}.${ext}"
 nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico

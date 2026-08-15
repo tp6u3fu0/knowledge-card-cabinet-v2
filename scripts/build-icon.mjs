@@ -1,7 +1,8 @@
-// Renders public/app-icon.svg into the multi-size Windows icon that
-// electron-builder stamps onto the installer, the .exe and the shortcuts.
+// Renders public/app-icon.svg into the Windows and macOS icons that
+// electron-builder stamps onto the installer and app bundle.
 //
-// The result (build/icon.ico) is committed, so a normal `npm run desktop:dist`
+// The results (build/icon.ico and build/icon.icns) are committed, so a normal
+// `npm run desktop:dist`
 // never has to run this. Re-run it only when the source mark changes:
 //
 //   node scripts/build-icon.mjs
@@ -19,6 +20,15 @@ const sharp = require("sharp");
 
 // 256 must be present: electron-builder rejects icons without it.
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
+const ICNS_IMAGES = [
+  [16, "icp4"],
+  [32, "icp5"],
+  [64, "icp6"],
+  [128, "ic07"],
+  [256, "ic08"],
+  [512, "ic09"],
+  [1024, "ic10"],
+];
 
 function icoFrom(images) {
   const header = Buffer.alloc(6);
@@ -45,15 +55,32 @@ function icoFrom(images) {
   return Buffer.concat([header, directory, ...images.map((image) => image.data)]);
 }
 
+function icnsFrom(images) {
+  const chunks = images.map(({ type, data }) => {
+    const header = Buffer.alloc(8);
+    header.write(type, 0, 4, "ascii");
+    header.writeUInt32BE(header.length + data.length, 4);
+    return Buffer.concat([header, data]);
+  });
+  const header = Buffer.alloc(8);
+  header.write("icns", 0, 4, "ascii");
+  header.writeUInt32BE(header.length + chunks.reduce((size, chunk) => size + chunk.length, 0), 4);
+  return Buffer.concat([header, ...chunks]);
+}
+
+function renderPng(source, size) {
+  return sharp(source, { density: (72 * size) / 512 })
+    .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
 const source = await readFile(new URL("public/app-icon.svg", projectRoot));
 const images = await Promise.all(
   SIZES.map(async (size) => ({
     size,
     // density scales the SVG rasterisation; the source is drawn at 512px.
-    data: await sharp(source, { density: (72 * size) / 512 })
-      .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .png({ compressionLevel: 9 })
-      .toBuffer(),
+    data: await renderPng(source, size),
   })),
 );
 
@@ -68,4 +95,13 @@ await writeFile(
   await sharp(source, { density: 72 }).resize(512, 512).png({ compressionLevel: 9 }).toBuffer(),
 );
 
-console.log(`wrote ${fileURLToPath(target)} (${SIZES.join(", ")})`);
+const macTarget = new URL("icon.icns", outputDir);
+const macImages = await Promise.all(
+  ICNS_IMAGES.map(async ([size, type]) => ({
+    type,
+    data: await renderPng(source, size),
+  })),
+);
+await writeFile(macTarget, icnsFrom(macImages));
+
+console.log(`wrote ${fileURLToPath(target)} (${SIZES.join(", ")}) and ${fileURLToPath(macTarget)}`);

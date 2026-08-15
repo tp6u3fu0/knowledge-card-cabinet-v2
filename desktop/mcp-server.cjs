@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
@@ -12,6 +13,9 @@ function runtimeManifestCandidates() {
   if (process.env.KCC_RUNTIME_FILE) candidates.push(path.resolve(process.env.KCC_RUNTIME_FILE));
   if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, APP_DATA_DIRECTORY, "runtime.json"));
   if (process.env.LOCALAPPDATA) candidates.push(path.join(process.env.LOCALAPPDATA, APP_DATA_DIRECTORY, "runtime.json"));
+  if (process.platform === "darwin") {
+    candidates.push(path.join(os.homedir(), "Library", "Application Support", APP_DATA_DIRECTORY, "runtime.json"));
+  }
   return [...new Set(candidates)];
 }
 

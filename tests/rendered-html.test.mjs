@@ -247,6 +247,19 @@ test("desktop packaging points to the local runtime", async () => {
   // which is the first thing anyone downloading a release would notice.
   assert.match(builder, /icon: build\/icon\.ico/);
   await access(new URL("../build/icon.ico", import.meta.url));
+  // macOS uses ICNS rather than ICO; both architecture-specific artifacts are
+  // built on native macOS runners during a tagged release.
+  assert.match(builder, /mac:[\s\S]*icon: build\/icon\.icns/);
+  await access(new URL("../build/icon.icns", import.meta.url));
+  const releaseWorkflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  assert.match(releaseWorkflow, /macos-13/);
+  assert.match(releaseWorkflow, /macos-14/);
+  assert.match(releaseWorkflow, /--mac --arm64/);
+  const afterPack = await readFile(new URL("../desktop/after-pack.cjs", import.meta.url), "utf8");
+  assert.match(afterPack, /electronPlatformName === "darwin"/);
+  assert.match(afterPack, /Contents[\s\S]*Resources/);
+  assert.match(afterPack, /await createPackage\(temporaryDirectory, asarPath\)/);
+  assert.doesNotMatch(afterPack, /archiveStream\.once/);
   const modelRuntime = await readFile(new URL("../desktop/model-runtime.cjs", import.meta.url), "utf8");
   const desktopPackage = JSON.parse(await readFile(new URL("../desktop/package.json", import.meta.url), "utf8"));
   assert.match(modelRuntime, /@huggingface\/transformers/);
