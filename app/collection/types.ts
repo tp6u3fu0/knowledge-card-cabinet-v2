@@ -201,6 +201,9 @@ export type SummaryTierChoice = {
 export type EmbeddingChoice = {
   language: "zh" | "en" | "multi";
   language_label: string;
+  /** The size the user asked for. The width is whatever that model happens to be. */
+  tier: "light" | "precise";
+  tier_label: string;
   dimensions: number;
   model_id: string;
   model_label: string;

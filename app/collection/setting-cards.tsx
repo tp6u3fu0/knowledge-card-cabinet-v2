@@ -11,7 +11,7 @@
  * turn over, because that is what cards do here.
  */
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 
 import { SeededCoverArt, type CoverMotif } from "../cover-art";
 import { FlipCard } from "../card-face";
@@ -49,21 +49,40 @@ const EXAMPLE_COVER_STYLE = {
 } as CSSProperties;
 
 /**
- * A slot holds the option that is actually in force. An empty slot is drawn as
- * an empty slot — an outline the shape of the missing card — rather than hidden,
- * so "nothing is chosen yet" looks like a state rather than a rendering bug.
+ * A slot holds the option that is actually in force, and accepts a card dropped
+ * onto it.
+ *
+ * The drop target is the point of the slot, so it is rendered next to the cards
+ * it accepts rather than at the top of the page — a drag that has to cross a
+ * whole screen is one nobody completes twice. Dropping and clicking do the same
+ * thing; the click path is what keyboards and screen readers use, so it can
+ * never be removed in favour of the drag.
  */
 export function CardSlot({
   kicker,
   label,
   hint,
   card,
+  isDropTarget = false,
+  onDrop,
 }: {
   kicker: string;
   label: string;
   hint?: string;
   card: ReactNode;
+  isDropTarget?: boolean;
+  onDrop?: (modelId: string) => void;
 }) {
+  const [isOver, setOver] = useState(false);
+
+  const accept = (event: DragEvent<HTMLDivElement>) => {
+    if (!onDrop) return;
+    event.preventDefault();
+    setOver(false);
+    const modelId = event.dataTransfer.getData("application/x-kcc-model");
+    if (modelId) onDrop(modelId);
+  };
+
   return (
     <div className="card-slot">
       <div className="card-slot__label">
@@ -71,8 +90,24 @@ export function CardSlot({
         <strong>{label}</strong>
         {hint ? <small>{hint}</small> : null}
       </div>
-      <div className={`card-slot__well${card ? " is-filled" : ""}`}>
-        {card ?? <span className="card-slot__empty">尚未選擇</span>}
+      <div
+        className={[
+          "card-slot__well",
+          card ? "is-filled" : "",
+          isDropTarget ? "is-armed" : "",
+          isOver ? "is-over" : "",
+        ].filter(Boolean).join(" ")}
+        onDragOver={(event) => {
+          if (!onDrop) return;
+          // Without preventDefault the browser refuses the drop outright.
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={accept}
+      >
+        {card ?? <span className="card-slot__empty">{isDropTarget ? "把卡片拖到這裡" : "尚未選擇"}</span>}
       </div>
     </div>
   );
@@ -98,6 +133,7 @@ export function SettingCard({
   active = false,
   disabled = false,
   compact = false,
+  draggableId,
   onClick,
 }: {
   accent: VisualAccent;
@@ -111,6 +147,8 @@ export function SettingCard({
   active?: boolean;
   disabled?: boolean;
   compact?: boolean;
+  /** Set to make the card draggable onto a matching CardSlot. */
+  draggableId?: string;
   onClick?: () => void;
 }) {
   const className = [
@@ -146,7 +184,20 @@ export function SettingCard({
   }
 
   return (
-    <button className={className} style={EXAMPLE_COVER_STYLE} type="button" onClick={onClick} disabled={disabled} aria-pressed={active}>
+    <button
+      className={className}
+      style={EXAMPLE_COVER_STYLE}
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      draggable={Boolean(draggableId) && !disabled}
+      onDragStart={(event) => {
+        if (!draggableId) return;
+        event.dataTransfer.setData("application/x-kcc-model", draggableId);
+        event.dataTransfer.effectAllowed = "move";
+      }}
+    >
       {body}
     </button>
   );

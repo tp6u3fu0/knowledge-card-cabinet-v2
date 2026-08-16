@@ -34,6 +34,15 @@ const DIMENSION_GUIDE = [
     limits: ["中文長句與跨領域概念的區辨力較弱", "同義但用詞不同的卡片較容易漏抓"],
   },
   {
+    dimensions: 512,
+    label: "512 維",
+    headline: "中文輕量的實際寬度",
+    download: "約 30 MB",
+    per_card: "2 KB／張",
+    strengths: ["專為中文訓練，短句判斷比多語言 384 維穩", "下載比任何其他選項都小", "CPU 推論負擔很低"],
+    limits: ["英文內容的表現不如英文專用模型", "長文的區辨力仍不及 1024 維"],
+  },
+  {
     dimensions: 1024,
     label: "1024 維",
     headline: "中文語意明顯較準",
@@ -175,11 +184,71 @@ const MODEL_CATALOG = [
     builtin: false,
   },
   {
-    id: "embedding-bge-m3-1024",
+    id: "embedding-bge-small-zh-512",
     kind: "embedding",
     language: "zh",
-    label: "BGE-M3",
+    label: "BGE-Small-ZH",
+    short_label: "中文輕量",
+    provider: "transformers.js",
+    model_id: "Xenova/bge-small-zh-v1.5",
+    task: "feature-extraction",
+    dtype: "q8",
+    // 512, not 384: there is no 384-dim Chinese sentence model with ONNX
+    // weights. The whole 384 tier is the MiniLM family, which is English or a
+    // multilingual distillation of it — neither is trained on Chinese first.
+    dimensions: 512,
+    size_label: "約 30 MB",
+    download_size_bytes: 30_000_000,
+    min_memory_gb: 4,
+    tier: "輕量硬體",
+    languages: "中文語意搜尋",
+    description: "專為中文訓練的輕量句向量模型。下載很小、CPU 也跑得快，是中文收藏在不想下載大模型時的預設選擇。",
+    builtin: false,
+  },
+  {
+    id: "embedding-bge-large-zh-1024",
+    kind: "embedding",
+    language: "zh",
+    label: "BGE-Large-ZH",
     short_label: "中文最佳",
+    provider: "transformers.js",
+    model_id: "Xenova/bge-large-zh-v1.5",
+    task: "feature-extraction",
+    dtype: "q8",
+    dimensions: 1024,
+    size_label: "約 330 MB",
+    download_size_bytes: 330_000_000,
+    min_memory_gb: 8,
+    tier: "平衡硬體",
+    languages: "中文語意搜尋",
+    description: "1024 維、專為中文訓練。純中文收藏的語意關聯品質最好，代價是下載與每張卡片的處理時間都比較長。",
+    builtin: false,
+  },
+  {
+    id: "embedding-bge-large-en-1024",
+    kind: "embedding",
+    language: "en",
+    label: "BGE-Large-EN",
+    short_label: "英文最佳",
+    provider: "transformers.js",
+    model_id: "Xenova/bge-large-en-v1.5",
+    task: "feature-extraction",
+    dtype: "q8",
+    dimensions: 1024,
+    size_label: "約 330 MB",
+    download_size_bytes: 330_000_000,
+    min_memory_gb: 8,
+    tier: "平衡硬體",
+    languages: "英文語意搜尋",
+    description: "1024 維、專為英文訓練。英文為主的收藏在需要細緻區辨時用這個。",
+    builtin: false,
+  },
+  {
+    id: "embedding-bge-m3-1024",
+    kind: "embedding",
+    language: "multi",
+    label: "BGE-M3",
+    short_label: "中英最佳",
     provider: "transformers.js",
     model_id: "Xenova/bge-m3",
     task: "feature-extraction",
@@ -213,6 +282,20 @@ const SUMMARY_TIERS = [
   { tier: "large", label: "大", headline: "約 450 MB", note: "多語言、對中文筆記較友善，但下載與每次整理都最慢。" },
 ];
 
+/**
+ * The two sizes offered, and the widths each accepts.
+ *
+ * Deliberately a tier rather than a raw dimension. There is no 384-dim Chinese
+ * sentence model with ONNX weights — the whole 384 family is MiniLM, which is
+ * English or a multilingual distillation — so a "384 維" button could not be
+ * honoured for 中文為主 without silently handing back another language's model.
+ * The tier is the promise; each card then states the width it actually is.
+ */
+const EMBEDDING_TIERS = [
+  { tier: "light", tier_label: "輕量", dimensions: [384, 512] },
+  { tier: "precise", tier_label: "高精度", dimensions: [1024] },
+];
+
 const EMBEDDING_LANGUAGES = [
   { language: "zh", label: "中文為主" },
   { language: "en", label: "英文為主" },
@@ -230,8 +313,10 @@ const EMBEDDING_LANGUAGES = [
 function embeddingChoices(models) {
   const rows = [];
   for (const { language, label } of EMBEDDING_LANGUAGES) {
-    for (const dimensions of [384, 1024]) {
-      const candidates = models.filter((model) => model.kind === "embedding" && model.dimensions === dimensions && model.language && model.language !== "none");
+    for (const { tier, tier_label, dimensions } of EMBEDDING_TIERS) {
+      const candidates = models.filter((model) => model.kind === "embedding"
+        && dimensions.includes(model.dimensions)
+        && model.language && model.language !== "none");
       const exact = candidates.find((model) => model.language === language);
       const chosen = exact
         || candidates.find((model) => model.language === "multi")
@@ -241,12 +326,14 @@ function embeddingChoices(models) {
       rows.push({
         language,
         language_label: label,
-        dimensions,
+        tier,
+        tier_label,
+        dimensions: chosen.dimensions,
         model_id: chosen.id,
         model_label: chosen.label,
         size_label: chosen.size_label,
         exact: Boolean(exact),
-        note: exact ? "" : `${dimensions} 維目前沒有專為${label.replace("為主", "")}訓練的模型，這裡用最接近的「${chosen.label}」。`,
+        note: exact ? "" : `目前沒有專為${label.replace("為主", "")}訓練的${tier_label}模型，這裡用最接近的「${chosen.label}」。`,
       });
     }
   }
@@ -1256,6 +1343,7 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
 module.exports = {
   API_PROVIDERS,
   EMBEDDING_LANGUAGES,
+  EMBEDDING_TIERS,
   SUMMARY_TIERS,
   embeddingChoices,
   BUILTIN_EMBEDDING_MODEL,

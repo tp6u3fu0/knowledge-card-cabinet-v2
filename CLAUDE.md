@@ -120,13 +120,19 @@ Windows 與 macOS 的差異只允許出現在 `desktop/` 的少數幾個檔案�
 - **能力不存在時要說實話。** mDNS 在 macOS 一定有，在 Windows 只有裝了 Apple Bonjour 才有。`status()` 回報 `discovery_active` / `discovery_detail`，介面照著顯示。**不要寫死「Bonjour 已啟用」**——之前就是這樣，在沒有 Bonjour 的機器上直接騙人。
 - **子行程的 `error` 事件一定要接。** `spawn` 找不到執行檔是**非同步**的 `error` 事件，沒接就會 throw 掉整個 Electron main process。而且要 `await` 到它落定再回報狀態，否則 `active` 會先是 true 再偷偷變 false。
 
-### 1.10 版號只有一份
+### 1.10 向量大小是「輕量／高精度」，不是「384／1024」
+
+實測過：**Hugging Face 上沒有 384 維、專為中文訓練又有 ONNX 權重的句向量模型。** 384 那一檔全是 MiniLM 家族，不是英文就是多語言蒸餾版。最小的中文專用模型是 `bge-small-zh-v1.5`，512 維。
+
+所以介面上的按鈕是**大小分級**，實際寬度寫在被選中的卡片上。不要為了「比較整齊」把它改回 384/1024 兩個按鈕——那個承諾只能靠偷偷回傳別種語言的模型來兌現，而那正是使用者要求修掉的行為。
+
+### 1.11 版號只有一份
 
 `package.json` 是唯一來源。`scripts/release-check.mjs` 會掃 `desktop/*.cjs`，出現不一致的版號字面值就失敗。
 
 會這樣是因為 MCP bridge 曾寫死 `0.1.0` 對所有 AI 工具回報錯版本，而 OpenAPI 文件寫死 `0.4.0`——一個既不是 app 版本也不是路由 `v1` 的數字。
 
-### 1.11 備份校驗碼只能由產生它的實作驗證
+### 1.12 備份校驗碼只能由產生它的實作驗證
 
 JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，JS 給 `0.0000492`）。跨工具的備份請**移除 `checksum_sha256` 欄位**再匯入；沒有校驗碼的 payload 會跳過該檢查。不要試圖「修好」跨 runtime 的校驗。
 
@@ -142,6 +148,7 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | 新增 API 路由 | `app/api/**/route.ts` 代理、`openapi.json` 的 paths、根路徑的 `capabilities` 陣列 | 前端 404；整合工具看不到新能力 |
 | `store.cjs` 的 `SCHEMA` | `load()`、`writeMeta()`、`STORE_VERSION` 遷移 | 欄位讀不回來或舊資料庫開不起來 |
 | `MODEL_CATALOG` 新增項目 | `size_tier`（summary）或 `language` + `dimensions`（embedding） | 簡易模式選不到它 |
+| `EMBEDDING_TIERS` / `EMBEDDING_LANGUAGES` | 每個「語言 × 大小」組合都要有專門訓練的模型 | `tests/model-catalogue.test.mjs` 會失敗（刻意的）——那個測試存在的目的就是不讓組合退回別種語言的模型 |
 | `DIMENSION_GUIDE` 涵蓋範圍 | 任何新的 embedding 維度都要有對應條目 | `tests/model-catalogue.test.mjs` 會失敗（刻意的） |
 | `package.json` 版本 | 無（其他地方都用讀的） | — |
 | `electron-builder.yml` 的 extraResources | `main.cjs` 的路徑解析、`model-runtime.cjs` 的 `bundledModelsDir()` | 打包版找不到資源 |

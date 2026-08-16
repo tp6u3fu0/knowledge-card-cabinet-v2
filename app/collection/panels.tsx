@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
 
 import type { CoverMotif } from "../cover-art";
 import { CardSlot, GlossaryCard, SettingCard } from "./setting-cards";
-import { glossaryFor } from "./glossary";
+import { glossaryEntries } from "./glossary";
 
 import type {
   ApiProbeResult,
@@ -167,6 +167,7 @@ export function ModelOptionCard({
         state={modelState(model, isBusy)}
         active={model.active}
         disabled={isTaskRunning || isPending}
+        draggableId={model.id}
         onClick={() => (model.installed ? onSelect(model.kind, model.id) : onDownload(model.id))}
       />
       {model.error ? (
@@ -189,22 +190,20 @@ export function ModelOptionCard({
 }
 
 /**
- * The plain-language answers for one tab, kept at the bottom of it.
+ * The explainer cards for a set of terms, placed where those terms appear.
  *
- * Below the controls rather than above: someone who already knows what an
- * embedding is should not have to scroll past an explanation of one every time
- * they come to change a setting.
+ * They used to sit in one row at the foot of each tab, which meant the answer
+ * to "what is a dimension" was three screens away from the control that asks
+ * you to choose one. Anchoring them to the thing they describe is the whole
+ * point of having them.
  */
-function GlossaryRow({ scope }: { scope: "local" | "api" | "data" | "devices" }) {
-  const entries = glossaryFor(scope);
+function GlossaryAside({ ids, label = "這是什麼？" }: { ids: string[]; label?: string }) {
+  const entries = glossaryEntries(ids);
   if (entries.length === 0) return null;
   return (
-    <section className="glossary-row">
-      <div className="glossary-row__heading">
-        <span className="model-settings-kicker">PLAIN LANGUAGE / 這些詞是什麼意思</span>
-        <p>這一頁用到的詞，翻到背面有白話說明。這些是說明卡，不會出現在你的收藏裡。</p>
-      </div>
-      <div className="glossary-row__wall">
+    <aside className="glossary-aside">
+      <span className="model-settings-kicker">{label}</span>
+      <div className="glossary-aside__wall">
         {entries.map((entry) => (
           <GlossaryCard
             key={entry.id}
@@ -218,6 +217,50 @@ function GlossaryRow({ scope }: { scope: "local" | "api" | "data" | "devices" })
           />
         ))}
       </div>
+    </aside>
+  );
+}
+
+/**
+ * One model decision: a slot, the cards that can go in it, and the words that
+ * explain them — kept together so the drag is a few centimetres rather than a
+ * scroll, and so the explanation is beside the thing it explains.
+ */
+function ModelSection({
+  kicker,
+  title,
+  description,
+  slotKicker,
+  slotLabel,
+  slotHint,
+  slotCard,
+  glossaryIds,
+  onDrop,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  description: string;
+  slotKicker: string;
+  slotLabel: string;
+  slotHint: string;
+  slotCard: ReactNode;
+  glossaryIds: string[];
+  onDrop: (modelId: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="settings-block model-section">
+      <div className="settings-block__heading">
+        <span className="model-settings-kicker">{kicker}</span>
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+      <div className="model-section__body">
+        <CardSlot kicker={slotKicker} label={slotLabel} hint={slotHint} card={slotCard} isDropTarget onDrop={onDrop} />
+        <div className="model-section__wall">{children}</div>
+      </div>
+      <GlossaryAside ids={glossaryIds} />
     </section>
   );
 }
@@ -318,6 +361,8 @@ function DeviceManagementPanel({
         </button>
       </section>
 
+      <GlossaryAside ids={["pairing"]} />
+
       <section className="device-list-card">
         <div className="device-list-card__heading">
           <div className="settings-block__heading">
@@ -340,6 +385,8 @@ function DeviceManagementPanel({
           </div>
         ) : <p>啟用後只會在同一個區網以 HTTPS 分享；原本桌面 API 仍維持 loopback。</p>}
       </section>
+
+      <GlossaryAside ids={["fingerprint"]} />
 
       <section className="device-list-card">
         <div className="device-list-card__heading">
@@ -375,7 +422,6 @@ function DeviceManagementPanel({
         )}
       </section>
 
-      <GlossaryRow scope="devices" />
     </div>
   );
 }
@@ -445,6 +491,7 @@ export function DataManagementPanel({
           <h3>匯出本機資料</h3>
           <p>包含卡片內容、封面資料、embedding、垃圾桶內容與卡片關聯。API 金鑰不會寫入備份檔。匯入會取代目前本機資料。</p>
         </div>
+        <GlossaryAside ids={["backup"]} />
         <div className="settings-data-actions">
           <button className="settings-secondary-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting || isExporting || isResetting}>
             {isImporting ? "匯入中…" : "匯入 JSON 備份"}
@@ -591,11 +638,10 @@ function AddModelForm({
  * The default view: pick a size for tidying and a language for search, and let
  * the app choose the checkpoint.
  *
- * It renders the same card component as the advanced view on purpose. The two
- * used to be laid out differently, which made switching between them feel like
- * arriving at an unrelated screen rather than seeing more of the same thing.
- * Simple shows the shortlist; advanced shows everything. That is the only
- * difference there should be.
+ * It renders the same card component and the same slot as the advanced view.
+ * The two used to be laid out differently, which made switching between them
+ * feel like arriving at an unrelated screen. Simple shows the shortlist;
+ * advanced shows everything. That is the only difference there should be.
  */
 function SimpleModelPicker({
   choices,
@@ -604,6 +650,9 @@ function SimpleModelPicker({
   activeEmbedding,
   actionId,
   isTaskRunning,
+  summarySlot,
+  embeddingSlot,
+  onChoose,
   onDownload,
   onSelect,
 }: {
@@ -613,26 +662,34 @@ function SimpleModelPicker({
   activeEmbedding: string;
   actionId: string;
   isTaskRunning: boolean;
+  summarySlot: ReactNode;
+  embeddingSlot: ReactNode;
+  onChoose: (modelId: string) => void;
   onDownload: (id: string) => void;
   onSelect: (kind: ModelKind, id: string) => void;
 }) {
   const activeChoice = choices.embedding.find((choice) => choice.model_id === activeEmbedding);
   const [language, setLanguage] = useState<EmbeddingChoice["language"]>(activeChoice?.language ?? "multi");
-  const [dimensions, setDimensions] = useState<number>(activeChoice?.dimensions ?? 384);
+  const [tier, setTier] = useState<EmbeddingChoice["tier"]>(activeChoice?.tier ?? "light");
 
   const byId = new Map(models.map((model) => [model.id, model]));
-  const selected = choices.embedding.find((choice) => choice.language === language && choice.dimensions === dimensions);
+  const selected = choices.embedding.find((choice) => choice.language === language && choice.tier === tier);
   const selectedModel = selected ? byId.get(selected.model_id) : undefined;
   const cardProps = { actionId, isTaskRunning, showTools: false, onDownload, onSelect, onInspect: () => {}, onRemove: () => {}, onRemoveCustom: () => {} };
 
   return (
     <div className="simple-picker">
-      <div className="settings-block">
-        <div className="settings-block__heading">
-          <span className="model-settings-kicker">01 / 整理筆記</span>
-          <h3>要多大的整理模型？</h3>
-          <p>模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。隨時可以改。</p>
-        </div>
+      <ModelSection
+        kicker="01 / 整理筆記"
+        title="要多大的整理模型？"
+        description="模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。點一下或把卡片拖進卡槽都可以，隨時能改。"
+        slotKicker="ACTIVE / 整理"
+        slotLabel="整理卡槽"
+        slotHint="貼上筆記時，由這張卡負責拆成欄位。"
+        slotCard={summarySlot}
+        glossaryIds={["summary-model"]}
+        onDrop={onChoose}
+      >
         <div className="model-card-wall">
           {choices.summary.map((choice) => {
             const model = byId.get(choice.model_id);
@@ -646,14 +703,19 @@ function SimpleModelPicker({
             );
           })}
         </div>
-      </div>
+      </ModelSection>
 
-      <div className="settings-block">
-        <div className="settings-block__heading">
-          <span className="model-settings-kicker">02 / 搜尋與關聯</span>
-          <h3>你的筆記主要用什麼語言？</h3>
-          <p>這會決定卡片之間的語意距離。維度必須全庫一致，換了會重建所有卡片的向量。</p>
-        </div>
+      <ModelSection
+        kicker="02 / 搜尋與關聯"
+        title="你的筆記主要用什麼語言？"
+        description="這會決定卡片之間的語意距離。每個語言與大小的組合都有一個專門訓練的模型；換模型會重建所有卡片的向量。"
+        slotKicker="ACTIVE / 向量"
+        slotLabel="向量卡槽"
+        slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
+        slotCard={embeddingSlot}
+        glossaryIds={["embedding", "dimensions"]}
+        onDrop={onChoose}
+      >
         <div className="simple-picker__axes">
           <div className="simple-axis" role="group" aria-label="語言">
             {[...new Map(choices.embedding.map((choice) => [choice.language, choice.language_label])).entries()].map(([value, label]) => (
@@ -662,10 +724,13 @@ function SimpleModelPicker({
               </button>
             ))}
           </div>
-          <div className="simple-axis" role="group" aria-label="向量維度">
-            {[384, 1024].map((value) => (
-              <button className={dimensions === value ? "is-active" : ""} key={value} type="button" onClick={() => setDimensions(value)}>
-                {value} 維{value === 384 ? "（小而快）" : "（較準）"}
+          {/* A size, not a width. No 384-dim Chinese model exists, so a button
+              promising one could only be honoured by handing back another
+              language's model; the chosen card states its real width instead. */}
+          <div className="simple-axis" role="group" aria-label="模型大小">
+            {[...new Map(choices.embedding.map((choice) => [choice.tier, choice.tier_label])).entries()].map(([value, label]) => (
+              <button className={tier === value ? "is-active" : ""} key={value} type="button" onClick={() => setTier(value)}>
+                {label}{value === "light" ? "（小而快）" : "（較準）"}
               </button>
             ))}
           </div>
@@ -678,7 +743,7 @@ function SimpleModelPicker({
             </div>
           </div>
         ) : null}
-      </div>
+      </ModelSection>
     </div>
   );
 }
@@ -820,6 +885,26 @@ export function ModelSettingsPanel({
   const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
   const activeSummaryModel = summaryModels.find((model) => model.id === catalog?.active.summary);
   const activeEmbeddingModel = embeddingModels.find((model) => model.id === catalog?.active.embedding);
+  const slotCard = (model: ModelOption | undefined) => (model ? (
+    <SettingCard
+      accent={model.kind === "summary" ? "amber" : "sky"}
+      glyph={modelGlyph(model)}
+      number={model.short_label}
+      meta={model.kind === "summary" ? "整理" : "向量"}
+      title={model.label}
+      tags={model.kind === "embedding" && model.dimensions ? [`${model.dimensions} 維`] : [model.size_label]}
+      compact
+    />
+  ) : null);
+  const summarySlotCard = slotCard(activeSummaryModel);
+  const embeddingSlotCard = slotCard(activeEmbeddingModel);
+  /** Dropping a card does exactly what pressing it does. */
+  const chooseModel = (modelId: string) => {
+    const model = catalog?.models.find((candidate) => candidate.id === modelId);
+    if (!model || isBackgroundTaskRunning) return;
+    if (model.installed) onSelect(model.kind, model.id);
+    else onDownload(model.id);
+  };
   const [probeResults, setProbeResults] = useState<Record<ModelKind, ApiProbeResult | null>>({ summary: null, embedding: null });
   const [probing, setProbing] = useState<ModelKind | "">("");
   const [dimensionProbe, setDimensionProbe] = useState<EmbeddingProbeResult | null>(null);
@@ -844,6 +929,7 @@ export function ModelSettingsPanel({
         {/* Where the work happens is a choice between two things, so it is two
             cards — the same gesture as picking a model on the previous tab,
             rather than a dropdown that hides one option until opened. */}
+        <GlossaryAside ids={["local-vs-api"]} />
         <div className="settings-source-choice">
           <SettingCard
             accent={kind === "summary" ? "amber" : "sky"}
@@ -1003,6 +1089,7 @@ export function ModelSettingsPanel({
             ) : null}
           </div>
         ) : null}
+        {kind === "embedding" ? <GlossaryAside ids={["api-dimensions"]} /> : null}
         {kind === "embedding" ? <p className="settings-provider-card__note">目前資料庫向量固定為 {setting?.dimensions ?? 384} 維；自訂 embedding 必須回傳這個維度，才可以重新建立關聯。</p> : null}
       </div>
     );
@@ -1072,7 +1159,6 @@ export function ModelSettingsPanel({
             onResetConfirmationChange={onDatabaseResetConfirmationChange}
             onReset={onResetDatabase}
           />
-          <GlossaryRow scope="data" />
         </>
       ) : settingsTab === "api" ? (
         <form className="settings-api-form" onSubmit={onSaveSettings}>
@@ -1093,52 +1179,17 @@ export function ModelSettingsPanel({
               {isSettingsSaving ? "儲存並重建中…" : "儲存並套用"}
             </button>
           </div>
-          <GlossaryRow scope="api" />
         </form>
       ) : isLoading && !catalog ? (
         <div className="model-settings-empty">正在讀取本機硬體與模型狀態…</div>
       ) : catalog ? (
         <>
-          <div className="settings-slot-row">
-            <CardSlot
-              kicker="ACTIVE / 整理"
-              label="整理卡槽"
-              hint="貼上筆記時，由這張卡負責拆成欄位。"
-              card={activeSummaryModel ? (
-                <SettingCard
-                  accent="amber"
-                  glyph={modelGlyph(activeSummaryModel)}
-                  number={activeSummaryModel.short_label}
-                  meta="整理"
-                  title={activeSummaryModel.label}
-                  tags={[activeSummaryModel.size_label]}
-                  compact
-                />
-              ) : null}
-            />
-            <CardSlot
-              kicker="ACTIVE / 向量"
-              label="向量卡槽"
-              hint="搜尋與關聯圖的語意距離由這張卡決定。"
-              card={activeEmbeddingModel ? (
-                <SettingCard
-                  accent="sky"
-                  glyph={modelGlyph(activeEmbeddingModel)}
-                  number={activeEmbeddingModel.short_label}
-                  meta="向量"
-                  title={activeEmbeddingModel.label}
-                  tags={activeEmbeddingModel.dimensions ? [`${activeEmbeddingModel.dimensions} 維`] : []}
-                  compact
-                />
-              ) : null}
-            />
-            <div className="model-hardware-note">
-              <span className="model-settings-kicker">YOUR HARDWARE</span>
-              <strong>{catalog.hardware.label}</strong>
-              <span>{catalog.hardware.memory_gb} GB RAM · {catalog.hardware.cpu_cores} CPU cores</span>
-              {catalog.storage ? <span>{catalog.storage.path_label} · 可用 {catalog.storage.free_size_label}</span> : null}
-              <p>{catalog.hardware.note}</p>
-            </div>
+          <div className="model-hardware-note">
+            <span className="model-settings-kicker">YOUR HARDWARE</span>
+            <strong>{catalog.hardware.label}</strong>
+            <span>{catalog.hardware.memory_gb} GB RAM · {catalog.hardware.cpu_cores} CPU cores</span>
+            {catalog.storage ? <span>{catalog.storage.path_label} · 可用 {catalog.storage.free_size_label}</span> : null}
+            <p>{catalog.hardware.note}</p>
           </div>
           <div className="model-mode-switch" role="group" aria-label="設定模式">
             <button className={isAdvanced ? "" : "is-active"} type="button" onClick={() => setIsAdvanced(false)}>簡易</button>
@@ -1153,17 +1204,25 @@ export function ModelSettingsPanel({
               activeEmbedding={catalog.active.embedding}
               actionId={actionId}
               isTaskRunning={isBackgroundTaskRunning}
+              summarySlot={summarySlotCard}
+              embeddingSlot={embeddingSlotCard}
+              onChoose={chooseModel}
               onDownload={onDownload}
               onSelect={onSelect}
             />
           ) : (
           <>
-          <div className="settings-block">
-            <div className="settings-block__heading">
-              <span className="model-settings-kicker">01 / SUMMARY</span>
-              <h3>摘要與欄位整理</h3>
-              <p>決定「先貼上筆記」時，模型如何幫你整理卡片。</p>
-            </div>
+          <ModelSection
+            kicker="01 / SUMMARY"
+            title="摘要與欄位整理"
+            description="決定「先貼上筆記」時，模型如何幫你整理卡片。點一下或把卡片拖進卡槽都可以。"
+            slotKicker="ACTIVE / 整理"
+            slotLabel="整理卡槽"
+            slotHint="貼上筆記時，由這張卡負責拆成欄位。"
+            slotCard={summarySlotCard}
+            glossaryIds={["summary-model"]}
+            onDrop={chooseModel}
+          >
             <div className="model-card-wall">
               {summaryModels.map((model) => (
                 <div className="model-card-wall__item" key={model.id}>
@@ -1171,13 +1230,18 @@ export function ModelSettingsPanel({
                 </div>
               ))}
             </div>
-          </div>
-          <div className="settings-block">
-            <div className="settings-block__heading">
-              <span className="model-settings-kicker">02 / EMBEDDING</span>
-              <h3>語意向量與關聯圖</h3>
-              <p>決定卡片之間的語意距離與搜尋結果。</p>
-            </div>
+          </ModelSection>
+          <ModelSection
+            kicker="02 / EMBEDDING"
+            title="語意向量與關聯圖"
+            description="決定卡片之間的語意距離與搜尋結果。每個語言與大小的組合都有一個專門訓練的模型。"
+            slotKicker="ACTIVE / 向量"
+            slotLabel="向量卡槽"
+            slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
+            slotCard={embeddingSlotCard}
+            glossaryIds={["embedding", "dimensions"]}
+            onDrop={chooseModel}
+          >
             <DimensionGuide entries={catalog.dimension_guide ?? []} active={runtimeSettings?.embedding.dimensions} />
             <div className="model-card-wall">
               {embeddingModels.map((model) => (
@@ -1186,11 +1250,13 @@ export function ModelSettingsPanel({
                 </div>
               ))}
             </div>
+          </ModelSection>
+          <div className="settings-block">
+            <AddModelForm actionId={actionId} onAdd={onAddCustomModel} />
+            <GlossaryAside ids={["onnx"]} />
           </div>
-          <AddModelForm actionId={actionId} onAdd={onAddCustomModel} />
           </>
           )}
-          <GlossaryRow scope="local" />
           <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
         </>
       ) : null}

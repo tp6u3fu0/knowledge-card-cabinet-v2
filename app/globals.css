@@ -5042,3 +5042,79 @@ a:focus-visible {
 .settings-block__heading + .settings-data-actions {
   margin-top: 14px;
 }
+
+/* ── Slot beside its cards ────────────────────────────────────────────────
+   The slot is a drop target, so it has to be within a short drag of the cards
+   it accepts. It used to sit at the top of the page with every card below it,
+   which is a drag nobody completes twice. */
+
+.model-section__body {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 170px) minmax(0, 1fr);
+}
+
+.model-section__wall {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.model-section .card-slot {
+  position: sticky;
+  top: 8px;
+}
+
+.model-section .card-slot__well {
+  min-height: 176px;
+}
+
+/* An armed slot says it will take a card before one is picked up; is-over is
+   the confirmation that letting go now will land it. */
+.card-slot__well.is-armed {
+  border-color: color-mix(in srgb, var(--accent-sky) 45%, rgba(33, 31, 39, 0.18));
+}
+
+.card-slot__well.is-over {
+  background: color-mix(in srgb, var(--accent-sky-soft) 55%, transparent);
+  border-color: var(--accent-sky);
+  border-style: solid;
+}
+
+.setting-card[draggable="true"] {
+  cursor: grab;
+}
+
+.setting-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* ── Glossary beside the term ── */
+
+.glossary-aside {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.glossary-aside__wall {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  max-width: 720px;
+}
+
+.glossary-aside .glossary-card__shell .card-flip {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .model-section__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-section .card-slot {
+    position: static;
+  }
+}

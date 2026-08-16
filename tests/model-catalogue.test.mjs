@@ -42,7 +42,10 @@ test("the catalogue explains the dimension trade-off it asks people to make", as
     assert.equal(status, 200);
 
     const widths = body.dimension_guide.map((entry) => entry.dimensions);
-    assert.deepEqual(widths, [384, 1024]);
+    // Not a fixed list: widths follow the catalogue, and pinning them here just
+    // made adding a model fail a test about explanations. What must hold is
+    // that the guide is ordered and covers everything shipped — asserted below.
+    assert.deepEqual(widths, [...widths].sort((first, second) => first - second));
     for (const entry of body.dimension_guide) {
       // Both sides have to be stated: a "guide" that only lists upsides for the
       // bigger model is a recommendation wearing a comparison's clothes.
@@ -337,4 +340,35 @@ test("a probe against something that is not an embeddings endpoint fails clearly
   } finally {
     await new Promise((resolve) => service.close(resolve));
   }
+});
+
+test("every language and size combination resolves to a purpose-trained model", async () => {
+  await withRuntime(async ({ json }) => {
+    const { body } = await json("/models");
+    const choices = body.simple.embedding;
+    const languages = new Set(choices.map((choice) => choice.language));
+    const tiers = new Set(choices.map((choice) => choice.tier));
+    assert.deepEqual([...languages].sort(), ["en", "multi", "zh"]);
+    assert.deepEqual([...tiers].sort(), ["light", "precise"]);
+    assert.equal(choices.length, languages.size * tiers.size, "the matrix has a hole in it");
+
+    for (const choice of choices) {
+      // `exact: false` means this pair is being served another language's
+      // model. That is the state this matrix exists to make impossible.
+      assert.ok(
+        choice.exact,
+        `${choice.language_label} × ${choice.tier_label} falls back to ${choice.model_label} instead of a model trained for it`,
+      );
+      const model = body.models.find((candidate) => candidate.id === choice.model_id);
+      assert.ok(model, `${choice.model_id} is offered but not in the catalogue`);
+      assert.equal(model.language, choice.language);
+      assert.ok(model.dimensions > 0, `${model.id} does not declare a width`);
+    }
+
+    // The tier is a promise about size, so the widths must not overlap between
+    // tiers — otherwise "輕量" and "高精度" could return the same model.
+    const light = choices.filter((choice) => choice.tier === "light").map((choice) => choice.dimensions);
+    const precise = choices.filter((choice) => choice.tier === "precise").map((choice) => choice.dimensions);
+    assert.ok(Math.max(...light) < Math.min(...precise), "a light model is as wide as a precise one");
+  });
 });

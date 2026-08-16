@@ -10,7 +10,7 @@ export type GlossaryEntry = {
   aside?: string;
   accent: VisualAccent;
   glyph: CoverMotif["shape"];
-  /** Which settings tab this term belongs beside. */
+  /** The tab this term is used on. Placement is by id; this is for grouping. */
   scope: "local" | "api" | "data" | "devices";
 };
 
@@ -38,9 +38,9 @@ export const GLOSSARY: GlossaryEntry[] = [
     id: "dimensions",
     number: "G-02",
     term: "維度",
-    question: "384 維和 1024 維差在哪？",
-    answer: "就是上面那串數字有多長。1024 維記得比較細，分辨相近主題時比較準；384 維檔案小、算得快，日常用通常就夠了。",
-    aside: "重點是整個卡冊只能用同一種長度。換維度等於把所有卡片的數字重算一次，卡片內容不會變，但要花一點時間。",
+    question: "「輕量」和「高精度」差在哪？",
+    answer: "差在那串數字有多長。高精度是 1024 個數字，記得比較細，分辨相近主題時比較準；輕量是 384 到 512 個，檔案小、算得快，日常用通常就夠了。",
+    aside: "確切幾個由模型決定，卡片上會寫。整個卡冊只能用同一種長度，所以換模型等於把所有卡片的數字重算一次——內容不會變，但要花一點時間。",
     accent: "indigo",
     glyph: "bars",
     scope: "local",
@@ -124,6 +124,7 @@ export const GLOSSARY: GlossaryEntry[] = [
   },
 ];
 
-export function glossaryFor(scope: GlossaryEntry["scope"]): GlossaryEntry[] {
-  return GLOSSARY.filter((entry) => entry.scope === scope);
+/** Looked up by id, so each block asks for exactly the terms it uses. */
+export function glossaryEntries(ids: string[]): GlossaryEntry[] {
+  return ids.map((id) => GLOSSARY.find((entry) => entry.id === id)).filter((entry): entry is GlossaryEntry => Boolean(entry));
 }

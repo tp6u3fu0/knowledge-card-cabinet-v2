@@ -83,8 +83,20 @@ test("the settings glossary is coherent and draws only real glyphs", async () =>
   }
 
   // Every settings tab has terms worth explaining; a scope with none means a
-  // tab quietly lost its plain-language row.
+  // tab quietly lost its plain-language cards.
   for (const scope of ["local", "api", "data", "devices"]) {
     assert.ok(source.includes(`scope: "${scope}"`), `no glossary entry for the ${scope} tab`);
+  }
+
+  // Cards are placed by id now, not by scope. An id referenced from the panels
+  // that no longer exists renders nothing at all — silently, and exactly where
+  // the explanation was supposed to be.
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+  const ids = new Set([...source.matchAll(/^\s{4}id: "([^"]+)"/gmu)].map((match) => match[1]));
+  const referenced = [...panels.matchAll(/GlossaryAside ids=\{\[([^\]]*)\]\}/gu)]
+    .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/gu)].map((inner) => inner[1]));
+  assert.ok(referenced.length >= 6, `panels reference only ${referenced.length} glossary cards`);
+  for (const id of referenced) {
+    assert.ok(ids.has(id), `panels.tsx asks for glossary card "${id}", which glossary.ts does not define`);
   }
 });
