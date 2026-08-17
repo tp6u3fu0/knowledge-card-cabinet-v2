@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, type FormEvent, type ReactNode } from "rea
 import QRCode from "qrcode";
 
 import type { CoverMotif } from "../cover-art";
-import { CardSlot, GlossaryCard, SettingCard } from "./setting-cards";
+import { AddCard, CardDeck, CardSlot, GlossaryCard, SettingCard } from "./setting-cards";
 import { glossaryEntries } from "./glossary";
 
 import type {
@@ -168,6 +168,7 @@ export function ModelOptionCard({
         active={model.active}
         disabled={isTaskRunning || isPending}
         draggableId={model.id}
+        dragKind={model.kind}
         onClick={() => (model.installed ? onSelect(model.kind, model.id) : onDownload(model.id))}
       />
       {model.error ? (
@@ -227,6 +228,7 @@ function GlossaryAside({ ids, label = "這是什麼？" }: { ids: string[]; labe
  * scroll, and so the explanation is beside the thing it explains.
  */
 function ModelSection({
+  kind,
   kicker,
   title,
   description,
@@ -237,7 +239,9 @@ function ModelSection({
   glossaryIds,
   onDrop,
   children,
+  footer,
 }: {
+  kind: ModelKind;
   kicker: string;
   title: string;
   description: string;
@@ -248,6 +252,8 @@ function ModelSection({
   glossaryIds: string[];
   onDrop: (modelId: string) => void;
   children: ReactNode;
+  /** Anything that opens out of the deck, such as the add-a-model form. */
+  footer?: ReactNode;
 }) {
   return (
     <section className="settings-block model-section">
@@ -257,9 +263,10 @@ function ModelSection({
         <p>{description}</p>
       </div>
       <div className="model-section__body">
-        <CardSlot kicker={slotKicker} label={slotLabel} hint={slotHint} card={slotCard} isDropTarget onDrop={onDrop} />
+        <CardSlot kicker={slotKicker} label={slotLabel} hint={slotHint} card={slotCard} kind={kind} onDrop={onDrop} />
         <div className="model-section__wall">{children}</div>
       </div>
+      {footer}
       <GlossaryAside ids={glossaryIds} />
     </section>
   );
@@ -558,13 +565,17 @@ export function DataManagementPanel({
  * in practice means being offline.
  */
 function AddModelForm({
+  kind,
   actionId,
   onAdd,
+  onClose,
 }: {
+  /** Fixed by the deck the form opened out of — you are adding to that pile. */
+  kind: ModelKind;
   actionId: string;
   onAdd: (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => Promise<boolean>;
+  onClose: () => void;
 }) {
-  const [kind, setKind] = useState<ModelKind>("embedding");
   const [modelId, setModelId] = useState("");
   const [label, setLabel] = useState("");
   const [dimensions, setDimensions] = useState("");
@@ -585,23 +596,20 @@ function AddModelForm({
     setLabel("");
     setDimensions("");
     setNeedsDetail(false);
+    onClose();
   };
 
   return (
     <form className="model-add-form" onSubmit={submit}>
       <div className="model-add-form__heading">
         <span className="model-settings-kicker">ADD FROM HUGGING FACE</span>
-        <strong>貼上模型 id 就好</strong>
+        <strong>貼上模型 id，就多一張{kind === "embedding" ? "向量" : "整理"}卡</strong>
         <p>
           填 <code>作者/模型名稱</code>，其餘資訊會自動從 Hugging Face 讀取。本機只跑得動 ONNX 權重，
           所以請挑有 ONNX 版本的模型——<code>Xenova</code> 與 <code>onnx-community</code> 轉檔的都可以。
         </p>
       </div>
       <div className="model-add-form__row">
-        <div className="model-add-form__kind" role="group" aria-label="用途">
-          <button className={kind === "embedding" ? "is-active" : ""} type="button" onClick={() => setKind("embedding")}>語意向量</button>
-          <button className={kind === "summary" ? "is-active" : ""} type="button" onClick={() => setKind("summary")}>摘要整理</button>
-        </div>
         <input
           className="model-add-form__id"
           type="text"
@@ -631,6 +639,88 @@ function AddModelForm({
         </div>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * One deck of models in the advanced view, with the blank card that adds to it.
+ *
+ * The add-a-model form used to be its own section at the foot of the page,
+ * which made a model you added feel like it came from somewhere else. Opening
+ * it from the back of the deck it will join says what it does without a label.
+ */
+function AdvancedModelSection({
+  kind,
+  models,
+  actionId,
+  isTaskRunning,
+  onDownload,
+  onSelect,
+  onInspect,
+  onRemove,
+  onRemoveCustom,
+  onAdd,
+  children,
+  ...section
+}: {
+  kind: ModelKind;
+  kicker: string;
+  title: string;
+  description: string;
+  slotKicker: string;
+  slotLabel: string;
+  slotHint: string;
+  slotCard: ReactNode;
+  glossaryIds: string[];
+  models: ModelOption[];
+  actionId: string;
+  isTaskRunning: boolean;
+  onDrop: (modelId: string) => void;
+  onDownload: (id: string) => void;
+  onSelect: (kind: ModelKind, id: string) => void;
+  onInspect: (id: string) => void;
+  onRemove: (id: string) => void;
+  onRemoveCustom: (id: string) => void;
+  onAdd: (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => Promise<boolean>;
+  children?: ReactNode;
+}) {
+  const [isAdding, setAdding] = useState(false);
+
+  return (
+    <ModelSection
+      kind={kind}
+      {...section}
+      footer={isAdding ? (
+        <div className="model-section__footer">
+          <AddModelForm kind={kind} actionId={actionId} onAdd={onAdd} onClose={() => setAdding(false)} />
+          <GlossaryAside ids={["onnx"]} />
+        </div>
+      ) : null}
+    >
+      {children}
+      <CardDeck kind={kind} hint={`共 ${models.length} 張 · 滑過展開，拖進卡槽啟用`}>
+        {models.map((model) => (
+          <ModelOptionCard
+            key={model.id}
+            model={model}
+            actionId={actionId}
+            isTaskRunning={isTaskRunning}
+            onDownload={onDownload}
+            onSelect={onSelect}
+            onInspect={onInspect}
+            onRemove={onRemove}
+            onRemoveCustom={onRemoveCustom}
+          />
+        ))}
+        <AddCard
+          key="add"
+          label="加入模型"
+          caption={`從 Hugging Face 貼上一個 id，成為這疊裡的${kind === "embedding" ? "向量" : "整理"}卡。`}
+          open={isAdding}
+          onClick={() => setAdding((open) => !open)}
+        />
+      </CardDeck>
+    </ModelSection>
   );
 }
 
@@ -680,9 +770,10 @@ function SimpleModelPicker({
   return (
     <div className="simple-picker">
       <ModelSection
+        kind="summary"
         kicker="01 / 整理筆記"
         title="要多大的整理模型？"
-        description="模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。點一下或把卡片拖進卡槽都可以，隨時能改。"
+        description="模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。滑過卡堆展開，點一下或拖進卡槽都可以，隨時能改。"
         slotKicker="ACTIVE / 整理"
         slotLabel="整理卡槽"
         slotHint="貼上筆記時，由這張卡負責拆成欄位。"
@@ -690,7 +781,7 @@ function SimpleModelPicker({
         glossaryIds={["summary-model"]}
         onDrop={onChoose}
       >
-        <div className="model-card-wall">
+        <CardDeck kind="summary" hint={`共 ${choices.summary.length} 張 · 滑過展開，拖進卡槽啟用`}>
           {choices.summary.map((choice) => {
             const model = byId.get(choice.model_id);
             if (!model) return null;
@@ -702,10 +793,11 @@ function SimpleModelPicker({
               </div>
             );
           })}
-        </div>
+        </CardDeck>
       </ModelSection>
 
       <ModelSection
+        kind="embedding"
         kicker="02 / 搜尋與關聯"
         title="你的筆記主要用什麼語言？"
         description="這會決定卡片之間的語意距離。每個語言與大小的組合都有一個專門訓練的模型；換模型會重建所有卡片的向量。"
@@ -1212,26 +1304,29 @@ export function ModelSettingsPanel({
             />
           ) : (
           <>
-          <ModelSection
+          <AdvancedModelSection
+            kind="summary"
             kicker="01 / SUMMARY"
             title="摘要與欄位整理"
-            description="決定「先貼上筆記」時，模型如何幫你整理卡片。點一下或把卡片拖進卡槽都可以。"
+            description="決定「先貼上筆記」時，模型如何幫你整理卡片。滑過卡堆展開，點一下或把卡片拖進卡槽都可以。"
             slotKicker="ACTIVE / 整理"
             slotLabel="整理卡槽"
             slotHint="貼上筆記時，由這張卡負責拆成欄位。"
             slotCard={summarySlotCard}
             glossaryIds={["summary-model"]}
+            models={summaryModels}
+            actionId={actionId}
+            isTaskRunning={isBackgroundTaskRunning}
             onDrop={chooseModel}
-          >
-            <div className="model-card-wall">
-              {summaryModels.map((model) => (
-                <div className="model-card-wall__item" key={model.id}>
-                  <ModelOptionCard model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
-                </div>
-              ))}
-            </div>
-          </ModelSection>
-          <ModelSection
+            onDownload={onDownload}
+            onSelect={onSelect}
+            onInspect={onInspect}
+            onRemove={onRemove}
+            onRemoveCustom={onRemoveCustomModel}
+            onAdd={onAddCustomModel}
+          />
+          <AdvancedModelSection
+            kind="embedding"
             kicker="02 / EMBEDDING"
             title="語意向量與關聯圖"
             description="決定卡片之間的語意距離與搜尋結果。每個語言與大小的組合都有一個專門訓練的模型。"
@@ -1240,21 +1335,19 @@ export function ModelSettingsPanel({
             slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
             slotCard={embeddingSlotCard}
             glossaryIds={["embedding", "dimensions"]}
+            models={embeddingModels}
+            actionId={actionId}
+            isTaskRunning={isBackgroundTaskRunning}
             onDrop={chooseModel}
+            onDownload={onDownload}
+            onSelect={onSelect}
+            onInspect={onInspect}
+            onRemove={onRemove}
+            onRemoveCustom={onRemoveCustomModel}
+            onAdd={onAddCustomModel}
           >
             <DimensionGuide entries={catalog.dimension_guide ?? []} active={runtimeSettings?.embedding.dimensions} />
-            <div className="model-card-wall">
-              {embeddingModels.map((model) => (
-                <div className="model-card-wall__item" key={model.id}>
-                  <ModelOptionCard model={model} actionId={actionId} isTaskRunning={isBackgroundTaskRunning} onDownload={onDownload} onSelect={onSelect} onInspect={onInspect} onRemove={onRemove} onRemoveCustom={onRemoveCustomModel} />
-                </div>
-              ))}
-            </div>
-          </ModelSection>
-          <div className="settings-block">
-            <AddModelForm actionId={actionId} onAdd={onAddCustomModel} />
-            <GlossaryAside ids={["onnx"]} />
-          </div>
+          </AdvancedModelSection>
           </>
           )}
           <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>

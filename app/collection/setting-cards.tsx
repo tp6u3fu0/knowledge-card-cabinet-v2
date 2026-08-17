@@ -11,10 +11,11 @@
  * turn over, because that is what cards do here.
  */
 
-import { useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { Children, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { SeededCoverArt, type CoverMotif } from "../cover-art";
 import { FlipCard } from "../card-face";
+import { useCardDrag, useDragState, useSlotRegistration } from "./card-drag";
 import type { VisualAccent } from "./types";
 
 /**
@@ -63,25 +64,21 @@ export function CardSlot({
   label,
   hint,
   card,
-  isDropTarget = false,
+  kind = "",
   onDrop,
 }: {
   kicker: string;
   label: string;
   hint?: string;
   card: ReactNode;
-  isDropTarget?: boolean;
+  /** Which deck's cards this slot takes; a card of another kind is refused. */
+  kind?: string;
   onDrop?: (modelId: string) => void;
 }) {
-  const [isOver, setOver] = useState(false);
-
-  const accept = (event: DragEvent<HTMLDivElement>) => {
-    if (!onDrop) return;
-    event.preventDefault();
-    setOver(false);
-    const modelId = event.dataTransfer.getData("application/x-kcc-model");
-    if (modelId) onDrop(modelId);
-  };
+  const slotId = useSlotRegistration(kind, onDrop);
+  const drag = useDragState();
+  const isArmed = Boolean(onDrop) && drag.kind === kind;
+  const isOver = isArmed && drag.overSlot === slotId;
 
   return (
     <div className="card-slot">
@@ -94,20 +91,77 @@ export function CardSlot({
         className={[
           "card-slot__well",
           card ? "is-filled" : "",
-          isDropTarget ? "is-armed" : "",
+          isArmed ? "is-armed" : "",
           isOver ? "is-over" : "",
         ].filter(Boolean).join(" ")}
-        onDragOver={(event) => {
-          if (!onDrop) return;
-          // Without preventDefault the browser refuses the drop outright.
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={accept}
+        data-card-slot={onDrop ? slotId : undefined}
       >
-        {card ?? <span className="card-slot__empty">{isDropTarget ? "把卡片拖到這裡" : "尚未選擇"}</span>}
+        {card ?? <span className="card-slot__empty">{onDrop ? "把卡片拖到這裡" : "尚未選擇"}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** The gap left between cards when a deck is open and has room to spread. */
+const FAN_GAP_PX = 16;
+
+/**
+ * A pile of cards that fans open when you reach for it.
+ *
+ * Stacked is how cards are kept when you are not using them, and it keeps a
+ * long catalogue from turning the settings page into a wall of thumbnails. The
+ * fan is laid out by transform rather than by changing the grid, because only
+ * transforms can animate — a grid that reflows would snap open with no sense of
+ * the cards sliding apart. The step shrinks as the deck narrows, so a wide
+ * window spreads the cards fully and a narrow one keeps them overlapping
+ * instead of pushing any of them out of view.
+ */
+export function CardDeck({ kind, hint, children }: { kind: string; hint?: string; children: ReactNode }) {
+  const items = Children.toArray(children);
+  const drag = useDragState();
+  // A deck stays open while one of its cards is in the air, so the pointer
+  // leaving the pile mid-drag does not collapse the row underneath it.
+  const held = drag.kind === kind;
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const [fan, setFan] = useState(0);
+  const count = items.length;
+
+  // How far apart the cards sit when the deck is open. This has to be measured
+  // rather than written as a percentage: a percentage inside `translate`
+  // resolves against the card being moved, not the row it is moving along, so
+  // the arithmetic would come out as zero and the deck would never open.
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return undefined;
+    const measure = () => {
+      // offsetWidth, not the bounding box: the cards are rotated in the pile.
+      const cardWidth = (rail.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0;
+      if (!cardWidth) return;
+      const room = (rail.clientWidth - cardWidth) / Math.max(count - 1, 1);
+      setFan(Math.max(0, Math.min(cardWidth + FAN_GAP_PX, room)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, [count]);
+
+  return (
+    <div
+      className={`card-deck${held ? " is-held" : ""}`}
+      style={{ "--count": count, "--fan": `${fan}px` } as CSSProperties}
+      data-deck-kind={kind}
+    >
+      {hint ? <span className="card-deck__hint">{hint}</span> : null}
+      <div className="card-deck__rail" ref={railRef}>
+        {items.map((item, index) => (
+          // Children.toArray keeps each child's own key, so a card keeps its
+          // identity — and its half-finished return animation — when the
+          // catalogue reorders around it.
+          <div className="card-deck__item" key={(item as { key?: string | null }).key ?? index} style={{ "--i": index } as CSSProperties}>
+            {item}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -134,6 +188,7 @@ export function SettingCard({
   disabled = false,
   compact = false,
   draggableId,
+  dragKind = "",
   onClick,
 }: {
   accent: VisualAccent;
@@ -147,10 +202,12 @@ export function SettingCard({
   active?: boolean;
   disabled?: boolean;
   compact?: boolean;
-  /** Set to make the card draggable onto a matching CardSlot. */
+  /** Set to make the card carryable into a CardSlot of the same kind. */
   draggableId?: string;
+  dragKind?: string;
   onClick?: () => void;
 }) {
+  const { ref: carryRef, onPointerDown, gap } = useCardDrag({ cardId: draggableId ?? "", kind: dragKind, disabled: !draggableId || disabled });
   const className = [
     "collection-card",
     "setting-card",
@@ -158,6 +215,8 @@ export function SettingCard({
     compact ? "setting-card--compact" : "",
     active ? "is-active" : "",
     onClick ? "" : "setting-card--static",
+    draggableId ? "setting-card--carryable" : "",
+    gap ? "is-carried" : "",
   ].filter(Boolean).join(" ");
 
   const body = (
@@ -184,21 +243,46 @@ export function SettingCard({
   }
 
   return (
+    <>
+      <button
+        className={className}
+        ref={carryRef}
+        style={EXAMPLE_COVER_STYLE}
+        type="button"
+        onClick={onClick}
+        onPointerDown={onPointerDown}
+        disabled={disabled}
+        aria-pressed={active}
+      >
+        {body}
+      </button>
+      {/* Holds the card's place in the pile while it is in the air. */}
+      {gap ? <span className="setting-card__gap" style={{ height: `${gap.height}px` }} aria-hidden="true" /> : null}
+    </>
+  );
+}
+
+/**
+ * The blank at the end of the deck: the card you have not added yet.
+ *
+ * A model from Hugging Face becomes an ordinary card in the pile once it is
+ * added, so the way to add one belongs in the pile too — as the empty sleeve
+ * every card index has at the back, rather than as a form in a different
+ * section that happens to produce cards somewhere else on the page.
+ */
+export function AddCard({ label, caption, open, onClick }: { label: string; caption: string; open: boolean; onClick: () => void }) {
+  return (
     <button
-      className={className}
-      style={EXAMPLE_COVER_STYLE}
+      className={`collection-card setting-card setting-card--add${open ? " is-open" : ""}`}
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      draggable={Boolean(draggableId) && !disabled}
-      onDragStart={(event) => {
-        if (!draggableId) return;
-        event.dataTransfer.setData("application/x-kcc-model", draggableId);
-        event.dataTransfer.effectAllowed = "move";
-      }}
+      aria-expanded={open}
     >
-      {body}
+      <span className="setting-card__add-mark" aria-hidden="true">+</span>
+      <span className="collection-card__copy">
+        <strong>{label}</strong>
+        <span>{caption}</span>
+      </span>
     </button>
   );
 }

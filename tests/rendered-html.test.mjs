@@ -328,3 +328,43 @@ test("collection success notices are transient", async () => {
   assert.match(collectionPage, /setCreateSuccess\(""\)/);
   assert.match(collectionPage, /window\.clearTimeout\(timeoutId\)/);
 });
+
+test("a carried card is measured before its deck slot is flattened", async () => {
+  // The fanned position of a card is a transform on its deck slot, and a
+  // transformed ancestor is the containing block for anything fixed inside it.
+  // Measure first, then flatten: the other order pins the card to the slot and
+  // it drifts away from the pointer by exactly the fan offset.
+  const drag = await readFile(new URL("../app/collection/card-drag.ts", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  const lift = drag.match(/const lift = \(\) => \{([\s\S]*?)\n {6}\};/);
+  assert.ok(lift, "card-drag no longer has a lift step");
+  const measured = lift[1].indexOf("getBoundingClientRect");
+  const flattened = lift[1].indexOf('holder.style.transform = "none"');
+  assert.ok(measured >= 0 && flattened > measured, "the card is flattened before it is measured");
+  assert.match(lift[1], /position = "fixed"/);
+
+  // The rule that makes the flattening necessary, so this stays connected.
+  const item = css.match(/\.card-deck__item \{([\s\S]*?)\n\}/);
+  assert.ok(item, "globals.css no longer positions the cards in a deck");
+  assert.match(item[1], /transform:/);
+});
+
+test("the deck's fan is measured rather than written as a percentage", async () => {
+  // A percentage inside translate() resolves against the card being moved, not
+  // the row it moves along, so the step came out as zero and the deck silently
+  // never opened.
+  const deck = await readFile(new URL("../app/collection/setting-cards.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(deck, /new ResizeObserver\(measure\)/);
+  assert.match(deck, /"--fan": `\$\{fan\}px`/);
+  const rules = css.match(/\.card-deck \{([\s\S]*?)\n\}/);
+  assert.ok(rules, "globals.css no longer styles a deck");
+  assert.doesNotMatch(rules[1], /--fan:[^;]*%/, "the fan step is a percentage again");
+
+  // Dropping is a shortcut, never the only way in: the click path is what
+  // keyboards and screen readers use.
+  assert.match(deck, /onClick=\{onClick\}/);
+  assert.doesNotMatch(deck, /draggable=/, "the browser's drag image is back");
+});

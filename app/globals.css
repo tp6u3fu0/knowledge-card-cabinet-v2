@@ -2868,6 +2868,12 @@ a:focus-visible {
 .collection-card {
   --tilt-x: 0deg;
   --tilt-y: 0deg;
+  /* The edge of the card stock. Two hairlines under the face, held just inside
+     the outline by a negative spread, so a card reads as a thing with a
+     thickness rather than a rectangle printed on the page. */
+  --card-stack:
+    0 1.5px 0 -0.5px color-mix(in srgb, var(--paper) 58%, var(--line)),
+    0 3px 0 -1px color-mix(in srgb, var(--domain-color) 26%, var(--line));
   --cover-color: var(--domain-color);
   --cover-soft-color: var(--domain-soft);
   --cover-background: var(--card-front);
@@ -2877,7 +2883,7 @@ a:focus-visible {
   background: color-mix(in srgb, var(--paper) 74%, var(--cover-soft-color));
   border: 1px solid color-mix(in srgb, var(--domain-color) 30%, var(--line));
   border-radius: 18px;
-  box-shadow: 0 8px 18px rgba(33, 31, 39, 0.055);
+  box-shadow: var(--card-stack), 0 8px 18px rgba(33, 31, 39, 0.055);
   color: var(--ink);
   cursor: pointer;
   display: grid;
@@ -2898,12 +2904,12 @@ a:focus-visible {
 .collection-card.is-active {
   background: color-mix(in srgb, var(--paper) 64%, var(--cover-soft-color));
   border-color: color-mix(in srgb, var(--domain-color) 52%, var(--line));
-  box-shadow: 0 13px 24px rgba(33, 31, 39, 0.1);
+  box-shadow: var(--card-stack), 0 15px 26px rgba(33, 31, 39, 0.11);
   transform: perspective(850px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) translateY(-7px);
 }
 
 .collection-card.is-active {
-  box-shadow: 0 13px 24px rgba(33, 31, 39, 0.1);
+  box-shadow: var(--card-stack), 0 15px 26px rgba(33, 31, 39, 0.11);
 }
 
 .collection-card::before {
@@ -4605,7 +4611,7 @@ a:focus-visible {
 }
 
 .setting-card--static:hover {
-  box-shadow: 0 8px 18px rgba(33, 31, 39, 0.055);
+  box-shadow: var(--card-stack), 0 8px 18px rgba(33, 31, 39, 0.055);
   transform: none;
 }
 
@@ -5082,12 +5088,151 @@ a:focus-visible {
   border-style: solid;
 }
 
-.setting-card[draggable="true"] {
+/* ── Carrying a card ──────────────────────────────────────────────────────
+   The card itself moves; there is no drag image. touch-action has to be off or
+   the browser claims the gesture as a scroll before the pointer has travelled
+   far enough to count as a lift. */
+
+.setting-card--carryable {
   cursor: grab;
+  touch-action: none;
 }
 
-.setting-card[draggable="true"]:active {
+.setting-card--carryable:active {
   cursor: grabbing;
+}
+
+.setting-card.is-carried {
+  box-shadow: var(--card-stack), 0 28px 46px rgba(33, 31, 39, 0.24);
+  cursor: grabbing;
+  z-index: 90;
+}
+
+/* Keeps the card's place in the pile open while it is in the air. */
+.setting-card__gap {
+  display: block;
+}
+
+/* ── The pile ─────────────────────────────────────────────────────────────
+   Cards live stacked and fan open when reached for. The fan is a transform,
+   not a change of layout, because only transforms animate — a grid that
+   reflowed would snap open with no sense of the cards sliding apart. --fan
+   shrinks as the deck narrows, so a wide window spreads the cards fully and a
+   narrow one lets them overlap instead of pushing any of them out of view. */
+
+.card-deck {
+  --card-w: 172px;
+  --deck-h: 288px;
+  --pile-step: 15px;
+  /* --fan is measured and set by CardDeck: a percentage here would resolve
+     against the card being moved rather than the row it moves along. */
+  --fan: 0px;
+  display: grid;
+  gap: 8px;
+}
+
+.card-deck__hint {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.card-deck__rail {
+  height: var(--deck-h);
+  position: relative;
+}
+
+.card-deck__item {
+  left: 0;
+  position: absolute;
+  /* The pile leans back and up, so it starts low enough that the top card of a
+     tall pile never rides over the line of text above the deck. Padding on the
+     rail would not do it: an absolutely positioned child is placed against the
+     padding box, not inside it. */
+  top: 26px;
+  transform:
+    translate3d(calc(var(--i) * var(--pile-step)), calc(var(--i) * -3px), 0)
+    rotate(calc(var(--i) * -1.1deg));
+  transform-origin: 50% 94%;
+  transition: transform 320ms cubic-bezier(0.22, 0.7, 0.3, 1);
+  width: var(--card-w);
+  z-index: calc(40 - var(--i));
+}
+
+/* The card under the pointer comes to the front of the fan. */
+.card-deck__item:hover,
+.card-deck__item:focus-within {
+  z-index: 60;
+}
+
+.card-deck:hover .card-deck__item,
+.card-deck:focus-within .card-deck__item,
+.card-deck.is-held .card-deck__item {
+  transform: translate3d(calc(var(--i) * var(--fan)), 0, 0);
+}
+
+/* Overlapping cards mean overlapping captions, so what sits under a card —
+   its file tools, its caveat — belongs to whichever card you are pointing at
+   and stays out of the way for the rest. */
+.card-deck__item .model-card__tools,
+.card-deck__item .model-card-wall__note {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.card-deck__item:hover .model-card__tools,
+.card-deck__item:focus-within .model-card__tools,
+.card-deck__item:hover .model-card-wall__note,
+.card-deck__item:focus-within .model-card-wall__note {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The simple picker's cards carry a tier label and a caveat under them. */
+.simple-picker .card-deck {
+  --deck-h: 336px;
+}
+
+/* ── The blank card at the back of the deck ── */
+
+.setting-card--add {
+  align-content: center;
+  /* Opaque: it sits in the fan with a card behind it. */
+  background: color-mix(in srgb, var(--paper) 94%, var(--line));
+  border-style: dashed;
+  box-shadow: none;
+  gap: 10px;
+  grid-template-rows: auto auto;
+  justify-items: center;
+  text-align: center;
+}
+
+.setting-card--add:hover,
+.setting-card--add.is-open {
+  background: color-mix(in srgb, var(--paper) 70%, var(--cover-soft-color));
+  border-style: solid;
+  box-shadow: var(--card-stack), 0 8px 18px rgba(33, 31, 39, 0.055);
+}
+
+.setting-card--add .setting-card__add-mark {
+  color: var(--muted);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.setting-card--add .collection-card__copy {
+  gap: 6px;
+  padding: 0 6px;
+  text-align: center;
+}
+
+.model-section__footer {
+  border-top: 1px solid rgba(33, 31, 39, 0.09);
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 16px;
 }
 
 /* ── Glossary beside the term ── */

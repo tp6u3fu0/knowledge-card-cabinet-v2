@@ -156,6 +156,9 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
 | `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
 | `setting-cards.tsx` 的卡片結構 | `globals.css` 的 `.setting-card` 覆寫（`.collection-card__copy span` 與 `__tags` 在收藏頁是 `display:none`） | 設定卡的說明與標籤整片消失 |
+| `.card-deck__item` 加上任何 transform／filter／container-type | `card-drag.ts` 的 `holderOf()` 必須把它攤平 | 被拿起的卡片以卡槽為定位基準，會跟游標差一個展開位移 |
+| `CardDeck` 的展開間距 | 只能用量出來的 px；`translate()` 裡的 `%` 是以被移動的卡片為基準 | 間距算出 0，卡堆永遠展不開（而且不會報錯） |
+| `SettingCard` 的拖曳 | 點擊路徑必須保留（鍵盤與螢幕閱讀器只有這條） | 拖不動的人完全無法換模型 |
 | `glossary.ts` 的 `glyph` / `accent` | 必須是 `cover-art.tsx` 畫得出來的 glyph、`visualAccents` 裡有的顏色 | `tests/cover-art.test.mjs` 會失敗（刻意的）；否則會靜靜退回同一個圖案 |
 | 新增設定分頁 | `glossary.ts` 要有對應 `scope` 的條目 | 測試會失敗；使用者少一整區白話說明 |
 | 新增 `desktop/` 的執行期相依 | `desktop/package.json`（打包用，鎖定版號）**與**根 `package.json`（CI 測試用） | CI 綠、打包版 require 失敗，或反過來 |
