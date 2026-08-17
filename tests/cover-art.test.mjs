@@ -93,7 +93,10 @@ test("the settings glossary is coherent and draws only real glyphs", async () =>
   // the explanation was supposed to be.
   const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
   const ids = new Set([...source.matchAll(/^\s{4}id: "([^"]+)"/gmu)].map((match) => match[1]));
-  const referenced = [...panels.matchAll(/GlossaryAside ids=\{\[([^\]]*)\]\}/gu)]
+  // Both spellings: the ids reach a card either straight through GlossaryAside
+  // or as a section's glossaryIds prop. Keep these as plain literal arrays —
+  // an id built by an expression is one this check cannot see.
+  const referenced = [...panels.matchAll(/(?:glossaryIds|ids)=\{\[([^\]]*)\]\}/gu)]
     .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/gu)].map((inner) => inner[1]));
   assert.ok(referenced.length >= 6, `panels reference only ${referenced.length} glossary cards`);
   for (const id of referenced) {

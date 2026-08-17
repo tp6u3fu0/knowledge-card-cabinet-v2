@@ -265,9 +265,9 @@ function ModelSection({
       <div className="model-section__body">
         <CardSlot kicker={slotKicker} label={slotLabel} hint={slotHint} card={slotCard} kind={kind} onDrop={onDrop} />
         <div className="model-section__wall">{children}</div>
+        <GlossaryAside ids={glossaryIds} />
       </div>
       {footer}
-      <GlossaryAside ids={glossaryIds} />
     </section>
   );
 }
@@ -366,9 +366,8 @@ function DeviceManagementPanel({
         <button className="create-card-submit" type="button" onClick={onIssueCode} disabled={isIssuingCode}>
           {isIssuingCode ? "產生中…" : pairingCode ? "產生新配對碼" : "產生配對碼"}
         </button>
+        <GlossaryAside ids={["pairing"]} />
       </section>
-
-      <GlossaryAside ids={["pairing"]} />
 
       <section className="device-list-card">
         <div className="device-list-card__heading">
@@ -391,9 +390,9 @@ function DeviceManagementPanel({
             <code>{lanSharing.certificate_fingerprint_sha256}</code>
           </div>
         ) : <p>啟用後只會在同一個區網以 HTTPS 分享；原本桌面 API 仍維持 loopback。</p>}
+        {/* The fingerprint is only worth explaining once one is on screen. */}
+        {lanSharing?.enabled ? <GlossaryAside ids={["fingerprint"]} /> : null}
       </section>
-
-      <GlossaryAside ids={["fingerprint"]} />
 
       <section className="device-list-card">
         <div className="device-list-card__heading">
@@ -765,6 +764,22 @@ function SimpleModelPicker({
   const byId = new Map(models.map((model) => [model.id, model]));
   const selected = choices.embedding.find((choice) => choice.language === language && choice.tier === tier);
   const selectedModel = selected ? byId.get(selected.model_id) : undefined;
+
+  /**
+   * Picking an axis is the choice, so it applies itself.
+   *
+   * This used to need a second click on a card that was a copy of the one
+   * already in the slot. A model that is not downloaded yet is the exception:
+   * a few hundred megabytes should not start moving because someone pressed a
+   * button labelled "中文為主", so that case asks first.
+   */
+  const pick = (nextLanguage: EmbeddingChoice["language"], nextTier: EmbeddingChoice["tier"]) => {
+    setLanguage(nextLanguage);
+    setTier(nextTier);
+    const choice = choices.embedding.find((entry) => entry.language === nextLanguage && entry.tier === nextTier);
+    const model = choice ? byId.get(choice.model_id) : undefined;
+    if (model?.installed && !model.active) onSelect("embedding", model.id);
+  };
   const cardProps = { actionId, isTaskRunning, showTools: false, onDownload, onSelect, onInspect: () => {}, onRemove: () => {}, onRemoveCustom: () => {} };
 
   return (
@@ -811,7 +826,7 @@ function SimpleModelPicker({
         <div className="simple-picker__axes">
           <div className="simple-axis" role="group" aria-label="語言">
             {[...new Map(choices.embedding.map((choice) => [choice.language, choice.language_label])).entries()].map(([value, label]) => (
-              <button className={language === value ? "is-active" : ""} key={value} type="button" onClick={() => setLanguage(value)}>
+              <button className={language === value ? "is-active" : ""} key={value} type="button" onClick={() => pick(value, tier)}>
                 {label}
               </button>
             ))}
@@ -821,18 +836,30 @@ function SimpleModelPicker({
               language's model; the chosen card states its real width instead. */}
           <div className="simple-axis" role="group" aria-label="模型大小">
             {[...new Map(choices.embedding.map((choice) => [choice.tier, choice.tier_label])).entries()].map(([value, label]) => (
-              <button className={tier === value ? "is-active" : ""} key={value} type="button" onClick={() => setTier(value)}>
+              <button className={tier === value ? "is-active" : ""} key={value} type="button" onClick={() => pick(language, value)}>
                 {label}{value === "light" ? "（小而快）" : "（較準）"}
               </button>
             ))}
           </div>
         </div>
-        {selected && selectedModel ? (
-          <div className="model-card-wall model-card-wall--single">
-            <div className="model-card-wall__item">
-              <ModelOptionCard model={selectedModel} {...cardProps} />
-              {selected.note ? <p className="model-card-wall__note is-caveat">{selected.note}</p> : null}
-            </div>
+        {selected ? (
+          <div className="simple-picker__chosen">
+            <p>
+              這個組合用的是 <strong>{selected.model_label}</strong>
+              （{selected.size_label}{selected.dimensions ? ` · ${selected.dimensions} 維` : ""}）
+              {selectedModel?.installed ? "，已經放進左邊的卡槽。" : "，下載完成後就會放進左邊的卡槽。"}
+            </p>
+            {selected.note ? <p className="is-caveat">{selected.note}</p> : null}
+            {selectedModel && !selectedModel.installed ? (
+              <button
+                className="create-card-submit"
+                type="button"
+                onClick={() => onDownload(selectedModel.id)}
+                disabled={isTaskRunning || actionId === selectedModel.id}
+              >
+                {actionId === selectedModel.id ? "準備中…" : `下載 ${selectedModel.size_label}`}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </ModelSection>
@@ -973,6 +1000,25 @@ export function ModelSettingsPanel({
   onEnableLan: () => void;
   onDisableLan: () => void;
 }) {
+  /**
+   * Whether the API form differs from what is actually saved.
+   *
+   * The save button is disabled without it, so pressing nothing is what
+   * happens when there is nothing to press it for; the bar also says so in
+   * words, since a disabled button alone reads as "broken".
+   */
+  const hasUnsavedSettings = (["summary", "embedding"] as const).some((kind) => {
+    const draft = settingsDraft[kind];
+    const saved = runtimeSettings?.[kind];
+    if (!saved) return true;
+    return draft.source !== saved.source
+      || draft.api_url !== saved.api_url
+      || draft.model !== saved.model
+      || draft.api_format !== saved.api_format
+      || draft.api_key.length > 0
+      || draft.clear_api_key;
+  });
+
   const summaryModels = catalog?.models.filter((model) => model.kind === "summary") ?? [];
   const embeddingModels = catalog?.models.filter((model) => model.kind === "embedding") ?? [];
   const activeSummaryModel = summaryModels.find((model) => model.id === catalog?.active.summary);
@@ -1013,6 +1059,7 @@ export function ModelSettingsPanel({
     const probe = probeResults[kind];
     return (
       <div className="settings-provider-card">
+        <div className="settings-provider-card__main">
         <div className="settings-block__heading">
           <span className="model-settings-kicker">{kind === "summary" ? "01 / SUMMARY" : "02 / EMBEDDING"}</span>
           <h3>{label}</h3>
@@ -1021,7 +1068,6 @@ export function ModelSettingsPanel({
         {/* Where the work happens is a choice between two things, so it is two
             cards — the same gesture as picking a model on the previous tab,
             rather than a dropdown that hides one option until opened. */}
-        <GlossaryAside ids={["local-vs-api"]} />
         <div className="settings-source-choice">
           <SettingCard
             accent={kind === "summary" ? "amber" : "sky"}
@@ -1181,8 +1227,14 @@ export function ModelSettingsPanel({
             ) : null}
           </div>
         ) : null}
-        {kind === "embedding" ? <GlossaryAside ids={["api-dimensions"]} /> : null}
         {kind === "embedding" ? <p className="settings-provider-card__note">目前資料庫向量固定為 {setting?.dimensions ?? 384} 維；自訂 embedding 必須回傳這個維度，才可以重新建立關聯。</p> : null}
+        </div>
+        {/* One explanation per term per tab: the two provider blocks are the
+            same choice made twice, and the answer does not change between
+            them. The dimension note appears only alongside the button that
+            measures one. */}
+        {kind === "summary" ? <GlossaryAside ids={["local-vs-api"]} /> : null}
+        {isApi && kind === "embedding" ? <GlossaryAside ids={["api-dimensions"]} /> : null}
       </div>
     );
   };
@@ -1193,7 +1245,7 @@ export function ModelSettingsPanel({
         <div>
           <p className="eyebrow">WORKSPACE SETTINGS</p>
           <h2 id="settings-title">設定</h2>
-          <p>把模型來源、API 連線與本機資源集中管理。設定儲存在這個知識卡櫃，不會上傳到外部服務。</p>
+          <p>設定只存在這台電腦。</p>
         </div>
         <button className="create-card-close" type="button" onClick={onClose}>
           關閉
@@ -1258,16 +1310,22 @@ export function ModelSettingsPanel({
             <span className="model-settings-kicker">BRING YOUR OWN MODEL</span>
             <strong>接入你熟悉的模型供應商</strong>
             <p>
-              支援 OpenAI-compatible 的服務，包含在本機執行的 <strong>Ollama</strong> 與 <strong>LM Studio</strong>，以及 Hugging Face TEI。
+              支援 OpenAI-compatible 的服務，包含在本機執行的 <b>Ollama</b> 與 <b>LM Studio</b>，以及 Hugging Face TEI。
               選擇供應商會自動填入位址，按「偵測可用模型」就能列出該服務已經載入的模型。
               用本機供應商時，卡片內容不會離開這台電腦。
             </p>
           </div>
           {providerFields("summary", "摘要與欄位整理", "用來把筆記整理成可檢查的知識卡草稿。")}
           {providerFields("embedding", "語意向量與關聯圖", "用來計算卡片相似度、搜尋結果與關聯圖連線。")}
-          <div className="settings-api-actions">
-            <p>儲存後若 embedding 設定有變更，系統會重新建立現有卡片的向量與關聯。</p>
-            <button className="create-card-submit" type="submit" disabled={isSettingsSaving || isBackgroundTaskRunning}>
+          {/* Sticky, because the form is three screens tall and the button used
+              to be at the bottom of the third. */}
+          <div className={`settings-api-actions${hasUnsavedSettings ? " is-dirty" : ""}`}>
+            <p>
+              {hasUnsavedSettings
+                ? "有尚未儲存的變更。儲存後若 embedding 設定有變更，系統會重新建立現有卡片的向量與關聯。"
+                : "目前的設定都已儲存。"}
+            </p>
+            <button className="create-card-submit" type="submit" disabled={isSettingsSaving || isBackgroundTaskRunning || !hasUnsavedSettings}>
               {isSettingsSaving ? "儲存並重建中…" : "儲存並套用"}
             </button>
           </div>

@@ -155,11 +155,14 @@
   width: min(1240px, 100%);
 }
 
+/* Sized to their labels rather than stretched across the panel: four tabs on a
+   1240px grid put the active one alone in a wide box with the rest scattered
+   far to its right. */
 .settings-tabs {
   border-bottom: 1px solid var(--line);
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin: 20px 0 24px;
   padding-bottom: 8px;
 }
@@ -213,7 +216,11 @@
 .settings-api-intro--devices { background: color-mix(in srgb, var(--lavender) 30%, var(--paper)); border-color: color-mix(in srgb, var(--lavender-deep) 52%, var(--line)); }
 .device-pairing-card,
 .device-list-card { background: rgba(251, 250, 247, 0.64); border: 1px solid rgba(33, 31, 39, 0.11); border-radius: 14px; padding: 20px; }
-.device-pairing-card { align-items: center; display: flex; gap: 20px; justify-content: space-between; }
+/* Text, the button, then the explanation — a row, not two ends with the button
+   floating in the middle of the gap. */
+.device-pairing-card { align-items: center; display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) auto; }
+
+.device-pairing-card:has(> .glossary-aside) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 250px); }
 .device-pairing-card > div { display: grid; gap: 7px; }
 .device-pairing-card p,
 .device-pairing-card small,
@@ -233,7 +240,7 @@
 .device-lan-details { border-top: 1px solid var(--line); display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; }
 .device-lan-details code { background: rgba(33, 31, 39, 0.06); border-radius: 6px; font-size: 10px; overflow-wrap: anywhere; padding: 8px; }
 
-.settings-api-intro strong {
+.settings-api-intro > strong {
   font-family: Georgia, "Noto Serif TC", serif;
   font-size: 22px;
   font-weight: 400;
@@ -251,10 +258,25 @@
 }
 
 .settings-provider-card {
+  align-items: start;
   background: rgba(251, 250, 247, 0.64);
   border: 1px solid rgba(33, 31, 39, 0.11);
   border-radius: 14px;
+  display: grid;
+  gap: 14px 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 250px);
   padding: 20px;
+}
+
+/* With nothing to explain, the fields take the column back. */
+.settings-provider-card:not(:has(> .glossary-aside)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-provider-card__main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
 }
 
 .settings-provider-card + .settings-provider-card {
@@ -382,9 +404,21 @@
 
 .settings-api-actions {
   align-items: center;
+  background: color-mix(in srgb, var(--card-front) 92%, var(--paper));
   border-top: 1px solid var(--line);
+  bottom: -1px;
   margin-top: 8px;
-  padding-top: 18px;
+  padding: 14px 0 4px;
+  position: sticky;
+}
+
+.settings-api-actions.is-dirty {
+  border-top-color: color-mix(in srgb, var(--accent-amber) 60%, var(--line));
+}
+
+.settings-api-actions .create-card-submit:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .settings-api-actions p {
@@ -4787,8 +4821,29 @@ a:focus-visible {
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
 }
 
-.model-card-wall--single {
-  grid-template-columns: minmax(0, 210px);
+/* What the two axes resolved to, in words. It used to be a second copy of the
+   card already sitting in the slot. */
+.simple-picker__chosen {
+  display: grid;
+  gap: 9px;
+  justify-items: start;
+  max-width: 460px;
+}
+
+.simple-picker__chosen p {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.75;
+  margin: 0;
+}
+
+.simple-picker__chosen strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.simple-picker__chosen .is-caveat {
+  color: var(--accent-coral);
 }
 
 .model-card-wall__item {
@@ -4852,90 +4907,111 @@ a:focus-visible {
   opacity: 0.45;
 }
 
-/* ── Glossary cards ── */
+/* ── Glossary notes ─────────────────────────────────────────────────────────
+   A card seen spine-on. These were full-size flip cards with a hint above and
+   a toggle below, which on the data tab made the explanation of the word
+   "checksum" physically larger than the button that writes the backup. The
+   controls are what the page is for; the glossary is read once. */
 
-.glossary-row {
-  border-top: 1px solid var(--line);
+.glossary-note {
+  /* The thumbnail is the same cover art the cards use, and that art reads its
+     colours from variables the .collection-card rule sets. A note is not a
+     .collection-card, so it has to set them itself or the art comes out
+     transparent. */
+  --cover-color: var(--domain-color);
+  --cover-soft-color: var(--domain-soft);
+  --cover-background: var(--card-front);
+  background: color-mix(in srgb, var(--paper) 82%, var(--domain-soft));
+  border: 1px solid color-mix(in srgb, var(--domain-color) 26%, var(--line));
+  border-radius: 13px;
+  box-shadow: var(--card-stack, none), 0 5px 12px rgba(33, 31, 39, 0.045);
+  --card-stack:
+    0 1.5px 0 -0.5px color-mix(in srgb, var(--paper) 58%, var(--line)),
+    0 3px 0 -1px color-mix(in srgb, var(--domain-color) 26%, var(--line));
+  overflow: hidden;
+}
+
+.glossary-note__face {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
   display: grid;
-  gap: 16px;
-  margin-top: 30px;
-  padding-top: 22px;
-}
-
-.glossary-row__heading {
-  display: grid;
-  gap: 5px;
-}
-
-.glossary-row__heading p {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.7;
-  margin: 0;
-}
-
-.glossary-row__wall {
-  display: grid;
-  gap: 18px;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-}
-
-/* FlipCard is sized for the reading view; inside a glossary row it has to come
-   down to the size of the other cards on the page. */
-.glossary-card__shell .card-flip {
-  max-width: none;
+  font: inherit;
+  gap: 11px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  padding: 10px 12px;
+  text-align: left;
   width: 100%;
 }
 
-.glossary-card__shell .card-viewer__hint {
-  font-size: 8.5px;
-  letter-spacing: 0.1em;
-  margin: 0 0 8px;
-}
-
-.glossary-card__shell .card-flip__toggle {
-  font-size: 10px;
-  margin-top: 9px;
-}
-
-.glossary-card {
-  aspect-ratio: 0.68;
-  height: 100%;
-  padding: 11px;
-}
-
-.glossary-card .collection-card__copy strong {
-  font-size: 18px;
-}
-
-.glossary-card .collection-card__copy span {
-  color: var(--muted);
-  display: -webkit-box;
-  font-size: 10.5px;
-  line-height: 1.6;
+/* The thumbnail keeps the card's proportions, so it reads as the same object
+   at a smaller size rather than as an icon. */
+.glossary-note__mark {
+  aspect-ratio: 0.7;
+  border-radius: 7px;
+  display: block;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  width: 34px;
 }
 
-.glossary-card .collection-card__tags {
-  display: flex;
-  gap: 4px;
-  padding: 0 3px;
+.glossary-note__mark .collection-card__art {
+  border-radius: 7px;
+  height: 100%;
 }
 
-.glossary-card--back .glossary-card__copy {
-  padding: 0 3px;
+.glossary-note__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
-.glossary-card--back .collection-card__plain-lead {
-  -webkit-line-clamp: 6;
+.glossary-note__number {
+  color: var(--muted);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.glossary-note__copy strong {
+  font-family: Georgia, "Noto Serif TC", serif;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.glossary-note__copy > span:last-child {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.glossary-note__toggle {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.glossary-note.is-open {
+  background: color-mix(in srgb, var(--paper) 70%, var(--domain-soft));
+  border-color: color-mix(in srgb, var(--domain-color) 45%, var(--line));
+}
+
+.glossary-note__body {
+  border-top: 1px solid color-mix(in srgb, var(--domain-color) 20%, var(--line));
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px 13px;
+}
+
+.glossary-note__body p {
   font-size: 11.5px;
-  line-height: 1.72;
+  line-height: 1.75;
+  margin: 0;
 }
 
-.glossary-card--back .collection-card__plain-body {
-  -webkit-line-clamp: 5;
+.glossary-note__aside {
+  color: var(--muted);
   font-size: 10.5px;
 }
 
@@ -5058,6 +5134,11 @@ a:focus-visible {
   align-items: start;
   display: grid;
   gap: 18px;
+  grid-template-columns: minmax(0, 170px) minmax(0, 1fr) minmax(0, 250px);
+}
+
+/* Without an explanation to show, the cards take the room back. */
+.model-section__body:not(:has(> .glossary-aside)) {
   grid-template-columns: minmax(0, 170px) minmax(0, 1fr);
 }
 
@@ -5174,6 +5255,20 @@ a:focus-visible {
 /* Overlapping cards mean overlapping captions, so what sits under a card —
    its file tools, its caveat — belongs to whichever card you are pointing at
    and stays out of the way for the rest. */
+/* The size labels belong to the fan as a whole, so they appear with it. While
+   the deck is closed they would all sit on the same spot, one word on top of
+   another. */
+.card-deck__item .model-card-wall__tier {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.card-deck:hover .model-card-wall__tier,
+.card-deck:focus-within .model-card-wall__tier,
+.card-deck.is-held .model-card-wall__tier {
+  opacity: 1;
+}
+
 .card-deck__item .model-card__tools,
 .card-deck__item .model-card-wall__note {
   opacity: 0;
@@ -5238,20 +5333,24 @@ a:focus-visible {
 /* ── Glossary beside the term ── */
 
 .glossary-aside {
+  align-content: start;
   display: grid;
   gap: 8px;
   margin-top: 4px;
+  max-width: 340px;
 }
 
 .glossary-aside__wall {
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  max-width: 720px;
+  gap: 8px;
 }
 
-.glossary-aside .glossary-card__shell .card-flip {
-  width: 100%;
+/* In a section wide enough for it, the explanations sit in their own column
+   beside the controls instead of below them, where they used to double the
+   length of the page. */
+.model-section__body > .glossary-aside,
+.settings-provider-card > .glossary-aside {
+  margin-top: 0;
 }
 
 @media (max-width: 900px) {

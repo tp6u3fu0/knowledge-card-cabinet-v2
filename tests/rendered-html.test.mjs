@@ -368,3 +368,39 @@ test("the deck's fan is measured rather than written as a percentage", async () 
   assert.match(deck, /onClick=\{onClick\}/);
   assert.doesNotMatch(deck, /draggable=/, "the browser's drag image is back");
 });
+
+test("the settings page keeps its explanations smaller than its controls", async () => {
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  // A glossary entry used to be a full flip card with a hint above and a toggle
+  // below — on the data tab, three times the size of the button it explained.
+  assert.doesNotMatch(panels, /glossary-card__shell/, "the glossary is back to full-size flip cards");
+  const note = css.match(/\.glossary-note \{([\s\S]*?)\n\}/);
+  assert.ok(note, "globals.css no longer styles a glossary note");
+  // The thumbnail is the card cover art, which reads its colours from variables
+  // that only .collection-card sets; without them it renders transparent.
+  assert.match(note[1], /--cover-color:/);
+
+  // The banner's title rule was also catching <strong> inside its paragraph,
+  // which put two words of a sentence in 22px serif.
+  assert.match(css, /\.settings-api-intro > strong \{/);
+  assert.doesNotMatch(css, /\.settings-api-intro strong \{/);
+
+  // Labels that belong to the fan cannot be legible while the deck is closed:
+  // they would all sit on the same spot.
+  const tier = css.match(/\.card-deck__item \.model-card-wall__tier \{([\s\S]*?)\n\}/);
+  assert.ok(tier, "the deck's size labels are visible while the pile is closed");
+  assert.match(tier[1], /opacity:\s*0/);
+});
+
+test("the API form says whether there is anything to save", async () => {
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(panels, /const hasUnsavedSettings =/);
+  assert.match(panels, /disabled=\{isSettingsSaving \|\| isBackgroundTaskRunning \|\| !hasUnsavedSettings\}/);
+  // The form is three screens tall; the button has to travel with the reader.
+  const actions = css.match(/\.settings-api-actions \{[\s\S]*?position: sticky;[\s\S]*?\n\}/);
+  assert.ok(actions, "the save bar no longer follows the form");
+});

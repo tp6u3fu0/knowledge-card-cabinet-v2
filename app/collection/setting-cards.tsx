@@ -7,14 +7,13 @@
  * as a card, and the one currently in use sits in a slot at the top. The point
  * is not decoration: the collection page already taught the reader that a card
  * is "one thing you can pick up and turn over", so reusing it means the model
- * chooser needs no explaining. The glossary cards lean on the same habit — they
- * turn over, because that is what cards do here.
+ * chooser needs no explaining. The glossary keeps the same language at a
+ * smaller size: a card seen spine-on, which opens when the reader wants it.
  */
 
 import { Children, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { SeededCoverArt, type CoverMotif } from "../cover-art";
-import { FlipCard } from "../card-face";
 import { useCardDrag, useDragState, useSlotRegistration } from "./card-drag";
 import type { VisualAccent } from "./types";
 
@@ -288,12 +287,15 @@ export function AddCard({ label, caption, open, onClick }: { label: string; capt
 }
 
 /**
- * A term explained on the back of a card.
+ * A term explained without taking the floor.
  *
- * The settings page is full of words — 向量、維度、ONNX — that mean nothing to
- * someone who has not built one of these before, and a tooltip is the wrong
- * shape for a two-paragraph answer. Putting the answer on the back of a card
- * means it is available without being in the way.
+ * These used to be full-size cards with a flip hint above and a "see the back"
+ * button below — three pieces of chrome each, and on the data tab the
+ * explanation of the word "checksum" was physically larger than the button that
+ * makes the backup. A settings page is read for its controls; the glossary is
+ * read once, by one reader, on their first run. So it keeps the card language
+ * at the size of a spine: the cover art shrinks to a thumbnail, the question
+ * stays visible, and the answer unfolds in place when it is actually wanted.
  */
 export function GlossaryCard({
   accent,
@@ -312,48 +314,27 @@ export function GlossaryCard({
   answer: string;
   aside?: string;
 }) {
-  const front = (
-    <div className={`collection-card setting-card glossary-card collection-card--${accent}`} style={EXAMPLE_COVER_STYLE}>
-      <span className="collection-card__accent" aria-hidden="true" />
-      <span className="collection-card__topline">
-        <span>{number}</span>
-        <span>術語</span>
-      </span>
-      <SeededCoverArt seed={term} pattern="orbit" motifs={exampleMotifs(glyph)} />
-      <span className="collection-card__copy">
-        <strong>{term}</strong>
-        <span>{question}</span>
-      </span>
-      <span className="collection-card__tags">
-        <span>翻面看說明</span>
-      </span>
-    </div>
-  );
-
-  const back = (
-    <div className={`collection-card collection-card--back glossary-card glossary-card--back collection-card--${accent}`}>
-      <span className="collection-card__back-head">
-        <span className="collection-card__accent" aria-hidden="true" />
-        <span className="collection-card__topline">
-          <span>{number}</span>
-          <span>{term}</span>
-        </span>
-      </span>
-      <span className="collection-card__plain-copy glossary-card__copy">
-        <span className="collection-card__plain-lead">{answer}</span>
-        {aside ? (
-          <>
-            <span className="collection-card__plain-rule" aria-hidden="true" />
-            <span className="collection-card__plain-body">{aside}</span>
-          </>
-        ) : null}
-      </span>
-    </div>
-  );
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="glossary-card__shell">
-      <FlipCard front={front} back={back} hint="拖曳翻面 · 看白話說明" />
+    <div className={`glossary-note collection-card--${accent}${open ? " is-open" : ""}`} style={EXAMPLE_COVER_STYLE}>
+      <button className="glossary-note__face" type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        <span className="glossary-note__mark" aria-hidden="true">
+          <SeededCoverArt seed={term} pattern="orbit" motifs={exampleMotifs(glyph)} />
+        </span>
+        <span className="glossary-note__copy">
+          <span className="glossary-note__number">{number} · 術語</span>
+          <strong>{term}</strong>
+          <span>{question}</span>
+        </span>
+        <span className="glossary-note__toggle" aria-hidden="true">{open ? "−" : "+"}</span>
+      </button>
+      {open ? (
+        <div className="glossary-note__body">
+          <p>{answer}</p>
+          {aside ? <p className="glossary-note__aside">{aside}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
