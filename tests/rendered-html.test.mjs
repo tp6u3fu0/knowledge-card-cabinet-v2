@@ -350,18 +350,23 @@ test("a carried card is measured before its deck slot is flattened", async () =>
   assert.match(item[1], /transform:/);
 });
 
-test("the deck's fan is measured rather than written as a percentage", async () => {
+test("an open deck lays its cards out at full width, measured", async () => {
   // A percentage inside translate() resolves against the card being moved, not
-  // the row it moves along, so the step came out as zero and the deck silently
-  // never opened.
+  // the row it moves along, so a computed step came out as zero and the deck
+  // silently never opened. And the open layout has to be a wall rather than one
+  // long row: eight cards fanned along a single line left each one a sliver of
+  // its own right edge, with the title clipped away.
   const deck = await readFile(new URL("../app/collection/setting-cards.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(deck, /new ResizeObserver\(measure\)/);
-  assert.match(deck, /"--fan": `\$\{fan\}px`/);
-  const rules = css.match(/\.card-deck \{([\s\S]*?)\n\}/);
-  assert.ok(rules, "globals.css no longer styles a deck");
-  assert.doesNotMatch(rules[1], /--fan:[^;]*%/, "the fan step is a percentage again");
+  assert.match(deck, /"--x": `\$\{\(index % layout\.perRow\) \* layout\.step\}px`/);
+  assert.match(deck, /"--y": `\$\{Math\.floor\(index \/ layout\.perRow\) \* layout\.rowHeight\}px`/);
+  // The step never drops below a card's own width — "no overlap", in one line.
+  assert.match(deck, /Math\.max\(cardWidth \+ CARD_GAP_PX, spread\)/);
+  const open = css.match(/\.card-deck\.is-open \.card-deck__item \{([\s\S]*?)\n\}/);
+  assert.ok(open, "globals.css no longer positions an open deck");
+  assert.doesNotMatch(open[1], /%/, "the open positions are percentages again");
 
   // Dropping is a shortcut, never the only way in: the click path is what
   // keyboards and screen readers use.

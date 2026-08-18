@@ -697,7 +697,7 @@ function AdvancedModelSection({
       ) : null}
     >
       {children}
-      <CardDeck kind={kind} hint={`共 ${models.length} 張 · 滑過展開，拖進卡槽啟用`}>
+      <CardDeck kind={kind} hint="攤開這疊模型">
         {models.map((model) => (
           <ModelOptionCard
             key={model.id}
@@ -788,7 +788,7 @@ function SimpleModelPicker({
         kind="summary"
         kicker="01 / 整理筆記"
         title="要多大的整理模型？"
-        description="模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。滑過卡堆展開，點一下或拖進卡槽都可以，隨時能改。"
+        description="模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。攤開卡堆後，點一下或拖進卡槽都可以，隨時能改。"
         slotKicker="ACTIVE / 整理"
         slotLabel="整理卡槽"
         slotHint="貼上筆記時，由這張卡負責拆成欄位。"
@@ -796,7 +796,7 @@ function SimpleModelPicker({
         glossaryIds={["summary-model"]}
         onDrop={onChoose}
       >
-        <CardDeck kind="summary" hint={`共 ${choices.summary.length} 張 · 滑過展開，拖進卡槽啟用`}>
+        <CardDeck kind="summary" hint="攤開這疊模型">
           {choices.summary.map((choice) => {
             const model = byId.get(choice.model_id);
             if (!model) return null;
@@ -1366,7 +1366,7 @@ export function ModelSettingsPanel({
             kind="summary"
             kicker="01 / SUMMARY"
             title="摘要與欄位整理"
-            description="決定「先貼上筆記」時，模型如何幫你整理卡片。滑過卡堆展開，點一下或把卡片拖進卡槽都可以。"
+            description="決定「先貼上筆記」時，模型如何幫你整理卡片。攤開卡堆後，點一下或把卡片拖進卡槽都可以。"
             slotKicker="ACTIVE / 整理"
             slotLabel="整理卡槽"
             slotHint="貼上筆記時，由這張卡負責拆成欄位。"

@@ -101,43 +101,61 @@ export function CardSlot({
   );
 }
 
-/** The gap left between cards when a deck is open and has room to spread. */
-const FAN_GAP_PX = 16;
+/** The gap left between cards when the deck is open. */
+const CARD_GAP_PX = 16;
+/** The gap between rows of an open deck. */
+const ROW_GAP_PX = 18;
+/** Room the leaning pile is given at the top of the rail; matches globals.css. */
+const RAIL_TOP_PX = 26;
 
 /**
- * A pile of cards that fans open when you reach for it.
+ * A pile of cards that deals itself out when you ask it to.
  *
- * Stacked is how cards are kept when you are not using them, and it keeps a
- * long catalogue from turning the settings page into a wall of thumbnails. The
- * fan is laid out by transform rather than by changing the grid, because only
- * transforms can animate — a grid that reflows would snap open with no sense of
- * the cards sliding apart. The step shrinks as the deck narrows, so a wide
- * window spreads the cards fully and a narrow one keeps them overlapping
- * instead of pushing any of them out of view.
+ * Closed, it is a pile: one card's worth of space however long the catalogue
+ * is. Open, it is a proper wall — every card at full width, in as many rows as
+ * it takes. The first version fanned the cards along a single row, which was
+ * fine for four and unreadable for eight: the step shrank until each card was a
+ * sliver of its own right-hand edge and every title was clipped from the left.
+ *
+ * Opening is a click, not a hover, because opening now changes the height of
+ * the page. A hover that reflows the section under the pointer is how a page is
+ * made to feel unstable; a deliberate press is not.
+ *
+ * The layout is still transforms — a grid that reflowed would snap open with no
+ * sense of the cards moving apart — so the positions have to be measured. A
+ * percentage inside `translate` resolves against the card being moved rather
+ * than the row it moves along, and silently comes out as zero.
  */
 export function CardDeck({ kind, hint, children }: { kind: string; hint?: string; children: ReactNode }) {
   const items = Children.toArray(children);
   const drag = useDragState();
-  // A deck stays open while one of its cards is in the air, so the pointer
-  // leaving the pile mid-drag does not collapse the row underneath it.
-  const held = drag.kind === kind;
   const railRef = useRef<HTMLDivElement | null>(null);
-  const [fan, setFan] = useState(0);
+  const [isOpen, setOpen] = useState(false);
+  const [layout, setLayout] = useState({ step: 0, rowHeight: 0, perRow: 1 });
   const count = items.length;
 
-  // How far apart the cards sit when the deck is open. This has to be measured
-  // rather than written as a percentage: a percentage inside `translate`
-  // resolves against the card being moved, not the row it is moving along, so
-  // the arithmetic would come out as zero and the deck would never open.
+  // A deck stays open while one of its cards is in the air, so letting go
+  // outside it does not close the wall the card came from.
+  const held = drag.kind === kind;
+  const open = isOpen || held;
+
   useEffect(() => {
     const rail = railRef.current;
     if (!rail) return undefined;
     const measure = () => {
+      const first = rail.firstElementChild as HTMLElement | null;
       // offsetWidth, not the bounding box: the cards are rotated in the pile.
-      const cardWidth = (rail.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0;
+      const cardWidth = first?.offsetWidth ?? 0;
       if (!cardWidth) return;
-      const room = (rail.clientWidth - cardWidth) / Math.max(count - 1, 1);
-      setFan(Math.max(0, Math.min(cardWidth + FAN_GAP_PX, room)));
+      const room = rail.clientWidth;
+      const perRow = Math.max(1, Math.floor((room + CARD_GAP_PX) / (cardWidth + CARD_GAP_PX)));
+      // Spread the slack between the columns instead of leaving it all on the
+      // right — but only so far. Handing three columns the whole remainder puts
+      // twice a card's width between neighbours, which stops reading as a row
+      // of cards and starts reading as three unrelated things.
+      const spread = perRow > 1 ? (room - cardWidth) / (perRow - 1) : 0;
+      const step = Math.min(Math.max(cardWidth + CARD_GAP_PX, spread), cardWidth + CARD_GAP_PX * 3);
+      setLayout({ step, perRow, rowHeight: (first?.offsetHeight ?? 0) + ROW_GAP_PX });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -145,19 +163,43 @@ export function CardDeck({ kind, hint, children }: { kind: string; hint?: string
     return () => observer.disconnect();
   }, [count]);
 
+  const rows = Math.max(1, Math.ceil(count / layout.perRow));
+  const openHeight = layout.rowHeight ? RAIL_TOP_PX + rows * layout.rowHeight - ROW_GAP_PX : 0;
+
   return (
-    <div
-      className={`card-deck${held ? " is-held" : ""}`}
-      style={{ "--count": count, "--fan": `${fan}px` } as CSSProperties}
-      data-deck-kind={kind}
-    >
-      {hint ? <span className="card-deck__hint">{hint}</span> : null}
-      <div className="card-deck__rail" ref={railRef}>
+    <div className={`card-deck${open ? " is-open" : ""}`} data-deck-kind={kind}>
+      <button
+        className="card-deck__toggle"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+      >
+        <span className="card-deck__toggle-mark" aria-hidden="true">{open ? "−" : "+"}</span>
+        {open ? `收起這疊` : hint ?? "攤開這疊"}
+        <small>共 {count} 張</small>
+      </button>
+      <div
+        className="card-deck__rail"
+        ref={railRef}
+        style={open && openHeight ? { height: `${openHeight}px` } : undefined}
+        // Tabbing into a closed pile opens it: the cards behind the top one are
+        // reachable by keyboard, and landing on one you cannot see is worse
+        // than a section opening without a click.
+        onFocus={() => setOpen(true)}
+      >
         {items.map((item, index) => (
           // Children.toArray keeps each child's own key, so a card keeps its
           // identity — and its half-finished return animation — when the
           // catalogue reorders around it.
-          <div className="card-deck__item" key={(item as { key?: string | null }).key ?? index} style={{ "--i": index } as CSSProperties}>
+          <div
+            className="card-deck__item"
+            key={(item as { key?: string | null }).key ?? index}
+            style={{
+              "--i": index,
+              "--x": `${(index % layout.perRow) * layout.step}px`,
+              "--y": `${Math.floor(index / layout.perRow) * layout.rowHeight}px`,
+            } as CSSProperties}
+          >
             {item}
           </div>
         ))}
