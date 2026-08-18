@@ -370,6 +370,16 @@ export function FlipCard({
         onClickCapture={swallowDragClick}
       >
         <div className="card-flip__inner" style={style}>
+          {/* The four sides of the card stock. Two faces alone have no
+              thickness at all: turn the card past about 80 degrees and it
+              vanishes into a hairline, which is the one angle where a reader
+              looks specifically to see how thick the thing is. These are real
+              quads standing perpendicular to the faces, so the card is a slab
+              from every angle rather than a picture of one. */}
+          <span className="card-flip__edge card-flip__edge--right" aria-hidden="true" />
+          <span className="card-flip__edge card-flip__edge--left" aria-hidden="true" />
+          <span className="card-flip__edge card-flip__edge--top" aria-hidden="true" />
+          <span className="card-flip__edge card-flip__edge--bottom" aria-hidden="true" />
           <div className="card-flip__face" aria-hidden={flipped}>
             {front}
           </div>

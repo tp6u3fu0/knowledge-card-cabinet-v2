@@ -409,3 +409,35 @@ test("the API form says whether there is anything to save", async () => {
   const actions = css.match(/\.settings-api-actions \{[\s\S]*?position: sticky;[\s\S]*?\n\}/);
   assert.ok(actions, "the save bar no longer follows the form");
 });
+
+test("the flip card is a slab, not two sheets at the same depth", async () => {
+  // Turned past about 80 degrees, a card made of two faces at z=0 vanishes into
+  // a hairline — and that is exactly the angle someone turns a card to when
+  // they want to see how thick it is. The four sides are real quads standing
+  // between the faces. (A rule body holds no closing brace, so [^}] is enough
+  // to capture one.)
+  const cardFace = await readFile(new URL("../app/card-face.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  const edges = cardFace.match(/card-flip__edge card-flip__edge--(right|left|top|bottom)/gu) ?? [];
+  assert.equal(edges.length, 4, `the card has ${edges.length} sides instead of four`);
+
+  // Both faces must sit half a thickness off centre, or the sides stick out.
+  const front = css.match(/\.card-flip__face \{([^}]*)\}/u);
+  const back = css.match(/\.card-flip__face--back \{([^}]*)\}/u);
+  assert.ok(front && back, "globals.css no longer positions the card's faces");
+  assert.match(front[1], /translateZ\(calc\(var\(--card-thickness\) \/ 2\)\)/u);
+  assert.match(back[1], /rotateY\(180deg\) translateZ\(calc\(var\(--card-thickness\) \/ 2\)\)/u);
+
+  // Each side stands perpendicular to the faces. Lying flat would only add four
+  // more sheets at the same depth, which is the problem rather than the fix.
+  const right = css.match(/\.card-flip__edge--right \{([^}]*)\}/u);
+  const left = css.match(/\.card-flip__edge--left \{([^}]*)\}/u);
+  const top = css.match(/\.card-flip__edge--top \{([^}]*)\}/u);
+  const bottom = css.match(/\.card-flip__edge--bottom \{([^}]*)\}/u);
+  assert.ok(right && left && top && bottom, "globals.css is missing one of the card's sides");
+  assert.match(right[1], /rotateY\(90deg\)/u, "the right side lies flat");
+  assert.match(left[1], /rotateY\(-90deg\)/u, "the left side lies flat");
+  assert.match(top[1], /rotateX\(-90deg\)/u, "the top side lies flat");
+  assert.match(bottom[1], /rotateX\(90deg\)/u, "the bottom side lies flat");
+});

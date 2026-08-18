@@ -2902,12 +2902,13 @@ a:focus-visible {
 .collection-card {
   --tilt-x: 0deg;
   --tilt-y: 0deg;
-  /* The edge of the card stock. Two hairlines under the face, held just inside
+  /* The edge of the card stock. Three hairlines under the face, held just inside
      the outline by a negative spread, so a card reads as a thing with a
      thickness rather than a rectangle printed on the page. */
   --card-stack:
-    0 1.5px 0 -0.5px color-mix(in srgb, var(--paper) 58%, var(--line)),
-    0 3px 0 -1px color-mix(in srgb, var(--domain-color) 26%, var(--line));
+    0 2px 0 -0.5px color-mix(in srgb, var(--paper) 44%, var(--line)),
+    0 4px 0 -1px color-mix(in srgb, var(--domain-color) 34%, var(--line)),
+    0 5.5px 0 -1.5px color-mix(in srgb, var(--paper) 28%, var(--line));
   --cover-color: var(--domain-color);
   --cover-soft-color: var(--domain-soft);
   --cover-background: var(--card-front);
@@ -3331,12 +3332,82 @@ a:focus-visible {
   width: 100%;
 }
 
+/* ── A card with a thickness ───────────────────────────────────────────────
+   The two faces sit half a card-thickness in front of and behind the centre,
+   and four quads stand between them. Without the quads the card is two sheets
+   at the same depth: at 90 degrees it disappears, which is exactly the angle
+   someone turns it to in order to see how thick it is. */
+
+.card-flip__inner {
+  --card-thickness: 15px;
+  /* Matches the faces' border-radius: the sides stop short of the corners so a
+     square edge does not poke out past a rounded one. */
+  --card-corner: 18px;
+}
+
 .card-flip__face {
   backface-visibility: hidden;
   border-radius: 18px;
   display: block;
   inset: 0;
   position: absolute;
+  transform: translateZ(calc(var(--card-thickness) / 2));
+}
+
+.card-flip__edge {
+  /* Cut card stock, shaded across the thickness rather than along the card:
+     a dark rim where the printed face wraps, a lit band just inside it, and
+     the far rim in shadow. The first attempt striped this the long way and
+     read as a barcode; it also sat so close to the page colour that a card
+     seen edge-on still looked like a sheet of paper. */
+  background: linear-gradient(
+    var(--edge-axis, to right),
+    color-mix(in srgb, var(--paper) 46%, #2b2731) 0%,
+    color-mix(in srgb, var(--paper) 88%, #2b2731) 18%,
+    color-mix(in srgb, var(--paper) 72%, #2b2731) 58%,
+    color-mix(in srgb, var(--paper) 40%, #2b2731) 100%
+  );
+  display: block;
+  position: absolute;
+}
+
+.card-flip__edge--right {
+  height: calc(100% - var(--card-corner) * 2);
+  left: 100%;
+  top: var(--card-corner);
+  transform: translateZ(calc(var(--card-thickness) / 2)) rotateY(90deg);
+  transform-origin: left center;
+  width: var(--card-thickness);
+}
+
+.card-flip__edge--left {
+  --edge-axis: to left;
+  height: calc(100% - var(--card-corner) * 2);
+  right: 100%;
+  top: var(--card-corner);
+  transform: translateZ(calc(var(--card-thickness) / 2)) rotateY(-90deg);
+  transform-origin: right center;
+  width: var(--card-thickness);
+}
+
+.card-flip__edge--top {
+  --edge-axis: to bottom;
+  bottom: 100%;
+  height: var(--card-thickness);
+  left: var(--card-corner);
+  transform: translateZ(calc(var(--card-thickness) / 2)) rotateX(-90deg);
+  transform-origin: center bottom;
+  width: calc(100% - var(--card-corner) * 2);
+}
+
+.card-flip__edge--bottom {
+  --edge-axis: to top;
+  height: var(--card-thickness);
+  left: var(--card-corner);
+  top: 100%;
+  transform: translateZ(calc(var(--card-thickness) / 2)) rotateX(90deg);
+  transform-origin: center top;
+  width: calc(100% - var(--card-corner) * 2);
 }
 
 /* Specular highlight that tracks the cursor while the card leans. */
@@ -3361,7 +3432,7 @@ a:focus-visible {
    padding and gap cannot resolve against a container it establishes. */
 .card-flip__face--back {
   container-type: inline-size;
-  transform: rotateY(180deg);
+  transform: rotateY(180deg) translateZ(calc(var(--card-thickness) / 2));
 }
 
 /* The tilt-on-hover of the front face fights the flip rotation — drop it here. */
