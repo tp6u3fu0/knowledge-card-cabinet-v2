@@ -239,7 +239,14 @@ const EDGE_SLICES = Array.from({ length: EDGE_SLICE_COUNT }, (_, index) => {
   const position = (index + 0.5) / EDGE_SLICE_COUNT;
   return {
     depth: (position - 0.5).toFixed(4),
-    tone: `${Math.round(56 + 40 * position ** 0.7)}%`,
+    // Mixed into the card's own stock colour, so the edge is the same card seen
+    // side-on rather than a grey band stuck to it. Shallow enough a range that
+    // it still reads as one colour; the rim lines do the work of showing where
+    // the thickness starts and stops.
+    tone: `${Math.round(82 + 16 * position ** 0.7)}%`,
+    // The two outermost layers meet the faces, and a card's edge is legible
+    // because of the line where the printed face wraps over it.
+    rim: index === 0 || index === EDGE_SLICE_COUNT - 1,
   };
 });
 
@@ -250,10 +257,15 @@ const EDGE_SLICES = Array.from({ length: EDGE_SLICE_COUNT }, (_, index) => {
 export function FlipCard({
   front,
   back,
+  accent,
   hint = "DRAG TO TURN · 拖曳卡片翻轉",
 }: {
   front: ReactNode;
   back: ReactNode;
+  /** The card's colour. The edge is cut from the same stock as the faces, but
+      the colour variables sit on `.collection-card` — inside a face — so the
+      edge cannot inherit them and has to be told. */
+  accent?: string;
   hint?: string;
 }) {
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
@@ -389,7 +401,10 @@ export function FlipCard({
         onLostPointerCapture={endDrag}
         onClickCapture={swallowDragClick}
       >
-        <div className="card-flip__inner" style={style}>
+        <div
+          className={`card-flip__inner ${accent ? `collection-card--${accent}` : ""}`}
+          style={style}
+        >
           {/* The card stock, extruded. Two faces alone have no thickness at
               all — turned past about 80 degrees the card vanishes into a
               hairline, which is the one angle a reader turns it to in order to
@@ -403,7 +418,7 @@ export function FlipCard({
             <span
               key={slice.depth}
               aria-hidden="true"
-              className="card-flip__slice"
+              className={`card-flip__slice ${slice.rim ? "card-flip__slice--rim" : ""}`}
               style={{ "--slice-depth": slice.depth, "--slice-tone": slice.tone } as CSSProperties}
             />
           ))}

@@ -3340,6 +3340,11 @@ a:focus-visible {
 
 .card-flip__inner {
   --card-thickness: 5px;
+  /* The stock the edge is cut from: the same mix the front face is painted
+     with, so a card turned side-on is the same colour as the card. Falls back
+     to plain paper when no accent reaches here. */
+  --card-stock: color-mix(in srgb, var(--paper) 74%, var(--domain-soft, var(--paper)));
+  --card-rim: color-mix(in srgb, var(--domain-color, var(--line)) 34%, var(--line));
   /* Every layer of the edge is this shape, so it has to be the faces' radius.
      Change one and change the other, or the edge will not sit under the face. */
   --card-radius: 18px;
@@ -3364,13 +3369,21 @@ a:focus-visible {
 
      The tone is set per slice from the back rim to the front, so the edge is
      shaded like cut stock rather than painted one flat colour. */
-  background: color-mix(in srgb, var(--paper) var(--slice-tone, 80%), #2b2731);
+  background: color-mix(in srgb, var(--card-stock) var(--slice-tone, 86%), #2b2731);
   border-radius: var(--card-radius);
   display: block;
   inset: 0;
   pointer-events: none;
   position: absolute;
   transform: translateZ(calc(var(--slice-depth, 0) * var(--card-thickness)));
+}
+
+/* The line where the printed face wraps over the edge. An edge in exactly the
+   card's colour is honest and unreadable — nothing marks where the face stops —
+   so the two layers that meet the faces carry the faces' own border, and the
+   thickness sits between two hairlines. */
+.card-flip__slice--rim {
+  border: 1px solid var(--card-rim);
 }
 
 /* Specular highlight that tracks the cursor while the card leans. */

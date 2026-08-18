@@ -445,6 +445,24 @@ test("the flip card has an edge that follows its outline", async () => {
   assert.ok(count, "the edge no longer says how many layers it has");
   assert.ok(Number(count[1]) >= 12, `the edge is only ${count[1]} layers thick`);
 
+  // The edge is cut from the same stock as the faces. A grey band stuck to a
+  // coloured card reads as packaging, not as the card's own thickness — and the
+  // colour variables live on .collection-card, inside a face, so the edge only
+  // gets them if FlipCard puts the accent on the inner element itself.
+  // Two rules carry this selector — the layout one and the thickness one.
+  const inner = css.match(/\.card-flip__inner \{([^}]*--card-thickness[^}]*)\}/u);
+  assert.ok(inner, "globals.css no longer sets up the card's thickness");
+  assert.match(inner[1], /--card-stock:[^;]*var\(--domain-soft/u, "the edge is not cut from the card's own colour");
+  assert.match(slice[1], /background: color-mix\([^;]*var\(--card-stock\)/u, "the edge ignores the card's colour");
+  assert.match(cardFace, /collection-card--\$\{accent\}`? *\}?/u, "the accent never reaches the edge");
+
+  // Without a line where the face wraps over it, an edge in exactly the card's
+  // colour is invisible: nothing marks where the face stops.
+  const rim = css.match(/\.card-flip__slice--rim \{([^}]*)\}/u);
+  assert.ok(rim, "the edge lost the line that makes its thickness readable");
+  assert.match(rim[1], /border: 1px solid var\(--card-rim\)/u);
+  assert.match(cardFace, /rim: index === 0 \|\| index === EDGE_SLICE_COUNT - 1/u, "the rim is not on the two outermost layers");
+
   // Array.from's map callback takes two arguments — reading a third one for the
   // length gives undefined and the viewer throws on render.
   const table = cardFace.match(/const EDGE_SLICES = Array\.from\(([\s\S]*?)\n\}\);/u);

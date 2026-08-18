@@ -348,6 +348,7 @@ function CollectionCardViewer({
         <div className="card-viewer__content">
           <FlipCard
             key={card.id}
+            accent={card.accent}
             front={<KnowledgeCardFront card={card} active onClick={() => undefined} />}
             back={
               <KnowledgeCardBack
