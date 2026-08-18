@@ -470,3 +470,57 @@ test("the flip card has an edge that follows its outline", async () => {
   assert.doesNotMatch(table[0], /\(_, index, [A-Za-z]+\)/u, "Array.from's callback has no third argument");
 });
 
+
+test("the dropdown is the cabinet's own, not the operating system's", async () => {
+  // A native <select> opens an OS menu — on Windows a grey list with square
+  // corners — which was the one control drawn in someone else's hand. Replacing
+  // it is only an improvement if it keeps what a <select> gave for free: the
+  // keyboard, a form that still refuses to submit empty, and a menu that is not
+  // clipped by whatever container it happens to sit in.
+  const select = await readFile(new URL("../app/collection/card-select.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const users = await Promise.all(
+    ["page", "panels", "relation-view"].map((name) =>
+      readFile(new URL(`../app/collection/${name}.tsx`, import.meta.url), "utf8"),
+    ),
+  );
+
+  for (const [index, source] of users.entries()) {
+    assert.doesNotMatch(source, /<select/u, `a native select is back in file ${index}`);
+  }
+
+  // The listbox contract. Without these the picker is a div that looks like a
+  // control to sighted mouse users and to nobody else.
+  assert.match(select, /role="combobox"/u);
+  assert.match(select, /role="listbox"/u);
+  assert.match(select, /role="option"/u);
+  assert.match(select, /aria-expanded=\{open\}/u);
+  assert.match(select, /aria-activedescendant=\{open \? optionId\(active\) : undefined\}/u);
+  for (const key of ["ArrowDown", "ArrowUp", "Home", "End", "Escape", "Enter"]) {
+    assert.match(select, new RegExp(`"${key}"`, "u"), `the picker ignores ${key}`);
+  }
+
+  // Rendered into the body: a menu laid out in flow gets cut off by the
+  // toolbars and cards it opens inside of.
+  assert.match(select, /createPortal\(panel, document\.body\)/u);
+  const panel = css.match(/\.card-select__panel \{([^}]*)\}/u);
+  assert.ok(panel, "globals.css no longer draws the dropdown");
+  assert.match(panel[1], /position: fixed/u);
+  assert.match(panel[1], /animation: card-select-open/u);
+
+  // display:none would take the guard out of form validation entirely, which is
+  // the one thing it exists for.
+  const guard = css.match(/\.card-select__validity \{([^}]*)\}/u);
+  assert.ok(guard, "the required-field guard lost its styling");
+  assert.doesNotMatch(guard[1], /display: none/u, "a hidden guard is skipped by validation");
+  assert.match(guard[1], /opacity: 0/u);
+  assert.match(select, /required\n?\s*value=\{value\}/u, "the guard no longer mirrors the value");
+
+  // Motion the reader did not ask for is motion the reader can turn off.
+  const reduced = css.match(/@media \(prefers-reduced-motion: reduce\) \{\s*\.card-select__panel,\s*\.card-select__option \{\s*animation: none;/u);
+  assert.ok(reduced, "the dropdown ignores prefers-reduced-motion");
+
+  for (const frames of ["card-select-open", "card-select-close", "card-select-deal"]) {
+    assert.ok(css.includes(`@keyframes ${frames} {`), `${frames} is missing`);
+  }
+});

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { visualAccents, visualPatterns } from "./types";
+import { CardSelect } from "./card-select";
 import { RelationView } from "./relation-view";
 import {
   CreateCardForm,
@@ -1786,26 +1787,31 @@ export default function CollectionPage() {
               aria-label="搜尋收藏卡片"
             />
           </label>
-          <label className="database-filter-select database-category-filter">
-            <span>分類</span>
-            <select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value)}>
-              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-            </select>
-          </label>
-          <label className="database-filter-select">
-            <span>標籤</span>
-            <select value={activeTag} onChange={(event) => setActiveTag(event.target.value)}>
-              {tags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
-            </select>
-          </label>
-          <label className="database-filter-select">
-            <span>排序</span>
-            <select value={searchSort} onChange={(event) => setSearchSort(event.target.value as typeof searchSort)}>
-              <option value="relevance">預設順序</option>
-              <option value="updated">最近更新</option>
-              <option value="title">標題 A-Z</option>
-            </select>
-          </label>
+          <CardSelect
+            className="database-filter-select database-category-filter"
+            label="分類"
+            value={activeCategory}
+            onChange={setActiveCategory}
+            options={categories.map((category) => ({ value: category, label: category }))}
+          />
+          <CardSelect
+            className="database-filter-select"
+            label="標籤"
+            value={activeTag}
+            onChange={setActiveTag}
+            options={tags.map((tag) => ({ value: tag, label: tag }))}
+          />
+          <CardSelect
+            className="database-filter-select"
+            label="排序"
+            value={searchSort}
+            onChange={(next) => setSearchSort(next as typeof searchSort)}
+            options={[
+              { value: "relevance", label: "預設順序" },
+              { value: "updated", label: "最近更新" },
+              { value: "title", label: "標題 A-Z" },
+            ]}
+          />
           <button className={`database-category-button ${isCategoryManagerOpen ? "is-active" : ""}`} type="button" onClick={() => { setCategoryManagerError(""); setIsCategoryManagerOpen((current) => !current); }}>
             管理分類
           </button>
@@ -1864,7 +1870,7 @@ export default function CollectionPage() {
               <form onSubmit={(event) => void handleCreateCategory(event)}><label><span>新增分類</span><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="例如：資料工程" /></label><button type="submit" disabled={isCategorySaving}>新增</button></form>
               {selectedCategoryName && selectedCategoryName !== "待分類" ? <>
                 <form onSubmit={(event) => void handleRenameCategory(event)}><label><span>重新命名「{selectedCategoryName}」</span><input value={renamedCategoryName} onChange={(event) => setRenamedCategoryName(event.target.value)} /></label><button type="submit" disabled={isCategorySaving}>套用</button></form>
-                <form onSubmit={(event) => void handleMergeCategory(event)}><label><span>合併到</span><select value={mergeTargetCategory} onChange={(event) => setMergeTargetCategory(event.target.value)}><option value="">選擇目標分類</option>{categories.filter((category) => category !== "全部" && category !== selectedCategoryName).map((category) => <option key={category} value={category}>{category}</option>)}</select></label><button type="submit" disabled={isCategorySaving || !mergeTargetCategory}>合併</button></form>
+                <form onSubmit={(event) => void handleMergeCategory(event)}><CardSelect label="合併到" placeholder="選擇目標分類" value={mergeTargetCategory} onChange={setMergeTargetCategory} options={categories.filter((category) => category !== "全部" && category !== selectedCategoryName).map((category) => ({ value: category, label: category }))} /><button type="submit" disabled={isCategorySaving || !mergeTargetCategory}>合併</button></form>
               </> : null}
             </div>
             {categoryManagerError ? <p className="category-manager__error" role="alert">{categoryManagerError}</p> : null}

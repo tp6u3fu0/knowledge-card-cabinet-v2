@@ -162,6 +162,8 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `SettingCard` 的拖曳 | 點擊路徑必須保留（鍵盤與螢幕閱讀器只有這條） | 拖不動的人完全無法換模型 |
 | 翻卡的圓角 | 面與邊都吃 `--card-radius`，只改一邊會對不上 | 圓角卡片底下露出方角的邊 |
 | 翻卡的厚度畫法 | 是「同一個輪廓沿 z 疊很多層」，不是站在四邊的平板 | 平板在圓角處切過去，看起來像板子從卡片長出來，四個角還是開的 |
+| 新增一個下拉選單 | 用 `CardSelect`，不要用原生 `<select>`；面板是 portal 到 body 的 fixed 元素 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——原生選單長得像另一個程式，而且會被容器裁掉 |
+| `CardSelect` 放進表單欄位 | 要在 `globals.css` 給那個 context 一條「label 在上、trigger 滿寬」的規則 | 它會維持工具列的橫式藥丸樣式，跟旁邊的 input 對不齊 |
 | 翻卡要吃到卡片顏色 | `FlipCard` 必須收 `accent` 並把 `collection-card--<色>` 掛在 `.card-flip__inner` 上 | `--domain-*` 只設在 face 裡面的 `.collection-card`，邊緣繼承不到，會變成灰帶子貼在彩色卡片上 |
 | 翻卡的兩個面 | 必須各自 `translateZ(厚度/2)`，四個側面才對得起來 | 卡片轉到 90 度變成一條髮絲——正好是有人想看它多厚的那個角度 |
 | 在 `.collection-card` 之外用 `SeededCoverArt` | 該元素要自己定義 `--cover-color` / `--cover-soft-color` / `--cover-background` | 封面圖整片透明（術語卡的縮圖就這樣消失過一次） |

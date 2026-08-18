@@ -103,9 +103,7 @@
 
 .database-filter-select,
 .relation-select-control { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--muted); font-size: 0.72rem; }
-.database-filter-select select,
-.relation-select-control select { min-width: 7rem; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--ink); padding: 0.55rem 0.75rem; }
-.database-category-filter select { max-width: 10rem; }
+.database-category-filter .card-select__trigger { max-width: 10rem; }
 .database-category-button,
 .relation-strength-toggle { border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); padding: 0.55rem 0.8rem; cursor: pointer; }
 .database-category-button:hover,
@@ -124,8 +122,9 @@
 .category-manager__list button.is-active { border-color: var(--ink); box-shadow: 0 0 0 2px rgba(35, 35, 35, 0.12); }
 .category-manager__list small,
 .category-manager__forms label { display: grid; gap: 0.3rem; min-width: 12rem; color: var(--muted); font-size: 0.75rem; }
-.category-manager__forms input,
-.category-manager__forms select { border: 1px solid var(--line); border-radius: 0.55rem; padding: 0.55rem 0.65rem; background: var(--paper); color: var(--ink); }
+.category-manager__forms input { border: 1px solid var(--line); border-radius: 0.55rem; padding: 0.55rem 0.65rem; background: var(--paper); color: var(--ink); }
+.category-manager__forms .card-select { display: grid; gap: 0.3rem; min-width: 12rem; }
+.category-manager__forms .card-select__trigger { border-radius: 0.55rem; min-width: 0; padding: 0.55rem 0.65rem; }
 .category-manager__forms button,
 .category-manager__error { color: #a8473c; }
 .collection-search-reasons { grid-column: 1 / -1; color: var(--muted); font-size: 0.8rem; }
@@ -330,7 +329,7 @@
 }
 
 .settings-provider-card input,
-.settings-provider-card select {
+.settings-provider-card .card-select__trigger {
   background: rgba(255, 255, 255, 0.62);
   border: 1px solid rgba(33, 31, 39, 0.14);
   border-radius: 8px;
@@ -344,7 +343,7 @@
 }
 
 .settings-provider-card input:focus,
-.settings-provider-card select:focus {
+.settings-provider-card .card-select__trigger:focus-visible {
   border-color: #4d9b8e;
   box-shadow: 0 0 0 3px rgba(77, 155, 142, 0.13);
 }
@@ -2390,8 +2389,7 @@ a:focus-visible {
   font-style: normal;
 }
 
-.model-add-form input,
-.model-add-form select {
+.model-add-form input {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -2580,7 +2578,6 @@ a:focus-visible {
 
 .create-card-ai-input:focus,
 .create-card-field input:focus,
-.create-card-field select:focus,
 .create-card-field textarea:focus {
   border-color: color-mix(in srgb, var(--mint-deep) 82%, var(--ink));
   box-shadow: 0 0 0 3px rgba(172, 220, 209, 0.25);
@@ -2657,7 +2654,6 @@ a:focus-visible {
 }
 
 .create-card-field input,
-.create-card-field select,
 .create-card-field textarea {
   background: rgba(251, 250, 247, 0.82);
   border: 1px solid rgba(33, 31, 39, 0.13);
@@ -3673,7 +3669,7 @@ a:focus-visible {
   border: 1px solid rgba(33, 31, 39, 0.11);
   border-radius: 16px;
   display: flex;
-  /* The selects have a min-width, so the row has to be allowed to wrap or it
+  /* The pickers have a min-width, so the row has to be allowed to wrap or it
      pushes the whole workspace wider than the viewport. */
   flex-wrap: wrap;
   gap: 10px;
@@ -3705,15 +3701,20 @@ a:focus-visible {
   min-width: 150px;
 }
 
-.relation-composer select {
+.relation-composer .card-select {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+}
+
+.relation-composer .card-select__trigger {
   background: rgba(251, 246, 238, 0.9);
   border: 1px solid rgba(33, 31, 39, 0.15);
   border-radius: 9px;
-  color: var(--ink);
-  font: inherit;
   font-size: 11px;
   min-width: 0;
   padding: 8px 9px;
+  width: 100%;
 }
 
 .relation-composer__arrow {
@@ -5437,4 +5438,270 @@ a:focus-visible {
   .model-section .card-slot {
     position: static;
   }
+}
+
+/* ── The cabinet's dropdown ────────────────────────────────────────────────
+   A native <select> opens an operating-system menu — on Windows a grey list
+   with square corners — which was the one part of the app drawn in someone
+   else's hand. This is the same control in the cabinet's: a card that unfolds
+   under the trigger, on the same hairlines and paper as everything else. */
+
+.card-select {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 0.72rem;
+  gap: 0.45rem;
+  position: relative;
+}
+
+.card-select__label {
+  white-space: nowrap;
+}
+
+.card-select__trigger {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 0.6rem;
+  justify-content: space-between;
+  min-width: 7rem;
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.card-select__trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--ink) 26%, var(--line));
+}
+
+.card-select__trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.card-select__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.card-select.is-open .card-select__trigger {
+  background: var(--card-front);
+  border-color: color-mix(in srgb, var(--ink) 34%, var(--line));
+  box-shadow: 0 6px 16px rgba(33, 31, 39, 0.08);
+}
+
+.card-select__current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-select__current.is-placeholder {
+  color: var(--muted);
+}
+
+/* Two borders of an empty box, turned into a chevron: no icon file to ship. */
+.card-select__chevron {
+  border-bottom: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+  border-radius: 1px;
+  color: var(--muted);
+  flex: none;
+  height: 0.42rem;
+  margin-top: -0.18rem;
+  transform: rotate(-45deg);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), color 160ms ease;
+  width: 0.42rem;
+}
+
+.card-select.is-open .card-select__chevron {
+  color: var(--ink);
+  margin-top: 0.1rem;
+  transform: rotate(135deg);
+}
+
+/* Kept in the layout, not display:none: a hidden field is skipped by form
+   validation, and this one exists so an empty required picker still stops the
+   submit at the browser's own message. */
+.card-select__validity {
+  border: 0;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  bottom: 0;
+  left: 1rem;
+  width: 1px;
+}
+
+/* Chrome anchors its validation bubble to the guard input, and the guard is a
+   pixel tall, so the picker says it too: after a failed submit the trigger
+   carries the same red the error text uses. :user-invalid, not :invalid — an
+   empty picker is not a mistake until someone tries to submit it. */
+.card-select:has(.card-select__validity:user-invalid) .card-select__trigger {
+  border-color: color-mix(in srgb, #a8473c 60%, var(--line));
+  box-shadow: 0 0 0 3px rgba(168, 71, 60, 0.12);
+}
+
+.card-select__panel {
+  background: var(--card-front);
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, var(--line));
+  border-radius: 16px;
+  box-shadow:
+    0 1.5px 0 -0.5px color-mix(in srgb, var(--paper) 62%, var(--line)),
+    0 18px 34px rgba(33, 31, 39, 0.14);
+  overscroll-behavior: contain;
+  overflow-y: auto;
+  padding: 6px;
+  position: fixed;
+  z-index: 95;
+  animation: card-select-open 190ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Unfolding from the edge it is attached to. */
+.card-select__panel--top { transform-origin: top center; }
+.card-select__panel--bottom { transform-origin: bottom center; }
+
+.card-select__panel.is-closing {
+  animation: card-select-close 130ms ease-in both;
+  pointer-events: none;
+}
+
+.card-select__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.card-select__row {
+  margin: 0;
+}
+
+.card-select__option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 11px;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 0.78rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  transition: background 120ms ease;
+  width: 100%;
+  /* Dealt rather than dumped: each row arrives a beat after the one above it,
+     and past the sixth they all arrive together so a long list still snaps. */
+  animation: card-select-deal 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 18ms);
+}
+
+.card-select__option.is-active {
+  background: color-mix(in srgb, var(--paper-deep) 78%, transparent);
+}
+
+.card-select__option.is-chosen {
+  font-weight: 600;
+}
+
+.card-select__option:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.card-select__mark {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  flex: none;
+  height: 7px;
+  transition: background 140ms ease, border-color 140ms ease;
+  width: 7px;
+}
+
+.card-select__option.is-chosen .card-select__mark {
+  background: var(--domain-color, var(--ink));
+  border-color: var(--domain-color, var(--ink));
+}
+
+.card-select__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.card-select__text em {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+@keyframes card-select-open {
+  from { opacity: 0; transform: translateY(-4px) scaleY(0.94); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes card-select-close {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-3px) scaleY(0.97); }
+}
+
+@keyframes card-select-deal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-select__panel,
+  .card-select__option {
+    animation: none;
+  }
+
+  .card-select__chevron {
+    transition: none;
+  }
+}
+
+/* ── The dropdown, standing in for a form field ────────────────────────────
+   In a toolbar the picker is a pill with its label beside it. Inside a form it
+   has to look like the inputs it sits next to instead: label above, full width,
+   the same corner and type size. */
+
+.card-select.create-card-field,
+.card-select.settings-provider-picker {
+  align-items: stretch;
+  display: grid;
+  gap: 7px;
+}
+
+.card-select.settings-provider-picker .card-select__label {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.card-select.create-card-field .card-select__trigger,
+.card-select.settings-provider-picker .card-select__trigger {
+  border-radius: 9px;
+  font-size: 12px;
+  min-height: 38px;
+  min-width: 0;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.relation-composer .card-select__label,
+.category-manager__forms .card-select__label {
+  font-size: 10px;
 }

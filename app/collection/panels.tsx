@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, type FormEvent, type ReactNode } from "rea
 import QRCode from "qrcode";
 
 import type { CoverMotif } from "../cover-art";
+import { CardSelect } from "./card-select";
 import { AddCard, CardDeck, CardSlot, GlossaryCard, SettingCard } from "./setting-cards";
 import { glossaryEntries } from "./glossary";
 
@@ -1096,24 +1097,20 @@ export function ModelSettingsPanel({
         </div>
         {isApi ? (
           <div className="settings-provider-fields">
-            <label>
-              <span>供應商</span>
-              <select
-                value=""
-                onChange={(event) => {
-                  const provider = providers.find((candidate) => candidate.id === event.target.value);
-                  if (!provider) return;
-                  const url = kind === "summary" ? provider.summary_url : provider.embedding_url;
-                  if (url) onDraftChange(kind, "api_url", url);
-                  if (kind === "embedding") onDraftChange(kind, "api_format", provider.api_format);
-                }}
-              >
-                <option value="">選擇供應商以自動填入位址…</option>
-                {providers.map((provider) => (
-                  <option key={provider.id} value={provider.id}>{provider.label}</option>
-                ))}
-              </select>
-            </label>
+            <CardSelect
+              className="settings-provider-picker"
+              label="供應商"
+              placeholder="選擇供應商以自動填入位址…"
+              value=""
+              onChange={(next) => {
+                const provider = providers.find((candidate) => candidate.id === next);
+                if (!provider) return;
+                const url = kind === "summary" ? provider.summary_url : provider.embedding_url;
+                if (url) onDraftChange(kind, "api_url", url);
+                if (kind === "embedding") onDraftChange(kind, "api_format", provider.api_format);
+              }}
+              options={providers.map((provider) => ({ value: provider.id, label: provider.label }))}
+            />
             <label>
               <span>API endpoint</span>
               <input
@@ -1194,16 +1191,16 @@ export function ModelSettingsPanel({
               </div>
             ) : null}
             {kind === "embedding" ? (
-              <label>
-                <span>回傳格式</span>
-                <select
-                  value={draft.api_format}
-                  onChange={(event) => onDraftChange(kind, "api_format", event.target.value)}
-                >
-                  <option value="openai">OpenAI-compatible</option>
-                  <option value="tei">Text Embeddings Inference</option>
-                </select>
-              </label>
+              <CardSelect
+                className="settings-provider-picker"
+                label="回傳格式"
+                value={draft.api_format}
+                onChange={(next) => onDraftChange(kind, "api_format", next)}
+                options={[
+                  { value: "openai", label: "OpenAI-compatible" },
+                  { value: "tei", label: "Text Embeddings Inference" },
+                ]}
+              />
             ) : null}
             <label>
               <span>API 金鑰 <em>{setting?.api_key_set ? "已儲存，留白會沿用" : "選填"}</em></span>
@@ -1502,17 +1499,18 @@ export function CreateCardForm({
             placeholder="AI-005"
           />
         </label>
-        <label className="create-card-field">
-          <span>分類</span>
-          <select
-            required
-            value={draft.category}
-            onChange={(event) => onChange("category", event.target.value)}
-          >
-            {draft.category && !categoryOptions.includes(draft.category) ? <option value={draft.category}>{draft.category}</option> : null}
-            {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-          </select>
-        </label>
+        <CardSelect
+          className="create-card-field"
+          label="分類"
+          placeholder="選擇分類"
+          required
+          value={draft.category}
+          onChange={(next) => onChange("category", next)}
+          options={[
+            ...(draft.category && !categoryOptions.includes(draft.category) ? [{ value: draft.category, label: draft.category }] : []),
+            ...categoryOptions.map((category) => ({ value: category, label: category })),
+          ]}
+        />
         <label className="create-card-field">
           <span>主題</span>
           <input

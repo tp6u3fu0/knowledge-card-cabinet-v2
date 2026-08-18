@@ -11,6 +11,8 @@ import {
   type WheelEvent,
 } from "react";
 
+import { CardSelect } from "./card-select";
+
 import { resetTilt, tiltCard } from "../card-face";
 import { relationEdgeKey, relationEdgeLabel, relationKey } from "./relations";
 import type { KnowledgeCard, RelationEdge, RelationFilter, RelationStrength } from "./types";
@@ -440,12 +442,13 @@ export function RelationView({
             <span aria-hidden="true">＋</span>
             自製關聯
           </button>
-          <label className="relation-select-control">
-            <span>分類</span>
-            <select value={relationCategory} onChange={(event) => setRelationCategory(event.target.value)}>
-              {relationCategories.map((category) => <option key={category} value={category}>{category}</option>)}
-            </select>
-          </label>
+          <CardSelect
+            className="relation-select-control"
+            label="分類"
+            value={relationCategory}
+            onChange={setRelationCategory}
+            options={relationCategories.map((category) => ({ value: category, label: category }))}
+          />
           <button
             className={`relation-strength-toggle ${relationStrength === "strong" ? "is-active" : ""}`}
             type="button"
@@ -479,21 +482,23 @@ export function RelationView({
             <strong>建立一條自己的連線</strong>
             <span>這不會刪除 embedding 自動關聯，只會額外保留一條人工關聯。</span>
           </div>
-          <label>
-            <span>從</span>
-            <select value={relationSourceId} onChange={(event) => setRelationSourceId(event.target.value)} required>
-              <option value="" disabled>選擇卡片</option>
-              {cards.map((card) => <option key={card.id} value={card.id}>{card.title}</option>)}
-            </select>
-          </label>
+          <CardSelect
+            label="從"
+            placeholder="選擇卡片"
+            required
+            value={relationSourceId}
+            onChange={setRelationSourceId}
+            options={cards.map((card) => ({ value: card.id, label: card.title }))}
+          />
           <span className="relation-composer__arrow" aria-hidden="true">→</span>
-          <label>
-            <span>連到</span>
-            <select value={relationTargetId} onChange={(event) => setRelationTargetId(event.target.value)} required>
-              <option value="" disabled>選擇卡片</option>
-              {cards.map((card) => <option key={card.id} value={card.id}>{card.title}</option>)}
-            </select>
-          </label>
+          <CardSelect
+            label="連到"
+            placeholder="選擇卡片"
+            required
+            value={relationTargetId}
+            onChange={setRelationTargetId}
+            options={cards.map((card) => ({ value: card.id, label: card.title }))}
+          />
           <button className="relation-composer__submit" type="submit" disabled={isSavingRelation || cards.length < 2}>
             {isSavingRelation ? "建立中…" : "建立關聯"}
           </button>
