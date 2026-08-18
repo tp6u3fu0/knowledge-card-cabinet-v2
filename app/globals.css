@@ -3333,79 +3333,44 @@ a:focus-visible {
 
 /* ── A card with a thickness ───────────────────────────────────────────────
    The two faces sit half a card-thickness in front of and behind the centre,
-   and four quads stand between them. Without the quads the card is two sheets
-   at the same depth: at 90 degrees it disappears, which is exactly the angle
-   someone turns it to in order to see how thick it is. */
+   and the stock between them is drawn as a stack of copies of the card's own
+   outline. Without them the card is two sheets at the same depth: at 90
+   degrees it disappears, which is exactly the angle someone turns it to in
+   order to see how thick it is. */
 
 .card-flip__inner {
   --card-thickness: 5px;
-  /* Matches the faces' border-radius: the sides stop short of the corners so a
-     square edge does not poke out past a rounded one. */
-  --card-corner: 18px;
+  /* Every layer of the edge is this shape, so it has to be the faces' radius.
+     Change one and change the other, or the edge will not sit under the face. */
+  --card-radius: 18px;
 }
 
 .card-flip__face {
   backface-visibility: hidden;
-  border-radius: 18px;
+  border-radius: var(--card-radius);
   display: block;
   inset: 0;
   position: absolute;
   transform: translateZ(calc(var(--card-thickness) / 2));
 }
 
-.card-flip__edge {
-  /* Cut card stock, shaded across the thickness rather than along the card:
-     a rim where the printed face wraps, a lit band just inside it, and the far
-     rim in shadow. Shaded gently — over 5px a hard dark-to-light ramp reads as
-     a painted stripe, not as an edge catching the light. */
-  background: linear-gradient(
-    var(--edge-axis, to right),
-    color-mix(in srgb, var(--paper) 68%, #2b2731) 0%,
-    color-mix(in srgb, var(--paper) 92%, #2b2731) 30%,
-    color-mix(in srgb, var(--paper) 82%, #2b2731) 66%,
-    color-mix(in srgb, var(--paper) 62%, #2b2731) 100%
-  );
+.card-flip__slice {
+  /* One layer of the card's own silhouette, repeated across the thickness.
+     Straight quads standing on the four sides were the obvious way to do this
+     and the wrong shape: a rounded card has no straight sides to stand them
+     on, so they read as planks growing out of the card and left the corners
+     open. A stack of silhouettes follows the outline the whole way round and
+     meets itself at the corners.
+
+     The tone is set per slice from the back rim to the front, so the edge is
+     shaded like cut stock rather than painted one flat colour. */
+  background: color-mix(in srgb, var(--paper) var(--slice-tone, 80%), #2b2731);
+  border-radius: var(--card-radius);
   display: block;
+  inset: 0;
+  pointer-events: none;
   position: absolute;
-}
-
-.card-flip__edge--right {
-  height: calc(100% - var(--card-corner) * 2);
-  left: 100%;
-  top: var(--card-corner);
-  transform: translateZ(calc(var(--card-thickness) / 2)) rotateY(90deg);
-  transform-origin: left center;
-  width: var(--card-thickness);
-}
-
-.card-flip__edge--left {
-  --edge-axis: to left;
-  height: calc(100% - var(--card-corner) * 2);
-  right: 100%;
-  top: var(--card-corner);
-  transform: translateZ(calc(var(--card-thickness) / 2)) rotateY(-90deg);
-  transform-origin: right center;
-  width: var(--card-thickness);
-}
-
-.card-flip__edge--top {
-  --edge-axis: to bottom;
-  bottom: 100%;
-  height: var(--card-thickness);
-  left: var(--card-corner);
-  transform: translateZ(calc(var(--card-thickness) / 2)) rotateX(-90deg);
-  transform-origin: center bottom;
-  width: calc(100% - var(--card-corner) * 2);
-}
-
-.card-flip__edge--bottom {
-  --edge-axis: to top;
-  height: var(--card-thickness);
-  left: var(--card-corner);
-  top: 100%;
-  transform: translateZ(calc(var(--card-thickness) / 2)) rotateX(90deg);
-  transform-origin: center top;
-  width: calc(100% - var(--card-corner) * 2);
+  transform: translateZ(calc(var(--slice-depth, 0) * var(--card-thickness)));
 }
 
 /* Specular highlight that tracks the cursor while the card leans. */

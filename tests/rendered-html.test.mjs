@@ -410,34 +410,45 @@ test("the API form says whether there is anything to save", async () => {
   assert.ok(actions, "the save bar no longer follows the form");
 });
 
-test("the flip card is a slab, not two sheets at the same depth", async () => {
+test("the flip card has an edge that follows its outline", async () => {
   // Turned past about 80 degrees, a card made of two faces at z=0 vanishes into
   // a hairline — and that is exactly the angle someone turns a card to when
-  // they want to see how thick it is. The four sides are real quads standing
-  // between the faces. (A rule body holds no closing brace, so [^}] is enough
-  // to capture one.)
+  // they want to see how thick it is. The edge used to be four quads standing
+  // on the sides, which is the wrong shape for a rounded card: they cut the
+  // corners and read as planks growing out of it. Now the card's own outline is
+  // repeated across the thickness. (A rule body holds no closing brace, so
+  // [^}] is enough to capture one.)
   const cardFace = await readFile(new URL("../app/card-face.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  const edges = cardFace.match(/card-flip__edge card-flip__edge--(right|left|top|bottom)/gu) ?? [];
-  assert.equal(edges.length, 4, `the card has ${edges.length} sides instead of four`);
+  assert.doesNotMatch(cardFace, /card-flip__edge/u, "the flat side quads are back");
+  assert.doesNotMatch(css, /card-flip__edge/u, "the flat side quads are back in the stylesheet");
 
-  // Both faces must sit half a thickness off centre, or the sides stick out.
+  // Both faces must sit half a thickness off centre, or the edge sticks out.
   const front = css.match(/\.card-flip__face \{([^}]*)\}/u);
   const back = css.match(/\.card-flip__face--back \{([^}]*)\}/u);
   assert.ok(front && back, "globals.css no longer positions the card's faces");
   assert.match(front[1], /translateZ\(calc\(var\(--card-thickness\) \/ 2\)\)/u);
   assert.match(back[1], /rotateY\(180deg\) translateZ\(calc\(var\(--card-thickness\) \/ 2\)\)/u);
 
-  // Each side stands perpendicular to the faces. Lying flat would only add four
-  // more sheets at the same depth, which is the problem rather than the fix.
-  const right = css.match(/\.card-flip__edge--right \{([^}]*)\}/u);
-  const left = css.match(/\.card-flip__edge--left \{([^}]*)\}/u);
-  const top = css.match(/\.card-flip__edge--top \{([^}]*)\}/u);
-  const bottom = css.match(/\.card-flip__edge--bottom \{([^}]*)\}/u);
-  assert.ok(right && left && top && bottom, "globals.css is missing one of the card's sides");
-  assert.match(right[1], /rotateY\(90deg\)/u, "the right side lies flat");
-  assert.match(left[1], /rotateY\(-90deg\)/u, "the left side lies flat");
-  assert.match(top[1], /rotateX\(-90deg\)/u, "the top side lies flat");
-  assert.match(bottom[1], /rotateX\(90deg\)/u, "the bottom side lies flat");
+  // The slices carry the same radius as the faces, or the edge shows square
+  // corners under a rounded card.
+  const slice = css.match(/\.card-flip__slice \{([^}]*)\}/u);
+  assert.ok(slice, "globals.css no longer draws the card's edge");
+  assert.match(slice[1], /border-radius: var\(--card-radius\)/u, "the edge does not follow the outline");
+  assert.match(slice[1], /translateZ\(calc\(var\(--slice-depth[^)]*\) \* var\(--card-thickness\)\)\)/u);
+  assert.match(front[1], /border-radius: var\(--card-radius\)/u, "the face and its edge use different radii");
+
+  // Enough layers to close the gaps: at 5px thickness, ten would sit half a
+  // pixel apart and the edge would read as a stack of cards.
+  const count = cardFace.match(/const EDGE_SLICE_COUNT = (\d+);/u);
+  assert.ok(count, "the edge no longer says how many layers it has");
+  assert.ok(Number(count[1]) >= 12, `the edge is only ${count[1]} layers thick`);
+
+  // Array.from's map callback takes two arguments — reading a third one for the
+  // length gives undefined and the viewer throws on render.
+  const table = cardFace.match(/const EDGE_SLICES = Array\.from\(([\s\S]*?)\n\}\);/u);
+  assert.ok(table, "the edge no longer builds its layers");
+  assert.doesNotMatch(table[0], /\(_, index, [A-Za-z]+\)/u, "Array.from's callback has no third argument");
 });
+

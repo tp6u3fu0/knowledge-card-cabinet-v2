@@ -160,7 +160,8 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `.card-deck__item` 加上任何 transform／filter／container-type | `card-drag.ts` 的 `holderOf()` 必須把它攤平 | 被拿起的卡片以卡槽為定位基準，會跟游標差一個展開位移 |
 | `CardDeck` 的展開版面 | 位置只能用量出來的 px（`translate()` 裡的 `%` 是以被移動的卡片為基準）；展開是換行的牆，不是一長排 | 間距算出 0、卡堆永遠展不開（不會報錯）；或八張卡擠成一排，每張只剩右緣一條 |
 | `SettingCard` 的拖曳 | 點擊路徑必須保留（鍵盤與螢幕閱讀器只有這條） | 拖不動的人完全無法換模型 |
-| `.card-flip__face` 的 `border-radius` | `.card-flip__inner` 的 `--card-corner` 要跟著改 | 方形的側面會凸出圓角之外 |
+| 翻卡的圓角 | 面與邊都吃 `--card-radius`，只改一邊會對不上 | 圓角卡片底下露出方角的邊 |
+| 翻卡的厚度畫法 | 是「同一個輪廓沿 z 疊很多層」，不是站在四邊的平板 | 平板在圓角處切過去，看起來像板子從卡片長出來，四個角還是開的 |
 | 翻卡的兩個面 | 必須各自 `translateZ(厚度/2)`，四個側面才對得起來 | 卡片轉到 90 度變成一條髮絲——正好是有人想看它多厚的那個角度 |
 | 在 `.collection-card` 之外用 `SeededCoverArt` | 該元素要自己定義 `--cover-color` / `--cover-soft-color` / `--cover-background` | 封面圖整片透明（術語卡的縮圖就這樣消失過一次） |
 | `glossary.ts` 的 `glyph` / `accent` | 必須是 `cover-art.tsx` 畫得出來的 glyph、`visualAccents` 裡有的顏色 | `tests/cover-art.test.mjs` 會失敗（刻意的）；否則會靜靜退回同一個圖案 |

@@ -224,6 +224,26 @@ const SETTLE_MS = 480;
 const HOVER_MS = 160;
 
 /**
+ * The layers that make up the card's edge, from the back face to the front.
+ *
+ * Enough of them that the gaps close: over a 5px thickness these land about a
+ * third of a pixel apart, so from any angle they read as one solid edge rather
+ * than as a stack. They stop just short of both faces (hence the half-step) so
+ * no slice sits at exactly the same depth as a face and flickers against it.
+ *
+ * The tone runs dark at the back to near-paper at the front, which is how a
+ * cut edge catches the light.
+ */
+const EDGE_SLICE_COUNT = 14;
+const EDGE_SLICES = Array.from({ length: EDGE_SLICE_COUNT }, (_, index) => {
+  const position = (index + 0.5) / EDGE_SLICE_COUNT;
+  return {
+    depth: (position - 0.5).toFixed(4),
+    tone: `${Math.round(56 + 40 * position ** 0.7)}%`,
+  };
+});
+
+/**
  * The card tumbles freely under the pointer in both axes and settles onto the
  * face it was left showing. With no drag in progress it leans toward the cursor.
  */
@@ -370,16 +390,23 @@ export function FlipCard({
         onClickCapture={swallowDragClick}
       >
         <div className="card-flip__inner" style={style}>
-          {/* The four sides of the card stock. Two faces alone have no
-              thickness at all: turn the card past about 80 degrees and it
-              vanishes into a hairline, which is the one angle where a reader
-              looks specifically to see how thick the thing is. These are real
-              quads standing perpendicular to the faces, so the card is a slab
-              from every angle rather than a picture of one. */}
-          <span className="card-flip__edge card-flip__edge--right" aria-hidden="true" />
-          <span className="card-flip__edge card-flip__edge--left" aria-hidden="true" />
-          <span className="card-flip__edge card-flip__edge--top" aria-hidden="true" />
-          <span className="card-flip__edge card-flip__edge--bottom" aria-hidden="true" />
+          {/* The card stock, extruded. Two faces alone have no thickness at
+              all — turned past about 80 degrees the card vanishes into a
+              hairline, which is the one angle a reader turns it to in order to
+              see how thick it is. Four perpendicular quads fix that but are
+              the wrong shape: they are straight planks, so they cut across the
+              rounded corners and stick out past the outline. Instead the
+              silhouette itself is repeated across the thickness. Every slice
+              is the card's own rounded rectangle, so the edge follows the
+              outline the whole way round and closes at the corners. */}
+          {EDGE_SLICES.map((slice) => (
+            <span
+              key={slice.depth}
+              aria-hidden="true"
+              className="card-flip__slice"
+              style={{ "--slice-depth": slice.depth, "--slice-tone": slice.tone } as CSSProperties}
+            />
+          ))}
           <div className="card-flip__face" aria-hidden={flipped}>
             {front}
           </div>
