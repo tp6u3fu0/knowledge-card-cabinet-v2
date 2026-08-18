@@ -6,6 +6,7 @@ import { CardSelect } from "./card-select";
 import { RelationView } from "./relation-view";
 import {
   CreateCardForm,
+  BackgroundTaskPanel,
   ModelSettingsPanel,
   TrashPanel,
 } from "./panels";
@@ -743,7 +744,9 @@ export default function CollectionPage() {
 
     const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !modelActionId && !isSettingsSaving && !isDatabaseExporting && !isDatabaseImporting && !isDatabaseResetting && !isBackgroundTaskRunning) {
+      // A background task deliberately does not hold this shut: it keeps
+      // running, and the docked panel follows it outside the settings.
+      if (event.key === "Escape" && !modelActionId && !isSettingsSaving && !isDatabaseExporting && !isDatabaseImporting && !isDatabaseResetting) {
         setIsModelsOpen(false);
         setModelError("");
       }
@@ -855,21 +858,54 @@ export default function CollectionPage() {
     }
   };
 
-  const waitForBackgroundTask = async (taskId: string): Promise<BackgroundTask> => {
-    for (let attempt = 0; attempt < 300; attempt += 1) {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
-      const task = (await response.json()) as BackgroundTask | { detail?: string };
-      if (!response.ok || !("task_id" in task)) {
-        throw new Error("detail" in task ? task.detail ?? "背景任務狀態讀取失敗。" : "背景任務狀態讀取失敗。");
+  /**
+   * Follows a background task without holding anyone up.
+   *
+   * Downloading a 570 MB model and rebuilding every card's vector are minutes
+   * of work. They used to be awaited inside the click handler, which left the
+   * settings form disabled and the panel refusing to close until the work
+   * finished — the app was unusable for the duration of a job that has nothing
+   * to do with the rest of it. Now the handler fires the request, this picks
+   * up the task id, and the progress panel is the only thing that waits.
+   */
+  const watchedTasksRef = useRef(new Map<string, Promise<BackgroundTask | null>>());
+  const watchBackgroundTask = (
+    taskId: string,
+    { onDone, silent = false }: { onDone?: (task: BackgroundTask) => void; silent?: boolean } = {},
+  ): Promise<BackgroundTask | null> => {
+    const running = watchedTasksRef.current.get(taskId);
+    if (running) return running;
+    const fail = (message: string) => {
+      if (!silent) setModelError(message);
+      return null;
+    };
+    const watch = (async (): Promise<BackgroundTask | null> => {
+      try {
+        // Half an hour: a large model on a slow connection, plus the reindex.
+        for (let attempt = 0; attempt < 1800; attempt += 1) {
+          const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+          const task = (await response.json()) as BackgroundTask | { detail?: string };
+          if (!response.ok || !("task_id" in task)) {
+            throw new Error("detail" in task ? task.detail ?? "背景任務狀態讀取失敗。" : "背景任務狀態讀取失敗。");
+          }
+          setBackgroundTask(task);
+          if (task.status === "succeeded") {
+            onDone?.(task);
+            return task;
+          }
+          if (task.status === "failed" || task.status === "cancelled") {
+            return fail(task.error || task.message || "背景任務未完成。");
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        }
+        return fail("背景任務執行時間較長，請稍後重新查看狀態。");
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : "背景任務狀態讀取失敗。");
       }
-      setBackgroundTask(task);
-      if (task.status === "succeeded") return task;
-      if (task.status === "failed" || task.status === "cancelled") {
-        throw new Error(task.error || task.message || "背景任務未完成。");
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-    }
-    throw new Error("背景任務執行時間較長，請稍後重新查看狀態。");
+    })();
+    watchedTasksRef.current.set(taskId, watch);
+    void watch.finally(() => watchedTasksRef.current.delete(taskId));
+    return watch;
   };
 
   const loadBackgroundTasks = async () => {
@@ -880,7 +916,13 @@ export default function CollectionPage() {
       const latest = result.find((task) => task.status === "queued" || task.status === "running") ?? null;
       setBackgroundTask(latest);
       if (latest?.status === "queued" || latest?.status === "running") {
-        void waitForBackgroundTask(latest.task_id).catch(() => undefined);
+        // Reopening the app mid-job: pick the task back up where it was.
+        void watchBackgroundTask(latest.task_id, {
+          onDone: () => {
+            setCardsRefreshKey((current) => current + 1);
+            void loadModels(false);
+          },
+        });
       }
     } catch {
       // Model settings remain usable when task history is temporarily unavailable.
@@ -1010,10 +1052,12 @@ export default function CollectionPage() {
   };
 
   const closeModels = () => {
-    if (modelActionId || isSettingsSaving || isDatabaseExporting || isDatabaseImporting || isDatabaseResetting || isBackgroundTaskRunning) return;
+    if (modelActionId || isSettingsSaving || isDatabaseExporting || isDatabaseImporting || isDatabaseResetting) return;
     setIsModelsOpen(false);
     setModelError("");
-    setBackgroundTask(null);
+    // A finished task can go; a running one keeps its panel, docked in the
+    // corner of the collection, because it is still doing something.
+    if (!isBackgroundTaskRunning) setBackgroundTask(null);
   };
 
   const updateSettingsDraft = (kind: ModelKind, field: keyof ProviderSettingsDraft, value: string | boolean) => {
@@ -1046,11 +1090,15 @@ export default function CollectionPage() {
       const result = (await response.json()) as BackgroundTask | { detail?: string };
       if (!response.ok || !("task_id" in result)) throw new Error("detail" in result ? result.detail ?? "背景任務重試失敗。" : "背景任務重試失敗。");
       setBackgroundTask(result);
-      const completed = await waitForBackgroundTask(result.task_id);
-      setCreateSuccess(`${completed.label || "背景任務"}已重試完成。`);
-      setModelError("");
-      void loadModels(false);
-      if (completed.operation === "model_select") setCardsRefreshKey((current) => current + 1);
+      setCreateSuccess(`已重新開始「${result.label || "背景任務"}」。`);
+      void watchBackgroundTask(result.task_id, {
+        onDone: (completed) => {
+          setCreateSuccess(`${completed.label || "背景任務"}已重試完成。`);
+          setModelError("");
+          void loadModels(false);
+          if (completed.operation === "model_select") setCardsRefreshKey((current) => current + 1);
+        },
+      });
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "背景任務重試失敗，請稍後再試。");
     }
@@ -1185,20 +1233,23 @@ export default function CollectionPage() {
       if (!response.ok || !result.settings) throw new Error(result.detail ?? "設定套用失敗。");
       setRuntimeSettings(result.settings);
       setSettingsDraft(createSettingsDraft(result.settings));
-      let completedResult = result;
-      if (result.task_id) {
-        const task = await waitForBackgroundTask(result.task_id);
-        completedResult = (task.result ?? result) as typeof result;
-      }
-      setCreateSuccess(
-        completedResult.reindexed_cards
-          ? `設定已套用，並重新建立 ${completedResult.reindexed_cards} 張卡片的語意關聯。`
-          : "設定已套用。",
-      );
       setModelError("");
-      if (settingsDraft.embedding.source === "api" || completedResult.reindexed_cards) {
-        setCardsRefreshKey((current) => current + 1);
+      if (result.task_id) {
+        setCreateSuccess("設定已送出，正在背景重建語意關聯。可以關掉設定繼續使用卡片。");
+        void watchBackgroundTask(result.task_id, { onDone: (task) => {
+          const done = (task.result ?? {}) as { reindexed_cards?: number };
+          setCreateSuccess(
+            done.reindexed_cards
+              ? `設定已套用，並重新建立 ${done.reindexed_cards} 張卡片的語意關聯。`
+              : "設定已套用。",
+          );
+          setCardsRefreshKey((current) => current + 1);
+          void loadRuntimeSettings();
+        } });
+        return;
       }
+      setCreateSuccess("設定已套用。");
+      if (settingsDraft.embedding.source === "api") setCardsRefreshKey((current) => current + 1);
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "設定套用失敗，請稍後再試。");
     } finally {
@@ -1370,26 +1421,19 @@ export default function CollectionPage() {
       const result = (await response.json()) as { detail?: string; task_id?: string };
       if (!response.ok) throw new Error(result.detail ?? "模型下載無法開始。");
 
-      if (result.task_id) {
-        await waitForBackgroundTask(result.task_id);
-        const latest = await loadModels(false);
-        const model = latest?.models.find((candidate) => candidate.id === modelId);
-        if (model?.error) throw new Error(model.error);
-        setCreateSuccess(`已下載「${model?.label ?? modelId}」，現在可以啟用它。`);
-        return;
-      }
-
-      for (let attempt = 0; attempt < 180; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const latest = await loadModels(false);
-        const model = latest?.models.find((candidate) => candidate.id === modelId);
-        if (model?.status === "ready") {
-          setCreateSuccess(`已下載「${model.label}」，現在可以啟用它。`);
-          return;
-        }
-        if (model?.error) throw new Error(model.error);
-      }
-      throw new Error("模型下載時間較長，請稍後重新開啟模型設定查看狀態。");
+      if (!result.task_id) throw new Error("模型下載無法開始。");
+      setCreateSuccess("下載已開始，進度在下方；可以關掉設定繼續使用卡片。");
+      void watchBackgroundTask(result.task_id, { onDone: () => {
+        void (async () => {
+          const latest = await loadModels(false);
+          const model = latest?.models.find((candidate) => candidate.id === modelId);
+          if (model?.error) {
+            setModelError(model.error);
+            return;
+          }
+          setCreateSuccess(`已下載「${model?.label ?? modelId}」，現在可以啟用它。`);
+        })();
+      } });
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "模型下載失敗，請稍後再試。");
     } finally {
@@ -1413,11 +1457,14 @@ export default function CollectionPage() {
       if (!response.ok) throw new Error(result.detail ?? "模型啟用失敗。");
       if (result.models) setModelCatalog(result.models);
       if (result.task_id) {
-        const task = await waitForBackgroundTask(result.task_id);
-        const taskResult = task.result as { selection?: { model?: ModelOption }; models?: ModelCatalog; reindexed_cards?: number } | null | undefined;
-        if (taskResult?.models) setModelCatalog(taskResult.models);
-        setCreateSuccess(`已啟用「${taskResult?.selection?.model?.label ?? result.selection?.model?.label ?? "本機模型"}」。已完成 ${taskResult?.reindexed_cards ?? 0} 張卡片的語意索引更新。`);
         setModelError("");
+        setCreateSuccess(`「${result.selection?.model?.label ?? "本機模型"}」已啟用，正在背景重建語意索引。可以關掉設定繼續使用卡片。`);
+        void watchBackgroundTask(result.task_id, { onDone: (task) => {
+          const taskResult = task.result as { selection?: { model?: ModelOption }; models?: ModelCatalog; reindexed_cards?: number } | null | undefined;
+          if (taskResult?.models) setModelCatalog(taskResult.models);
+          setCreateSuccess(`已啟用「${taskResult?.selection?.model?.label ?? result.selection?.model?.label ?? "本機模型"}」。已完成 ${taskResult?.reindexed_cards ?? 0} 張卡片的語意索引更新。`);
+          setCardsRefreshKey((current) => current + 1);
+        } });
       } else {
         setCreateSuccess(`已啟用「${result.selection?.model?.label ?? "本機模型"}」。${kind === "embedding" ? "卡片關聯正在使用新的語意索引。" : ""}`);
       }
@@ -1465,7 +1512,9 @@ export default function CollectionPage() {
       const result = (await response.json().catch(() => ({}))) as BatchOrganizeResult;
       if (!response.ok) throw new Error(result.detail ?? "批次整理失敗。");
       setBatchResult(result);
-      if (result.task_id) await waitForBackgroundTask(result.task_id);
+      if (result.task_id && !(await watchBackgroundTask(result.task_id, { silent: true }))) {
+        throw new Error("批次整理未完成。");
+      }
       if (apply) {
         setCardsRefreshKey((current) => current + 1);
         setCreateSuccess(`已套用 ${result.changed_cards ?? 0} 張卡片的整理建議。`);
@@ -1490,7 +1539,9 @@ export default function CollectionPage() {
       });
       const result = (await response.json().catch(() => ({}))) as { detail?: string; name?: string; source?: string; task_id?: string };
       if (!response.ok || !result.name) throw new Error(result.detail ?? "重新命名分類失敗。");
-      if (result.task_id) await waitForBackgroundTask(result.task_id);
+      if (result.task_id && !(await watchBackgroundTask(result.task_id, { silent: true }))) {
+        throw new Error("重新命名分類未完成。");
+      }
       setCategoryRecords((current) => current.map((item) => item.name === selectedCategoryName ? { ...item, name: result.name! } : item));
       setSelectedCategoryName("");
       setRenamedCategoryName("");
@@ -1516,7 +1567,9 @@ export default function CollectionPage() {
       });
       const result = (await response.json().catch(() => ({}))) as { detail?: string; name?: string; affected_cards?: number; task_id?: string };
       if (!response.ok || !result.name) throw new Error(result.detail ?? "合併分類失敗。");
-      if (result.task_id) await waitForBackgroundTask(result.task_id);
+      if (result.task_id && !(await watchBackgroundTask(result.task_id, { silent: true }))) {
+        throw new Error("合併分類未完成。");
+      }
       setSelectedCategoryName("");
       setMergeTargetCategory("");
       setCardsRefreshKey((current) => current + 1);
@@ -1990,6 +2043,24 @@ export default function CollectionPage() {
               onEnableLan={() => void setLanSharingEnabled(true)}
               onDisableLan={() => void setLanSharingEnabled(false)}
             />
+          </div>
+        ) : null}
+
+        {/* The job outlives the settings panel, so its progress has to as well.
+            Docked in the corner of the collection with the same controls: a
+            download or a reindex is something you start and then get on with
+            reading, not something you sit and watch. */}
+        {!isModelsOpen && backgroundTask ? (
+          <div className="background-task-dock">
+            <BackgroundTaskPanel
+              task={backgroundTask}
+              onCancel={() => void handleCancelTask()}
+              onRetry={() => void handleRetryTask()}
+              onDismiss={() => setBackgroundTask(null)}
+            />
+            <button className="background-task-dock__open" type="button" onClick={openModels}>
+              開啟設定
+            </button>
           </div>
         ) : null}
 

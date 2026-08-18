@@ -348,6 +348,18 @@ test("a carried card is measured before its deck slot is flattened", async () =>
   const item = css.match(/\.card-deck__item \{([\s\S]*?)\n\}/);
   assert.ok(item, "globals.css no longer positions the cards in a deck");
   assert.match(item[1], /transform:/);
+
+  // Putting the slot back is the other half. Its transform is animated, so
+  // handing it to CSS while the transition is live sends the slot — and the
+  // card that has only just landed in it — travelling from the rail origin all
+  // over again. Restore, flush, then re-enable.
+  const clear = drag.match(/const clear = \(\) => \{([\s\S]*?)\n {4}\};/u);
+  assert.ok(clear, "card-drag no longer cleans up after a carry");
+  const restored = clear[1].indexOf('holder.style.removeProperty("transform")');
+  const flushed = clear[1].indexOf("void holder.offsetWidth");
+  const reenabled = clear[1].indexOf('holder.style.removeProperty("transition")');
+  assert.ok(restored >= 0 && flushed > restored, "the slot's position is restored without flushing the style");
+  assert.ok(reenabled > flushed, "the slot animates back from the rail origin, dragging the card with it");
 });
 
 test("an open deck lays its cards out at full width, measured", async () => {
@@ -523,4 +535,56 @@ test("the dropdown is the cabinet's own, not the operating system's", async () =
   for (const frames of ["card-select-open", "card-select-close", "card-select-deal"]) {
     assert.ok(css.includes(`@keyframes ${frames} {`), `${frames} is missing`);
   }
+});
+
+test("long jobs run in the background instead of holding the app hostage", async () => {
+  // Downloading a model and rebuilding every card's vector take minutes. They
+  // used to be awaited inside the click handler, which left the settings form
+  // disabled and the panel refusing to close for the duration — the whole app
+  // stopped for a job that has nothing to do with reading cards.
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(page, /waitForBackgroundTask/u, "the blocking wait is back");
+
+  // Starting a job must not be awaited to completion. The three long ones hand
+  // the task id to the watcher and return.
+  for (const handler of ["handleSaveSettings", "handleDownloadModel", "handleSelectModel"]) {
+    const body = page.slice(page.indexOf(`const ${handler} = async`), page.indexOf(`const ${handler} = async`) + 2600);
+    assert.ok(body.length > 100, `${handler} is gone`);
+    assert.match(body, /void watchBackgroundTask\(/u, `${handler} does not hand off to the watcher`);
+    assert.doesNotMatch(body, /await watchBackgroundTask\(/u, `${handler} still waits for the job to finish`);
+  }
+
+  // Escape and the close button must not consult the running task any more.
+  const close = page.match(/const closeModels = \(\) => \{([\s\S]*?)\n {2}\};/u);
+  assert.ok(close, "closeModels is gone");
+  assert.doesNotMatch(close[1].split("setIsModelsOpen")[0], /isBackgroundTaskRunning/u, "a running job still locks the settings shut");
+
+  // And the progress has to survive that close, or the job becomes invisible.
+  assert.match(page, /!isModelsOpen && backgroundTask \? \(/u, "a running job disappears when the settings close");
+  assert.match(page, /className="background-task-dock"/u);
+  const dock = css.match(/\.background-task-dock \{([^}]*)\}/u);
+  assert.ok(dock, "the docked progress panel has no styling");
+  assert.match(dock[1], /position: fixed/u);
+});
+
+test("the dimension guide states the choice, not an essay per option", async () => {
+  // Three dimensions each arguing their case in full is three screens of prose
+  // between the reader and the picker they came for. The two figures people
+  // actually compare stay on the face; the trade-offs open one at a time.
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  const guide = panels.slice(panels.indexOf("function DimensionGuide"), panels.indexOf("export function ModelSettingsPanel"));
+  assert.ok(guide.length > 200, "the dimension guide is gone");
+  assert.match(guide, /const \[open, setOpen\] = useState<number \| null>\(null\)/u, "every dimension is open at once again");
+  assert.match(guide, /aria-expanded=\{isOpen\}/u);
+  assert.match(guide, /isOpen \? \(/u, "the trade-offs are not behind the disclosure");
+  // The bullets are the long part: they must only exist while one is open.
+  const bulletsAt = guide.indexOf("dimension-guide__list");
+  assert.ok(bulletsAt > guide.indexOf("isOpen ? ("), "the bullet lists are still on the face");
+
+  assert.match(css, /\.dimension-guide__face \{/u, "the guide has no face to click");
+  assert.match(css, /@keyframes dimension-guide-open \{/u);
 });

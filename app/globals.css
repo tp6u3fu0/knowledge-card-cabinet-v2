@@ -2269,7 +2269,61 @@ a:focus-visible {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 14px;
+  overflow: hidden;
+}
+
+/* The face is the whole comparison: name, one line, and the two figures. The
+   argument for and against opens underneath, one card at a time. */
+.dimension-guide__face {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.dimension-guide__face:hover {
+  background: color-mix(in srgb, var(--paper-deep) 60%, transparent);
+}
+
+.dimension-guide__face:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
+  outline-offset: -2px;
+}
+
+.dimension-guide__numbers {
+  color: var(--muted);
+  display: flex;
+  font-size: 0.7rem;
+  gap: 12px;
+}
+
+.dimension-guide__toggle {
+  color: var(--accent-sky);
+  font-size: 0.68rem;
+  margin-top: 2px;
+}
+
+.dimension-guide__body {
+  border-top: 1px solid var(--line);
+  padding: 11px 14px 12px;
+  animation: dimension-guide-open 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes dimension-guide-open {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dimension-guide__body {
+    animation: none;
+  }
 }
 
 .dimension-guide__card.is-active {
@@ -2294,23 +2348,6 @@ a:focus-visible {
 
 .dimension-guide__headline {
   font-size: 0.82rem;
-  margin: 4px 0 10px;
-}
-
-.dimension-guide__card dl {
-  display: flex;
-  gap: 18px;
-  margin: 0 0 10px;
-}
-
-.dimension-guide__card dt {
-  color: var(--muted);
-  font-size: 0.68rem;
-}
-
-.dimension-guide__card dd {
-  font-size: 0.76rem;
-  margin: 0;
 }
 
 .dimension-guide__list {
@@ -5704,4 +5741,67 @@ a:focus-visible {
 .relation-composer .card-select__label,
 .category-manager__forms .card-select__label {
   font-size: 10px;
+}
+
+/* ── A background job, docked ──────────────────────────────────────────────
+   Downloading a model or rebuilding every vector takes minutes and has nothing
+   to do with the rest of the app, so it no longer holds the settings panel
+   open. When that panel closes the progress comes with it, into the corner of
+   the collection, keeping its cancel and retry. */
+
+.background-task-dock {
+  animation: background-task-dock-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  bottom: 18px;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  position: fixed;
+  right: 18px;
+  width: min(430px, calc(100vw - 36px));
+  z-index: 60;
+}
+
+.background-task-dock .background-task-panel {
+  background: var(--card-front);
+  box-shadow: 0 18px 34px rgba(33, 31, 39, 0.16);
+  width: 100%;
+}
+
+/* Inside the settings the buttons take their shape from the panel around them.
+   Out here there is no panel, so the dock states it. */
+.background-task-dock .background-task-panel__actions button {
+  border: 0;
+  border-radius: 999px;
+  color: var(--paper);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 6px 13px;
+}
+
+.background-task-dock__open {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 5px 12px;
+}
+
+.background-task-dock__open:hover {
+  border-color: color-mix(in srgb, var(--ink) 26%, var(--line));
+  color: var(--ink);
+}
+
+@keyframes background-task-dock-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-task-dock {
+    animation: none;
+  }
 }

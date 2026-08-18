@@ -132,8 +132,18 @@ export function useCardDrag({
       for (const property of ["position", "left", "top", "width", "height", "margin", "transform", "transition"]) {
         node.style.removeProperty(property);
       }
-      holder?.style.removeProperty("transform");
-      holder?.style.removeProperty("transition");
+      if (holder) {
+        // The deck slot animates its transform, and the one it is going back to
+        // is the fanned-out position it was flattened from. Left to itself it
+        // would take 320ms to travel there from the rail origin, carrying the
+        // card that has only just landed — the card arrives, then slides across
+        // the screen a second time. Restore the position with the transition
+        // still suppressed, force the style to land, and only then hand the
+        // slot back to CSS.
+        holder.style.removeProperty("transform");
+        void holder.offsetWidth;
+        holder.style.removeProperty("transition");
+      }
       setGap(null);
     };
     if (!animate) {

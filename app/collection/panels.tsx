@@ -868,35 +868,62 @@ function SimpleModelPicker({
   );
 }
 
-/** The 384-versus-1024 decision, stated with both sides. */
+/**
+ * The 384-versus-1024 decision.
+ *
+ * Every dimension used to state its case in full — a headline, two figures and
+ * five bullets each — which is three screens of prose sitting between someone
+ * and the picker they came here for. The comparison people actually make is the
+ * two numbers: how big the download is, and how much each card costs. Those
+ * stay on the face. The trade-offs are one click away, one at a time.
+ */
 function DimensionGuide({ entries, active }: { entries: DimensionGuideEntry[]; active?: number }) {
+  const [open, setOpen] = useState<number | null>(null);
   if (entries.length === 0) return null;
   return (
     <div className="dimension-guide">
       <span className="model-settings-kicker">384 vs 1024 / 該選哪一個</span>
       <p className="dimension-guide__lede">
-        維度不是越大越好，是兩種取捨。維度必須全庫一致，切換會重建所有卡片的向量與關聯。
+        維度不是越大越好，是取捨。全庫必須一致，切換會重建所有卡片的向量與關聯。
       </p>
       <div className="dimension-guide__grid">
-        {entries.map((entry) => (
-          <article className={`dimension-guide__card${active === entry.dimensions ? " is-active" : ""}`} key={entry.dimensions}>
-            <div className="dimension-guide__topline">
-              <strong>{entry.label}</strong>
-              {active === entry.dimensions ? <span className="dimension-guide__badge">目前使用</span> : null}
-            </div>
-            <p className="dimension-guide__headline">{entry.headline}</p>
-            <dl>
-              <div><dt>下載</dt><dd>{entry.download}</dd></div>
-              <div><dt>每張卡片</dt><dd>{entry.per_card}</dd></div>
-            </dl>
-            <ul className="dimension-guide__list dimension-guide__list--good">
-              {entry.strengths.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-            <ul className="dimension-guide__list dimension-guide__list--cost">
-              {entry.limits.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-          </article>
-        ))}
+        {entries.map((entry) => {
+          const isOpen = open === entry.dimensions;
+          return (
+            <article
+              className={`dimension-guide__card${active === entry.dimensions ? " is-active" : ""}${isOpen ? " is-open" : ""}`}
+              key={entry.dimensions}
+            >
+              <button
+                className="dimension-guide__face"
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() => setOpen(isOpen ? null : entry.dimensions)}
+              >
+                <span className="dimension-guide__topline">
+                  <strong>{entry.label}</strong>
+                  {active === entry.dimensions ? <span className="dimension-guide__badge">目前使用</span> : null}
+                </span>
+                <span className="dimension-guide__headline">{entry.headline}</span>
+                <span className="dimension-guide__numbers">
+                  <span>下載 {entry.download}</span>
+                  <span>{entry.per_card}</span>
+                </span>
+                <span className="dimension-guide__toggle">{isOpen ? "收起取捨" : "看取捨"}</span>
+              </button>
+              {isOpen ? (
+                <div className="dimension-guide__body">
+                  <ul className="dimension-guide__list dimension-guide__list--good">
+                    {entry.strengths.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                  <ul className="dimension-guide__list dimension-guide__list--cost">
+                    {entry.limits.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
     </div>
   );
