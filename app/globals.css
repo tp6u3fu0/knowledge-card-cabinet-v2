@@ -2902,13 +2902,12 @@ a:focus-visible {
 .collection-card {
   --tilt-x: 0deg;
   --tilt-y: 0deg;
-  /* The edge of the card stock. Three hairlines under the face, held just inside
-     the outline by a negative spread, so a card reads as a thing with a
-     thickness rather than a rectangle printed on the page. */
+  /* The edge of the card stock: two hairlines under the face, held just inside
+     the outline by a negative spread. Card stock, not a stack of cards — three
+     dark lines standing 5px proud read as a deck someone forgot to fan out. */
   --card-stack:
-    0 2px 0 -0.5px color-mix(in srgb, var(--paper) 44%, var(--line)),
-    0 4px 0 -1px color-mix(in srgb, var(--domain-color) 34%, var(--line)),
-    0 5.5px 0 -1.5px color-mix(in srgb, var(--paper) 28%, var(--line));
+    0 1.5px 0 -0.5px color-mix(in srgb, var(--paper) 62%, var(--line)),
+    0 3px 0 -1.25px color-mix(in srgb, var(--domain-color) 26%, var(--line));
   --cover-color: var(--domain-color);
   --cover-soft-color: var(--domain-soft);
   --cover-background: var(--card-front);
@@ -3339,7 +3338,7 @@ a:focus-visible {
    someone turns it to in order to see how thick it is. */
 
 .card-flip__inner {
-  --card-thickness: 15px;
+  --card-thickness: 5px;
   /* Matches the faces' border-radius: the sides stop short of the corners so a
      square edge does not poke out past a rounded one. */
   --card-corner: 18px;
@@ -3356,16 +3355,15 @@ a:focus-visible {
 
 .card-flip__edge {
   /* Cut card stock, shaded across the thickness rather than along the card:
-     a dark rim where the printed face wraps, a lit band just inside it, and
-     the far rim in shadow. The first attempt striped this the long way and
-     read as a barcode; it also sat so close to the page colour that a card
-     seen edge-on still looked like a sheet of paper. */
+     a rim where the printed face wraps, a lit band just inside it, and the far
+     rim in shadow. Shaded gently — over 5px a hard dark-to-light ramp reads as
+     a painted stripe, not as an edge catching the light. */
   background: linear-gradient(
     var(--edge-axis, to right),
-    color-mix(in srgb, var(--paper) 46%, #2b2731) 0%,
-    color-mix(in srgb, var(--paper) 88%, #2b2731) 18%,
-    color-mix(in srgb, var(--paper) 72%, #2b2731) 58%,
-    color-mix(in srgb, var(--paper) 40%, #2b2731) 100%
+    color-mix(in srgb, var(--paper) 68%, #2b2731) 0%,
+    color-mix(in srgb, var(--paper) 92%, #2b2731) 30%,
+    color-mix(in srgb, var(--paper) 82%, #2b2731) 66%,
+    color-mix(in srgb, var(--paper) 62%, #2b2731) 100%
   );
   display: block;
   position: absolute;
