@@ -152,6 +152,7 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `DIMENSION_GUIDE` 涵蓋範圍 | 任何新的 embedding 維度都要有對應條目 | `tests/model-catalogue.test.mjs` 會失敗（刻意的） |
 | `package.json` 版本 | 無（其他地方都用讀的） | — |
 | `electron-builder.yml` 的 extraResources | `main.cjs` 的路徑解析、`model-runtime.cjs` 的 `bundledModelsDir()` | 打包版找不到資源 |
+| 手動叫 `electron-builder`（例如只想建 `--dir`） | 一定要帶 `--config desktop/electron-builder.yml`；漏掉就沒有 extraResources、`productName`、圖示 | 打包成功、exit code 0，開起來卻停在「找不到前端 runtime」 |
 | README 提到的 npm script | `package.json` 必須真的有 | `tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
 | `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
