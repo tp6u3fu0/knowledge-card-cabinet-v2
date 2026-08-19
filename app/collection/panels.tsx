@@ -1296,6 +1296,9 @@ export function ModelSettingsPanel({
 
       {backgroundTask ? <BackgroundTaskPanel task={backgroundTask} onCancel={onCancelTask} onRetry={onRetryTask} onDismiss={onDismissTask} /> : null}
       {error ? <p className="create-card-error" role="alert">{error}</p> : null}
+      {/* Keyed on the tab so React replaces the subtree rather than patching it,
+          which is what lets the new tab arrive instead of appearing. */}
+      <div className="settings-tabpanel" key={settingsTab}>
       {settingsTab === "devices" ? (
         <DeviceManagementPanel
           devices={devices}
@@ -1432,6 +1435,7 @@ export function ModelSettingsPanel({
           )}
         </>
       ) : null}
+      </div>
     </section>
   );
 }

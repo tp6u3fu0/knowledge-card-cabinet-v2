@@ -557,9 +557,11 @@ test("long jobs run in the background instead of holding the app hostage", async
   }
 
   // Escape and the close button must not consult the running task any more.
-  const close = page.match(/const closeModels = \(\) => \{([\s\S]*?)\n {2}\};/u);
+  // The guard is the early return; what follows it may still mention the task,
+  // because a finished one is cleared on the way out.
+  const close = page.match(/const closeModels = \(\) => \{\s*\n([^\n]*)/u);
   assert.ok(close, "closeModels is gone");
-  assert.doesNotMatch(close[1].split("setIsModelsOpen")[0], /isBackgroundTaskRunning/u, "a running job still locks the settings shut");
+  assert.doesNotMatch(close[1], /isBackgroundTaskRunning/u, "a running job still locks the settings shut");
 
   // And the progress has to survive that close, or the job becomes invisible.
   assert.match(page, /!isModelsOpen && backgroundTask \? \(/u, "a running job disappears when the settings close");
@@ -642,4 +644,46 @@ test("each explanation is given once, where it changes a decision", async () => 
       assert.ok(!description.replace(/[。，、]/gu, "").includes(core), `a description repeats its slot hint: ${core}`);
     }
   }
+});
+
+test("the app moves on one set of timings", async () => {
+  // Motion only reads as one object if every part of it uses the same curve and
+  // the same handful of speeds. Before this there were nine durations and two
+  // curves in play, plus the browser's own `ease`, whose slow start makes a
+  // short movement feel like lag.
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+
+  for (const token of ["--ease-out:", "--ease-in-out:", "--motion-quick:", "--motion-base:", "--motion-slow:"]) {
+    assert.ok(css.includes(token), `the motion system lost ${token}`);
+  }
+
+  // Every transition and animation draws from the tokens. The exceptions are
+  // the ambient loops — a background that drifts for a minute at a time is not
+  // on the same clock as a button.
+  const declarations = css.match(/\n\s*(transition|animation):[^;}]*;/gu) ?? [];
+  const strays = declarations
+    .filter((line) => !line.includes("infinite"))
+    .filter((line) => /\d+m?s(?![\w-])/u.test(line) || /cubic-bezier/u.test(line) || /(?<![-\w])ease(?![-\w(])/u.test(line));
+  assert.deepEqual(strays.map((line) => line.trim()), [], "these move on their own clock");
+
+  // The backstop, so anything added later is covered without remembering to.
+  const reduced = css.match(/@media \(prefers-reduced-motion: reduce\) \{\s*\*,\s*\*::before,\s*\*::after \{([^}]*)\}/u);
+  assert.ok(reduced, "there is no app-wide reduced-motion rule");
+  assert.match(reduced[1], /animation-duration: 1ms !important/u);
+  assert.match(reduced[1], /transition-duration: 1ms !important/u);
+
+  // A surface that arrives and then vanishes is worse than one that does
+  // neither, so both full-screen surfaces are held mounted while they leave.
+  assert.match(css, /\.card-viewer\.is-closing/u);
+  assert.match(css, /\.settings-modal-backdrop\.is-closing/u);
+  assert.match(page, /const closeViewer = useCallback/u, "the viewer unmounts before it can leave");
+  assert.match(page, /const dismissSettings = useCallback/u, "the settings unmount before they can leave");
+  assert.match(page, /setIsViewerClosing\(true\)/u);
+  assert.match(page, /VIEWER_EXIT_MS/u);
+
+  // The wall deals itself out, but the stagger is capped: three hundred cards
+  // at 26ms apart would still be arriving eight seconds later.
+  assert.match(page, /"--i": Math\.min\(index, \d+\)/u, "the card stagger is uncapped");
+  assert.match(page, /"--s": Math\.min\(order, \d+\)/u, "the category stagger is uncapped");
 });

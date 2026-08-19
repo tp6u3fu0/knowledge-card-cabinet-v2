@@ -1,6 +1,21 @@
 @import "tailwindcss";
 
 :root {
+  /* ── Motion ──────────────────────────────────────────────────────────
+     Three speeds and two curves, so everything in the cabinet moves like
+     the same object. Quick is feedback under the cursor (colour, press),
+     base is something changing state in place (a hover lift, a disclosure),
+     slow is something travelling (a panel, a deck, a card).
+
+     The curve leaves fast and lands slowly, which is what makes a movement
+     read as settling rather than stopping. Nothing here uses the browser's
+     `ease`: its slow start makes a small movement feel like lag. */
+  --ease-out: cubic-bezier(0.22, 0.7, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.2, 1);
+  --motion-quick: 140ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+
   --ink: #211f27;
   --muted: #77727b;
   --paper: #fbfaf7;
@@ -180,7 +195,7 @@
   justify-content: flex-start;
   padding: 12px 14px;
   text-align: left;
-  transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out);
 }
 
 .settings-tabs button span {
@@ -492,7 +507,7 @@
   font-size: 11px;
   min-height: 38px;
   padding: 8px 13px;
-  transition: background 180ms ease, border-color 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out);
 }
 
 .settings-secondary-button:hover:not(:disabled) {
@@ -570,7 +585,7 @@
   font-size: 11px;
   min-height: 38px;
   padding: 8px 13px;
-  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out);
 }
 
 .settings-danger-button:hover:not(:disabled) {
@@ -736,8 +751,8 @@ a:focus-visible {
   overflow: hidden;
   position: relative;
   transform: rotate(-1.5deg);
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    box-shadow 220ms ease, filter 220ms ease, opacity 220ms ease;
+  transition: transform var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out), filter var(--motion-base) var(--ease-out), opacity var(--motion-base) var(--ease-out);
   width: clamp(96px, 7vw, 108px);
 }
 
@@ -1002,7 +1017,7 @@ a:focus-visible {
 
 .nav-links a,
 .text-link {
-  transition: color 180ms ease, transform 180ms ease;
+  transition: color var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 .nav-links a:hover,
@@ -1080,7 +1095,7 @@ a:focus-visible {
   gap: 12px;
   letter-spacing: 0.03em;
   padding: 13px 17px;
-  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
   width: fit-content;
 }
 
@@ -1295,7 +1310,7 @@ a:focus-visible {
   grid-template-columns: auto 1fr auto;
   padding: 11px 12px;
   text-align: left;
-  transition: background 180ms ease, transform 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 .reading-related__item:hover {
@@ -1348,7 +1363,7 @@ a:focus-visible {
 
 .card-viewer {
   align-items: flex-end;
-  animation: card-viewer-fade 260ms ease both;
+  animation: card-viewer-fade var(--motion-slow) var(--ease-out) both;
   background: rgba(33, 31, 39, 0.18);
   backdrop-filter: blur(16px) saturate(0.82);
   display: flex;
@@ -1360,7 +1375,7 @@ a:focus-visible {
 }
 
 .card-viewer__panel {
-  animation: card-viewer-rise 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: card-viewer-rise var(--motion-slow) var(--ease-out) both;
   background: rgba(251, 250, 247, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.62);
   border-radius: 28px 28px 0 0;
@@ -1396,7 +1411,7 @@ a:focus-visible {
   gap: 8px;
   letter-spacing: 0.08em;
   padding: 4px 0;
-  transition: color 180ms ease;
+  transition: color var(--motion-base) var(--ease-out);
 }
 
 .card-viewer__close:hover {
@@ -1536,7 +1551,7 @@ a:focus-visible {
 .collection-page-back {
   color: var(--muted);
   font-size: 12px;
-  transition: color 180ms ease;
+  transition: color var(--motion-base) var(--ease-out);
 }
 
 .collection-page-back:hover {
@@ -1749,8 +1764,8 @@ a:focus-visible {
   justify-content: center;
   min-height: 35px;
   padding: 8px 12px;
-  transition: background 180ms ease, border-color 180ms ease, color 180ms ease,
-    transform 180ms ease, box-shadow 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out);
   white-space: nowrap;
 }
 
@@ -2143,7 +2158,7 @@ a:focus-visible {
   display: block;
   height: 100%;
   min-width: 3px;
-  transition: width 300ms ease;
+  transition: width var(--motion-slow) var(--ease-out);
 }
 
 .background-task-panel__actions {
@@ -2312,7 +2327,7 @@ a:focus-visible {
 .dimension-guide__body {
   border-top: 1px solid var(--line);
   padding: 11px 14px 12px;
-  animation: dimension-guide-open 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: dimension-guide-open var(--motion-base) var(--ease-out) both;
 }
 
 @keyframes dimension-guide-open {
@@ -2547,7 +2562,7 @@ a:focus-visible {
   font: inherit;
   font-size: 10px;
   padding: 7px 12px;
-  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
   white-space: nowrap;
 }
 
@@ -2637,8 +2652,8 @@ a:focus-visible {
   font: inherit;
   font-size: 10px;
   padding: 8px 11px;
-  transition: background 180ms ease, border-color 180ms ease, color 180ms ease,
-    opacity 180ms ease, transform 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
   white-space: nowrap;
 }
 
@@ -2963,7 +2978,7 @@ a:focus-visible {
   text-align: left;
   transform: perspective(850px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
   transform-style: preserve-3d;
-  transition: background 180ms ease, transform 180ms ease;
+  transition: background var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
   will-change: transform;
 }
 
@@ -3433,7 +3448,7 @@ a:focus-visible {
   opacity: var(--sheen-opacity, 0);
   pointer-events: none;
   position: absolute;
-  transition: opacity 220ms ease-out;
+  transition: opacity var(--motion-base) var(--ease-out);
   z-index: 2;
 }
 
@@ -3463,7 +3478,7 @@ a:focus-visible {
   letter-spacing: 0.1em;
   margin-top: 14px;
   padding: 6px 14px;
-  transition: background 160ms ease, color 160ms ease;
+  transition: background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out);
 }
 
 .card-flip__toggle:hover {
@@ -3561,7 +3576,7 @@ a:focus-visible {
   font: inherit;
   font-size: 10px;
   padding: 6px 9px;
-  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+  transition: background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out), transform var(--motion-quick) var(--ease-out);
 }
 
 .relation-filter button:hover,
@@ -3686,7 +3701,7 @@ a:focus-visible {
   font: inherit;
   font-size: 10px;
   padding: 4px 10px;
-  transition: background 160ms ease, color 160ms ease;
+  transition: background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out);
 }
 
 .relation-manual__delete:hover:not(:disabled) {
@@ -3808,7 +3823,7 @@ a:focus-visible {
   line-height: 1;
   min-width: 24px;
   padding: 0;
-  transition: background 160ms ease, color 160ms ease;
+  transition: background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out);
 }
 
 .relation-zoom button:hover:not(:disabled) {
@@ -3858,7 +3873,7 @@ a:focus-visible {
   overflow: visible;
   position: absolute;
   transform-origin: center;
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform var(--motion-base) var(--ease-out);
   width: 100%;
   will-change: transform;
 }
@@ -3931,7 +3946,7 @@ a:focus-visible {
   animation: relation-node-float 7s ease-in-out infinite;
   transform: perspective(850px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
   transform-style: preserve-3d;
-  transition: box-shadow 180ms ease, transform 180ms ease, background 180ms ease;
+  transition: box-shadow var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out), background var(--motion-base) var(--ease-out);
   width: 32px;
   z-index: 2;
 }
@@ -3961,7 +3976,7 @@ a:focus-visible {
   text-align: center;
   text-overflow: ellipsis;
   transform: translateX(-50%);
-  transition: color 180ms ease, font-size 180ms ease, opacity 160ms ease;
+  transition: color var(--motion-base) var(--ease-out), font-size var(--motion-base) var(--ease-out), opacity var(--motion-quick) var(--ease-out);
   white-space: nowrap;
 }
 
@@ -4021,7 +4036,7 @@ a:focus-visible {
   position: absolute;
   transform: translate(-50%, -7px) scale(0.94);
   transform-origin: top center;
-  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: opacity var(--motion-quick) var(--ease-out), transform var(--motion-base) var(--ease-out);
   width: 188px;
   z-index: 8;
 }
@@ -5307,7 +5322,7 @@ a:focus-visible {
   font-size: 11px;
   gap: 8px;
   padding: 5px 13px 5px 9px;
-  transition: border-color 180ms ease, color 180ms ease;
+  transition: border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out);
 }
 
 .card-deck__toggle:hover {
@@ -5330,7 +5345,7 @@ a:focus-visible {
 .card-deck__rail {
   height: var(--deck-h);
   position: relative;
-  transition: height 320ms cubic-bezier(0.22, 0.7, 0.3, 1);
+  transition: height var(--motion-slow) var(--ease-out);
   width: 100%;
 }
 
@@ -5346,7 +5361,7 @@ a:focus-visible {
     translate3d(calc(var(--i) * var(--pile-step)), calc(var(--i) * -3px), 0)
     rotate(calc(var(--i) * -1.1deg));
   transform-origin: 50% 94%;
-  transition: transform 320ms cubic-bezier(0.22, 0.7, 0.3, 1);
+  transition: transform var(--motion-slow) var(--ease-out);
   width: var(--card-w);
   z-index: calc(40 - var(--i));
 }
@@ -5381,7 +5396,7 @@ a:focus-visible {
 .card-deck__item .model-card-wall__note {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 180ms ease;
+  transition: opacity var(--motion-base) var(--ease-out);
 }
 
 .card-deck__item:hover .model-card__tools,
@@ -5396,7 +5411,7 @@ a:focus-visible {
    they would all sit on the same spot, one word on top of another. */
 .card-deck__item .model-card-wall__tier {
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity var(--motion-base) var(--ease-out);
 }
 
 .card-deck.is-open .model-card-wall__tier {
@@ -5510,7 +5525,7 @@ a:focus-visible {
   min-width: 7rem;
   padding: 0.55rem 0.75rem;
   text-align: left;
-  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  transition: background var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out), box-shadow var(--motion-quick) var(--ease-out);
 }
 
 .card-select__trigger:hover:not(:disabled) {
@@ -5553,7 +5568,7 @@ a:focus-visible {
   height: 0.42rem;
   margin-top: -0.18rem;
   transform: rotate(-45deg);
-  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), color 160ms ease;
+  transition: transform var(--motion-base) var(--ease-out), color var(--motion-quick) var(--ease-out);
   width: 0.42rem;
 }
 
@@ -5598,7 +5613,7 @@ a:focus-visible {
   padding: 6px;
   position: fixed;
   z-index: 95;
-  animation: card-select-open 190ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: card-select-open var(--motion-base) var(--ease-out) both;
 }
 
 /* Unfolding from the edge it is attached to. */
@@ -5606,7 +5621,7 @@ a:focus-visible {
 .card-select__panel--bottom { transform-origin: bottom center; }
 
 .card-select__panel.is-closing {
-  animation: card-select-close 130ms ease-in both;
+  animation: card-select-close var(--motion-quick) var(--ease-in-out) both;
   pointer-events: none;
 }
 
@@ -5636,11 +5651,11 @@ a:focus-visible {
   gap: 0.5rem;
   padding: 0.5rem 0.6rem;
   text-align: left;
-  transition: background 120ms ease;
+  transition: background var(--motion-quick) var(--ease-out);
   width: 100%;
   /* Dealt rather than dumped: each row arrives a beat after the one above it,
      and past the sixth they all arrive together so a long list still snaps. */
-  animation: card-select-deal 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: card-select-deal var(--motion-base) var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 18ms);
 }
 
@@ -5663,7 +5678,7 @@ a:focus-visible {
   border-radius: 50%;
   flex: none;
   height: 7px;
-  transition: background 140ms ease, border-color 140ms ease;
+  transition: background var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out);
   width: 7px;
 }
 
@@ -5750,7 +5765,7 @@ a:focus-visible {
    the collection, keeping its cancel and retry. */
 
 .background-task-dock {
-  animation: background-task-dock-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: background-task-dock-in var(--motion-slow) var(--ease-out) both;
   bottom: 18px;
   display: grid;
   gap: 6px;
@@ -5804,4 +5819,153 @@ a:focus-visible {
   .background-task-dock {
     animation: none;
   }
+}
+
+/* ── Arrivals ──────────────────────────────────────────────────────────────
+   Everything that appears, arrives: it comes from slightly below and settles.
+   One pair of keyframes for the whole app, so a card, a panel and a notice all
+   enter the same way and the app reads as one surface rather than a set of
+   screens that each do their own thing. */
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* The wall of cards deals itself out: within a category by column, and each
+   category a beat after the one above. Both counters are capped by the markup
+   — with 300 cards an uncapped stagger would still be arriving a minute later. */
+.collection-category__item {
+  animation: rise-in var(--motion-slow) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 26ms + var(--s, 0) * 70ms);
+}
+
+/* Switching between cards, relations and table swaps one whole branch for
+   another, so the branch itself is what fades in. */
+.collection-categories,
+.relation-workspace,
+.collection-table-wrap {
+  animation: rise-in var(--motion-slow) var(--ease-out) both;
+}
+
+/* The settings arrive like the card viewer does — the backdrop first, the panel
+   just behind it. */
+.settings-modal-backdrop {
+  animation: fade-in var(--motion-base) var(--ease-out) both;
+}
+
+.settings-modal-backdrop .model-settings-panel {
+  animation: rise-in var(--motion-slow) var(--ease-out) both;
+}
+
+/* A tab is a different subject, not a different page: it crosses over rather
+   than reloading. Keyed on the tab in the markup so it replays on each change. */
+.settings-tabpanel {
+  animation: rise-in var(--motion-base) var(--ease-out) both;
+}
+
+/* What the app says back to you. This had no styling at all, so a sentence as
+   consequential as "the rebuild finished" appeared as bare text between the
+   toolbar and the cards. */
+.database-notice {
+  animation: rise-in var(--motion-slow) var(--ease-out) both;
+  background: color-mix(in srgb, var(--paper) 74%, var(--accent-coral-soft));
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 26%, var(--line));
+  border-radius: 12px;
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.7;
+  margin: 0 0 16px;
+  padding: 10px 15px;
+}
+
+.database-notice--success {
+  background: color-mix(in srgb, var(--paper) 74%, var(--accent-mint-soft));
+  border-color: color-mix(in srgb, var(--accent-mint) 26%, var(--line));
+}
+
+/* ── Press ─────────────────────────────────────────────────────────────────
+   A control that gives nothing back under the finger feels dead, however well
+   it animates on hover. The transition here is a superset of what each of
+   these already animated, so listing them once costs them nothing. */
+.create-card-submit,
+.settings-secondary-button,
+.database-add-button,
+.database-category-button,
+.database-trash-button,
+.database-model-button,
+.relation-compose-button,
+.background-task-dock__open,
+.card-select__trigger,
+.card-flip__toggle,
+.settings-tabs button,
+.view-switcher button,
+.dimension-guide__face,
+.glossary-note__face {
+  transition:
+    transform var(--motion-quick) var(--ease-out),
+    background var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out),
+    color var(--motion-base) var(--ease-out);
+}
+
+.create-card-submit:not(:disabled):active,
+.settings-secondary-button:not(:disabled):active,
+.database-add-button:not(:disabled):active,
+.database-category-button:not(:disabled):active,
+.database-trash-button:not(:disabled):active,
+.database-model-button:not(:disabled):active,
+.relation-compose-button:not(:disabled):active,
+.background-task-dock__open:not(:disabled):active,
+.card-select__trigger:not(:disabled):active,
+.card-flip__toggle:not(:disabled):active,
+.settings-tabs button:not(:disabled):active,
+.view-switcher button:not(:disabled):active,
+.dimension-guide__face:not(:disabled):active,
+.glossary-note__face:not(:disabled):active {
+  transform: scale(0.975);
+}
+
+/* ── Motion, refused ───────────────────────────────────────────────────────
+   Several components already turn their own animation off here. This is the
+   backstop for everything else, including anything added later: the app still
+   changes state, it just stops travelling to get there. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Leaving. A surface that arrives and then vanishes is worse than one that does
+   neither — the entrance sets an expectation the dismissal breaks. Held mounted
+   for exactly this long by useDismissal. */
+@keyframes sink-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+.card-viewer.is-closing,
+.settings-modal-backdrop.is-closing {
+  animation: fade-in var(--motion-base) var(--ease-in-out) reverse both;
+  pointer-events: none;
+}
+
+.card-viewer.is-closing .card-viewer__panel,
+.settings-modal-backdrop.is-closing .model-settings-panel {
+  animation: sink-out var(--motion-base) var(--ease-in-out) both;
 }

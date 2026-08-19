@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { visualAccents, visualPatterns } from "./types";
 import { CardSelect } from "./card-select";
 import { RelationView } from "./relation-view";
@@ -158,6 +158,10 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
   };
 }
 
+/** How long the two full-screen surfaces take to leave, in step with globals.css. */
+const VIEWER_EXIT_MS = 200;
+const PANEL_EXIT_MS = 200;
+
 const knowledgeCards: KnowledgeCard[] = [
   {
     id: "attention",
@@ -261,6 +265,7 @@ function KnowledgeCardSection({
   onSelect,
   onOpen,
   searchReasons,
+  order = 0,
 }: {
   category: string;
   cards: KnowledgeCard[];
@@ -268,13 +273,17 @@ function KnowledgeCardSection({
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   searchReasons?: Map<string, string[]>;
+  /** Where this category sits down the page, for the entrance stagger. */
+  order?: number;
 }) {
   return (
     <section
       className="collection-category"
       // A category is only as wide as its cards need, so small ones sit side by
       // side instead of each owning a mostly-empty row.
-      style={{ "--cards": Math.min(cards.length, 5) } as CSSProperties}
+      // Both counters are capped: an uncapped stagger over three hundred cards
+      // would still be arriving a minute after the page loaded.
+      style={{ "--cards": Math.min(cards.length, 5), "--s": Math.min(order, 4) } as CSSProperties}
       aria-label={`${category}，${cards.length} 張卡片`}
     >
       <div className="collection-category__head">
@@ -284,8 +293,8 @@ function KnowledgeCardSection({
         <span className="collection-category__rule" aria-hidden="true" />
       </div>
       <div className="collection-category__grid">
-        {cards.map((card) => (
-          <div className="collection-category__item" key={card.id}>
+        {cards.map((card, index) => (
+          <div className="collection-category__item" key={card.id} style={{ "--i": Math.min(index, 9) } as CSSProperties}>
             <KnowledgeCardFront
               card={card}
               active={card.id === selectedId}
@@ -307,12 +316,15 @@ function KnowledgeCardSection({
 }
 
 function CollectionCardViewer({
+  closing,
   card,
   relatedCards,
   onOpenRelated,
   onClose,
 }: {
   card: KnowledgeCard;
+  /** True while the panel is on its way out and must stay mounted. */
+  closing: boolean;
   relatedCards: KnowledgeCard[];
   onOpenRelated: (id: string) => void;
   onClose: () => void;
@@ -327,7 +339,7 @@ function CollectionCardViewer({
     // The backdrop is presentational: dismissal also lives on the close button
     // and the Escape handler, so it needs no role or key handling of its own.
     <div
-      className="card-viewer"
+      className={`card-viewer ${closing ? "is-closing" : ""}`}
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -551,6 +563,8 @@ export default function CollectionPage() {
   const [modelError, setModelError] = useState("");
   const [modelActionId, setModelActionId] = useState("");
   const [backgroundTask, setBackgroundTask] = useState<BackgroundTask | null>(null);
+  const [isViewerClosing, setIsViewerClosing] = useState(false);
+  const [isSettingsClosing, setIsSettingsClosing] = useState(false);
   const [cardsRefreshKey, setCardsRefreshKey] = useState(0);
 
   const isBackgroundTaskRunning = backgroundTask?.status === "queued" || backgroundTask?.status === "running";
@@ -722,12 +736,37 @@ export default function CollectionPage() {
       .filter((card): card is KnowledgeCard => Boolean(card))
     : [];
 
+  /**
+   * Both full-screen surfaces leave before they unmount.
+   *
+   * The card that is on screen has to stay on screen while the panel sinks —
+   * clearing the id first would blank the panel and then animate the blank —
+   * so closing is a flag now and the unmount happens on a timer.
+   */
+  const closeViewer = useCallback(() => {
+    if (isViewerClosing) return;
+    setIsViewerClosing(true);
+    window.setTimeout(() => {
+      setIsViewerClosing(false);
+      setViewerCardId("");
+    }, VIEWER_EXIT_MS);
+  }, [isViewerClosing]);
+
+  const dismissSettings = useCallback(() => {
+    if (isSettingsClosing) return;
+    setIsSettingsClosing(true);
+    window.setTimeout(() => {
+      setIsSettingsClosing(false);
+      setIsModelsOpen(false);
+    }, PANEL_EXIT_MS);
+  }, [isSettingsClosing]);
+
   useEffect(() => {
     if (!viewerCardId) return;
 
     const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setViewerCardId("");
+      if (event.key === "Escape") closeViewer();
     };
 
     document.body.style.overflow = "hidden";
@@ -737,7 +776,7 @@ export default function CollectionPage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [viewerCardId]);
+  }, [closeViewer, viewerCardId]);
 
   useEffect(() => {
     if (!isModelsOpen) return;
@@ -747,8 +786,8 @@ export default function CollectionPage() {
       // A background task deliberately does not hold this shut: it keeps
       // running, and the docked panel follows it outside the settings.
       if (event.key === "Escape" && !modelActionId && !isSettingsSaving && !isDatabaseExporting && !isDatabaseImporting && !isDatabaseResetting) {
-        setIsModelsOpen(false);
         setModelError("");
+        dismissSettings();
       }
     };
 
@@ -758,7 +797,7 @@ export default function CollectionPage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isBackgroundTaskRunning, isDatabaseExporting, isDatabaseImporting, isDatabaseResetting, isModelsOpen, isSettingsSaving, modelActionId]);
+  }, [dismissSettings, isBackgroundTaskRunning, isDatabaseExporting, isDatabaseImporting, isDatabaseResetting, isModelsOpen, isSettingsSaving, modelActionId]);
 
   useEffect(() => {
     if (!createSuccess) return;
@@ -1053,7 +1092,7 @@ export default function CollectionPage() {
 
   const closeModels = () => {
     if (modelActionId || isSettingsSaving || isDatabaseExporting || isDatabaseImporting || isDatabaseResetting) return;
-    setIsModelsOpen(false);
+    dismissSettings();
     setModelError("");
     // A finished task can go; a running one keeps its panel, docked in the
     // corner of the collection, because it is still doing something.
@@ -1992,7 +2031,11 @@ export default function CollectionPage() {
           />
         ) : null}
         {isModelsOpen ? (
-          <div className="settings-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModels(); }}>
+          <div
+            className={`settings-modal-backdrop ${isSettingsClosing ? "is-closing" : ""}`}
+            role="presentation"
+            onMouseDown={(event) => { if (event.target === event.currentTarget) closeModels(); }}
+          >
             <ModelSettingsPanel
               catalog={modelCatalog}
               runtimeSettings={runtimeSettings}
@@ -2076,9 +2119,10 @@ export default function CollectionPage() {
           </div>
         ) : collectionView === "cards" ? (
           <div className="collection-categories">
-            {cardGroups.map((group) => (
+            {cardGroups.map((group, order) => (
               <KnowledgeCardSection
                 key={group.category}
+                order={order}
                 category={group.category}
                 cards={group.cards}
                 selectedId={selectedId}
@@ -2117,9 +2161,10 @@ export default function CollectionPage() {
       {viewerCard ? (
         <CollectionCardViewer
           card={viewerCard}
+          closing={isViewerClosing}
           relatedCards={viewerRelatedCards}
           onOpenRelated={setViewerCardId}
-          onClose={() => setViewerCardId("")}
+          onClose={closeViewer}
         />
       ) : null}
     </main>
