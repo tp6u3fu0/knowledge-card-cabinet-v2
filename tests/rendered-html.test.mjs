@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -66,9 +66,11 @@ test("standalone server renders the knowledge card pages", async (context) => {
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: "ok", service: "web" });
 
-  const home = await fetch(`http://127.0.0.1:${runtime.port}/`);
-  assert.equal(home.status, 200);
-  assert.match(await home.text(), /知識卡冊/);
+  // There is no front page in the product any more — it is published on its
+  // own out of site/. Anyone arriving at the root gets their cards.
+  const root = await fetch(`http://127.0.0.1:${runtime.port}/`, { redirect: "manual" });
+  assert.equal(root.status, 307);
+  assert.equal(root.headers.get("location"), "/collection");
 
   const collection = await fetch(`http://127.0.0.1:${runtime.port}/collection`);
   assert.equal(collection.status, 200);
@@ -761,4 +763,38 @@ test("the canvas can be arranged by colour", async () => {
   // The graph is the whole point of the view, so it gets the window's height
   // rather than a fixed slab.
   assert.match(css, /\.relation-canvas \{[^}]*min-height: clamp\(/u, "the canvas is back to a fixed height");
+});
+
+test("what gets downloaded is the cabinet, not the advertisement", async () => {
+  // The front page and the product used to be two routes of one build, so
+  // every desktop release carried the marketing copy, and every change to the
+  // marketing copy needed a release. They are two builds now.
+  const root = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(root, /redirect\("\/collection"\)/u, "the product root no longer sends anyone to their cards");
+  assert.ok(root.length < 1200, "the product root has grown a front page again");
+
+  const landing = await readFile(new URL("../site/landing.tsx", import.meta.url), "utf8");
+  assert.match(landing, /export function LandingPage/u);
+  // Shared, not copied: the cards on the page are the cards in the app.
+  assert.match(landing, /from "\.\.\/app\/card-face"/u, "the front page has its own copy of the card components");
+
+  // The built product must not contain the page's copy anywhere — not in the
+  // client chunks, not in the server bundle, not in standalone.
+  const built = await readdir(new URL("../dist", import.meta.url), { recursive: true, withFileTypes: true });
+  const files = built.filter((entry) => entry.isFile() && /\.(?:js|html|css|json)$/u.test(entry.name));
+  assert.ok(files.length > 10, `only ${files.length} files in dist — was the product built?`);
+  for (const entry of files) {
+    const text = await readFile(join(entry.parentPath ?? entry.path, entry.name), "utf8");
+    assert.doesNotMatch(text, /把知識整理好/u, `${entry.name} carries the front page`);
+  }
+
+  // The page is configured at build time, and every setting is allowed to be
+  // missing: a page that links nowhere is worse than a page that says "soon".
+  const config = await readFile(new URL("../vite.config.site.ts", import.meta.url), "utf8");
+  assert.match(config, /outDir: "\.\.\/dist-site"/u);
+  assert.match(config, /base: "\.\/"/u, "the built page only works at a domain root");
+  assert.match(landing, /import\.meta\.env\.VITE_KCC_DOWNLOAD_URL/u);
+  assert.match(landing, /import\.meta\.env\.VITE_KCC_APP_URL/u);
+  assert.doesNotMatch(landing, /process\.env/u, "Vite replaces process.env with {} — the setting would silently be empty");
+  assert.doesNotMatch(landing, /href="\/collection"/u, "the page still links to a route it no longer sits next to");
 });

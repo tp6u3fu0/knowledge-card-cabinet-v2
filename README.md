@@ -44,7 +44,29 @@ npm run serve
 
 資料預設寫入 `./data`，可用 `KCC_DATA_DIR` 指定其他位置。API 只監聽 loopback，權杖每次啟動隨機產生，或以 `KCC_API_TOKEN` 固定。
 
-首頁同時作為公開產品介紹頁，包含收藏預覽與桌面版下載區。設定 `.env` 的 `NEXT_PUBLIC_DOWNLOAD_URL` 後，首頁會顯示下載連結；未設定時會顯示「桌面版準備中」。
+應用程式的根路徑 `/` 會直接轉到 `/collection`：**產品裡沒有首頁**。
+
+## 公開首頁
+
+介紹頁是獨立的靜態網站，原始碼在 `site/`，跟產品分開建置與發佈：
+
+```bash
+npm run dev:site     # 首頁開發伺服器
+npm run build:site   # 輸出到 dist-site/，可以放到任何靜態主機
+```
+
+它重用 `app/` 的卡片元件與樣式，所以頁面上的卡片就是應用程式畫出來的那些卡片，不是截圖。兩個設定都可以不給：
+
+| 建置變數 | 沒給的話 |
+| --- | --- |
+| `VITE_KCC_DOWNLOAD_URL` | 顯示「桌面版準備中」，不會連到不存在的頁面 |
+| `VITE_KCC_APP_URL` | 不提供「瀏覽版」入口——收藏本身不一定有公開網址 |
+
+```bash
+VITE_KCC_DOWNLOAD_URL=https://github.com/<you>/<repo>/releases/latest npm run build:site
+```
+
+輸出使用相對路徑，所以放在網域根目錄或 `/<repo>/` 子目錄都可以（GitHub Pages 是後者）。
 
 ## 桌面版
 
@@ -206,6 +228,8 @@ npm run desktop:mcp
 npm run dev              # 前端開發伺服器（需搭配 dev:api）
 npm run dev:api          # 本機 API，供開發用
 npm run build            # 建立前端 standalone build
+npm run build:site       # 建立公開首頁（輸出到 dist-site/）
+npm run dev:site         # 首頁開發伺服器
 npm run models:bundle    # 下載安裝包內建的 embedding 權重（約 130 MB）
 npm test                 # 建置並執行全部測試
 npm run test:api         # 只跑 API 行為契約（較快）
