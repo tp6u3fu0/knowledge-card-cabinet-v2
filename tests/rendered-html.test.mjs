@@ -810,3 +810,51 @@ test("what gets downloaded is the cabinet, not the advertisement", async () => {
   assert.doesNotMatch(landing, /process\.env/u, "Vite replaces process.env with {} — the setting would silently be empty");
   assert.doesNotMatch(landing, /href="\/collection"/u, "the page still links to a route it no longer sits next to");
 });
+
+test("the package leaves out only what it cannot reach", async () => {
+  // 1.2 GB of Windows package was 370 MB of files the process cannot open:
+  // onnxruntime ships prebuilds for six platform/arch pairs, transformers and
+  // onnxruntime-web each ship a browser half, and Chromium ships fifty
+  // languages. Cutting them is safe exactly as long as the keep-list still
+  // matches what the packages resolve to in Node — which is what this checks.
+  const builder = await readFile(new URL("../desktop/electron-builder.yml", import.meta.url), "utf8");
+
+  assert.match(builder, /- "!\*\*\/\*\.map"/u, "source maps are shipping again");
+  assert.match(builder, /electronLanguages:[\s\S]*zh-TW/u, "every Chromium locale is shipping again");
+
+  // The one that can break the app rather than just fatten it: onnxruntime-web
+  // is excluded wholesale and its Node entry added back by name. If the
+  // package renames that file, the app ships without the module transformers
+  // imports at load time — and nothing else would notice.
+  const ortWeb = JSON.parse(await readFile(new URL("../desktop/node_modules/onnxruntime-web/package.json", import.meta.url), "utf8"));
+  // Some packages hang their conditions off "." and some off the root.
+  const ortConditions = ortWeb.exports?.["."] ?? ortWeb.exports ?? {};
+  const nodeEntries = Object.values(ortConditions.node ?? {}).map((entry) => entry.replace(/^\.\//u, ""));
+  assert.ok(nodeEntries.length > 0, "onnxruntime-web no longer declares a node export");
+  for (const entry of nodeEntries) {
+    assert.ok(
+      builder.includes(`- "node_modules/onnxruntime-web/${entry}"`),
+      `onnxruntime-web resolves to ${entry} in Node, which the package excludes`,
+    );
+    await access(new URL(`../desktop/node_modules/onnxruntime-web/${entry}`, import.meta.url));
+  }
+
+  // Same check for transformers: Node resolves to dist/transformers.node.*,
+  // and those must not be caught by the exclusions aimed at its browser half.
+  const transformers = JSON.parse(await readFile(new URL("../desktop/node_modules/@huggingface/transformers/package.json", import.meta.url), "utf8"));
+  const conditions = transformers.exports?.["."] ?? transformers.exports ?? {};
+  const resolved = [conditions.node?.import?.default, conditions.node?.require?.default];
+  for (const entry of resolved) {
+    assert.ok(entry?.includes("transformers.node."), `transformers now resolves to ${entry} in Node`);
+    assert.ok(!builder.includes(`!node_modules/@huggingface/transformers/${entry.replace(/^\.\//u, "")}`));
+  }
+
+  // Each platform keeps its own onnxruntime binary and drops the others.
+  const windows = builder.slice(builder.indexOf("\nwin:"), builder.indexOf("\nmac:"));
+  assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u);
+  assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/linux\/\*\*/u);
+  assert.doesNotMatch(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u, "the Windows build excludes its own runtime");
+  const mac = builder.slice(builder.indexOf("\nmac:"), builder.indexOf("\nnsis:"));
+  assert.match(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u);
+  assert.doesNotMatch(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u, "the macOS build excludes its own runtime");
+});

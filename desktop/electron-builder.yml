@@ -3,8 +3,34 @@ productName: 知識卡冊
 directories:
   app: desktop
   output: release
+# What goes in the package. The exclusions below are all the same shape: this
+# is a Node process on one platform, and the model stack ships for every
+# platform and both runtimes. Measured on the Windows build, they take it from
+# 1.2 GB to well under a gigabyte without removing anything reachable.
 files:
   - "**/*"
+  # 1,071 source maps, ~42 MB, and nothing in a packaged app reads one.
+  - "!**/*.map"
+  # onnxruntime-web resolves to a 25 KB stub here: its package exports map
+  # sends "node" to dist/ort.node.min.*. The other 87 MB of dist/ is browser
+  # bundles and WASM the main process can never reach. The package itself has
+  # to stay — transformers imports it at module load, before it knows where it
+  # is running.
+  - "!node_modules/onnxruntime-web/dist/**"
+  - "node_modules/onnxruntime-web/dist/ort.node.min.js"
+  - "node_modules/onnxruntime-web/dist/ort.node.min.mjs"
+  # Same story a level up: in Node, transformers resolves to
+  # dist/transformers.node.*, so its WASM build and browser bundles are dead
+  # weight — the WASM file alone is 20 MB.
+  - "!node_modules/@huggingface/transformers/dist/*.wasm"
+  - "!node_modules/@huggingface/transformers/dist/transformers.web*"
+  - "!node_modules/@huggingface/transformers/dist/transformers.js"
+  - "!node_modules/@huggingface/transformers/dist/transformers.min.js"
+# Chromium ships ~50 locale files at ~1 MB each. The interface is Traditional
+# Chinese; en-US stays because Chromium falls back to it.
+electronLanguages:
+  - en-US
+  - zh-TW
 afterPack: desktop/after-pack.cjs
 asar: true
 asarUnpack:
@@ -27,6 +53,12 @@ extraResources:
     filter:
       - "**/*"
 win:
+  # onnxruntime-node carries prebuilt binaries for all six platform/arch pairs,
+  # 208 MB of which 34 MB can ever load. Windows keeps win32/x64 only.
+  files:
+    - "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**"
+    - "!node_modules/onnxruntime-node/bin/napi-v3/linux/**"
+    - "!node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/**"
   target:
     - nsis
   # Generated from public/favicon.svg by scripts/build-icon.mjs and committed,
@@ -35,6 +67,11 @@ win:
   icon: build/icon.ico
   artifactName: "KnowledgeCardCabinet-${version}-Setup.${ext}"
 mac:
+  # Both darwin arches stay: the release builds x64 and arm64 on separate
+  # runners, and a glob cannot tell which one it is being packed for.
+  files:
+    - "!node_modules/onnxruntime-node/bin/napi-v3/win32/**"
+    - "!node_modules/onnxruntime-node/bin/napi-v3/linux/**"
   target:
     - dmg
     - zip

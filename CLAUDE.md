@@ -157,6 +157,7 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
 | `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
 | `setting-cards.tsx` 的卡片結構 | `globals.css` 的 `.setting-card` 覆寫（`.collection-card__copy span` 與 `__tags` 在收藏頁是 `display:none`） | 設定卡的說明與標籤整片消失 |
+| 動到 `electron-builder.yml` 的 `files` 排除規則 | onnxruntime-web 與 transformers 是「整包排除、再把 Node 入口加回來」；改版時要對照它們 package.json 的 `exports.node` | 打包版少掉 transformers 在 module load 就 import 的模組，整個模型堆疊在打包版才炸，開發模式看不出來；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | 首頁的內容 | 改 `site/landing.tsx`，不要在 `app/` 底下重開一個首頁路由；`app/page.tsx` 只能是轉址 | 首頁又會被打包進每一個桌面版；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | 首頁要讀設定 | 用 `import.meta.env.VITE_*`，不要用 `process.env`——Vite 會把它換成 `{}`，設定會靜靜變成空字串 | 下載連結永遠不會出現，也不會報錯 |
 | 首頁連到收藏 | 只能連 `VITE_KCC_APP_URL`；`/collection` 不再跟首頁放在同一台伺服器上 | 靜態站上的按鈕連到 404 |
