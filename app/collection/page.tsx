@@ -16,7 +16,7 @@ import type {
   ApiProbeResult,
   ApiRelation,
   BackgroundTask,
-  BatchOrganizeResult,
+  DuplicatePair,
   CardDraft,
   CardDraftResponse,
   CategoryRecord,
@@ -518,10 +518,8 @@ export default function CollectionPage() {
   const [mergeTargetCategory, setMergeTargetCategory] = useState("");
   const [categoryManagerError, setCategoryManagerError] = useState("");
   const [isCategorySaving, setIsCategorySaving] = useState(false);
-  const [isBatchPanelOpen, setIsBatchPanelOpen] = useState(false);
-  const [batchSelectedIds, setBatchSelectedIds] = useState<string[]>([]);
-  const [batchResult, setBatchResult] = useState<BatchOrganizeResult | null>(null);
-  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [duplicatePairs, setDuplicatePairs] = useState<DuplicatePair[]>([]);
+  const [isDuplicateNoticeOpen, setIsDuplicateNoticeOpen] = useState(false);
   const [cards, setCards] = useState<KnowledgeCard[]>(knowledgeCards);
   const [relationEdgesState, setRelationEdgesState] = useState<ReadonlyArray<RelationEdge>>(defaultRelationEdges);
   const [isLoading, setIsLoading] = useState(true);
@@ -568,6 +566,26 @@ export default function CollectionPage() {
   const [cardsRefreshKey, setCardsRefreshKey] = useState(0);
 
   const isBackgroundTaskRunning = backgroundTask?.status === "queued" || backgroundTask?.status === "running";
+
+  /**
+   * Cards that look like the same card twice.
+   *
+   * This used to be one of four things a batch panel reported, behind a
+   * selection and a preview. Tag spellings and the category fallback happen on
+   * save now, and the relation suggestions were a copy of what the relation
+   * view already draws — so what is left is the one thing that needs a person
+   * to look, and it comes to them.
+   */
+  const loadDuplicates = async () => {
+    try {
+      const response = await fetch("/api/cards/duplicates", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { duplicates?: DuplicatePair[] };
+      setDuplicatePairs(Array.isArray(result.duplicates) ? result.duplicates : []);
+    } catch {
+      // A cabinet that cannot answer this is still perfectly usable.
+      setDuplicatePairs([]);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -659,6 +677,7 @@ export default function CollectionPage() {
         setCards(loadedCards);
         setRelationEdgesState(relationLoadFailed ? defaultRelationEdges : nextEdges);
         setSelectedId(loadedCards[0]?.id ?? "");
+        void loadDuplicates();
       } catch {
         if (!cancelled) setLoadError("目前無法載入本機資料，先顯示示範卡片。請重新啟動本機 API。");
       } finally {
@@ -728,7 +747,6 @@ export default function CollectionPage() {
   };
   const cardGroups = groupCardsByCategory(filteredCards);
   const searchReasonsById = new Map(filteredCards.map((card) => [card.id, getSearchReasons(card)]));
-  const batchChangedCount = batchResult?.cards?.filter((item) => item.changed).length ?? 0;
   const viewerCard = cards.find((card) => card.id === viewerCardId);
   const viewerRelatedCards = viewerCard
     ? viewerCard.related
@@ -1539,32 +1557,6 @@ export default function CollectionPage() {
     }
   };
 
-  const handleBatchOrganize = async (apply = false) => {
-    if (!batchSelectedIds.length) return;
-    setIsBatchRunning(true);
-    try {
-      const response = await fetch("/api/cards/batch/organize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ card_ids: batchSelectedIds, apply }),
-      });
-      const result = (await response.json().catch(() => ({}))) as BatchOrganizeResult;
-      if (!response.ok) throw new Error(result.detail ?? "批次整理失敗。");
-      setBatchResult(result);
-      if (result.task_id && !(await watchBackgroundTask(result.task_id, { silent: true }))) {
-        throw new Error("批次整理未完成。");
-      }
-      if (apply) {
-        setCardsRefreshKey((current) => current + 1);
-        setCreateSuccess(`已套用 ${result.changed_cards ?? 0} 張卡片的整理建議。`);
-      }
-    } catch (error) {
-      setModelError(error instanceof Error ? error.message : "批次整理失敗，請稍後再試。");
-    } finally {
-      setIsBatchRunning(false);
-    }
-  };
-
   const handleRenameCategory = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedCategoryName || !renamedCategoryName.trim()) return;
@@ -1907,9 +1899,6 @@ export default function CollectionPage() {
           <button className={`database-category-button ${isCategoryManagerOpen ? "is-active" : ""}`} type="button" onClick={() => { setCategoryManagerError(""); setIsCategoryManagerOpen((current) => !current); }}>
             管理分類
           </button>
-          <button className={`database-category-button ${isBatchPanelOpen ? "is-active" : ""}`} type="button" onClick={() => { setBatchResult(null); setIsBatchPanelOpen((current) => !current); }}>
-            AI 批次整理
-          </button>
           <button className="database-add-button" type="button" onClick={openCreateCard}>
             <DatabaseActionIcon kind="add" />
             <span>新增卡片</span>
@@ -1946,6 +1935,33 @@ export default function CollectionPage() {
 
         {loadError ? <p className="database-notice" role="status">{loadError}</p> : null}
         {createSuccess ? <p className="database-notice database-notice--success" role="status">{createSuccess}</p> : null}
+        {duplicatePairs.length ? (
+          <section className="duplicate-notice" aria-label="疑似重複的卡片">
+            <button
+              className="duplicate-notice__face"
+              type="button"
+              aria-expanded={isDuplicateNoticeOpen}
+              onClick={() => setIsDuplicateNoticeOpen((current) => !current)}
+            >
+              <span className="duplicate-notice__count">{duplicatePairs.length}</span>
+              <span>組卡片看起來重複了</span>
+              <span className="duplicate-notice__toggle">{isDuplicateNoticeOpen ? "收起" : "看看是哪些"}</span>
+            </button>
+            {isDuplicateNoticeOpen ? (
+              <ul className="duplicate-notice__list">
+                {duplicatePairs.slice(0, 8).map((pair) => (
+                  <li key={`${pair.source_id}-${pair.target_id}`}>
+                    <button type="button" onClick={() => setViewerCardId(pair.source_id)}>{pair.source_title || pair.source_id}</button>
+                    <span aria-hidden="true">↔</span>
+                    <button type="button" onClick={() => setViewerCardId(pair.target_id)}>{pair.target_title || pair.target_id}</button>
+                    <small>{pair.reason}{pair.reason === "標題相同" ? "" : ` · ${Math.round(pair.score * 100)}%`}</small>
+                  </li>
+                ))}
+                {duplicatePairs.length > 8 ? <li className="duplicate-notice__more">還有 {duplicatePairs.length - 8} 組</li> : null}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
         {isCategoryManagerOpen ? (
           <section className="category-manager" aria-label="分類管理">
             <div className="category-manager__heading">
@@ -1966,40 +1982,6 @@ export default function CollectionPage() {
               </> : null}
             </div>
             {categoryManagerError ? <p className="category-manager__error" role="alert">{categoryManagerError}</p> : null}
-          </section>
-        ) : null}
-        {isBatchPanelOpen ? (
-          <section className="category-manager batch-organizer" aria-label="AI 批次整理">
-            <div className="category-manager__heading">
-              <div><span className="eyebrow">BATCH AI ORGANIZER</span><strong>選取卡片後檢查整理建議</strong></div>
-              <small>會先預覽分類、標籤、重複卡片與自製關聯建議，確認後才套用。</small>
-            </div>
-            <div className="batch-organizer__cards">
-              {cards.map((card) => <label key={card.id}><input type="checkbox" checked={batchSelectedIds.includes(card.id)} onChange={(event) => setBatchSelectedIds((current) => event.target.checked ? [...current, card.id] : current.filter((id) => id !== card.id))} /><span>{card.title}</span><small>{card.category}</small></label>)}
-            </div>
-            <div className="category-manager__forms">
-              <button type="button" className="database-category-button" onClick={() => setBatchSelectedIds(cards.map((card) => card.id))}>全選</button>
-              <button type="button" className="database-category-button" onClick={() => setBatchSelectedIds([])}>清除選取</button>
-              <button type="button" className="database-add-button" disabled={isBatchRunning || !batchSelectedIds.length} onClick={() => void handleBatchOrganize(false)}>{isBatchRunning ? "分析中…" : `預覽 ${batchSelectedIds.length} 張`}</button>
-              <button type="button" className="database-add-button" disabled={isBatchRunning || !batchResult || batchChangedCount === 0} onClick={() => void handleBatchOrganize(true)} title={!batchResult ? "請先預覽整理建議" : batchChangedCount === 0 ? "目前沒有分類或標籤變更可套用" : undefined}>
-                {!batchResult ? "套用整理建議" : batchChangedCount > 0 ? `套用 ${batchChangedCount} 張分類／標籤` : "沒有可套用的整理"}
-              </button>
-            </div>
-            {batchResult ? <div className="batch-organizer__result">
-              <strong>分析結果</strong>
-              <span>{batchResult.cards?.filter((item) => item.changed).length ?? 0} 張有格式整理建議 · {batchResult.duplicates?.length ?? 0} 組疑似重複 · {batchResult.relations?.length ?? 0} 條關聯建議</span>
-              {batchResult.cards?.filter((item) => item.changed).slice(0, 6).map((item) => <small key={item.id}>{item.title} → {item.suggested_category} · {item.suggested_tags.join("、") || "無標籤"}</small>)}
-              {batchResult.duplicates?.slice(0, 4).map((item) => {
-                const firstTitle = cards.find((card) => card.id === item.source_id)?.title ?? item.source_id;
-                const secondTitle = cards.find((card) => card.id === item.target_id)?.title ?? item.target_id;
-                return <small key={`duplicate-${item.source_id}-${item.target_id}`}>疑似重複：{firstTitle} ↔ {secondTitle} · {item.reason}</small>;
-              })}
-              {batchResult.relations?.slice(0, 4).map((item) => {
-                const firstTitle = cards.find((card) => card.id === item.source_id)?.title ?? item.source_id;
-                const secondTitle = cards.find((card) => card.id === item.target_id)?.title ?? item.target_id;
-                return <small key={`relation-${item.source_id}-${item.target_id}`}>關聯建議：{firstTitle} ↔ {secondTitle} · {item.reason} · {Math.round(item.score * 100)}%</small>;
-              })}
-            </div> : null}
           </section>
         ) : null}
         {isCreateCardOpen ? (

@@ -485,3 +485,54 @@ describe("backup integrity", () => {
     assert.equal(result.status, 400);
   });
 });
+
+describe("tidying a card takes care of itself", () => {
+  // These two were the applyable half of a batch panel: you selected cards,
+  // previewed, and applied. They are cheap enough to do on the way in, and a
+  // cabinet that never needs tidying is better than one with a tidy button.
+  it("spells a tag the way the cabinet already spells it", async () => {
+    await ok("POST", "/cards", cardInput("tidy-first", { title: "第一張", tags: ["RAG", "向量檢索"] }));
+    const second = await ok("POST", "/cards", cardInput("tidy-second", { title: "第二張", tags: ["rag", "  Rag ", "向量檢索"] }));
+    assert.deepEqual(second.card.tags, ["RAG", "向量檢索"], "a tag arrived in its own spelling, and twice");
+  });
+
+  it("files a card under its topic when no category is given", async () => {
+    const created = await ok("POST", "/cards", { ...cardInput("tidy-third", { title: "第三張" }), category: undefined });
+    assert.equal(created.card.category, created.card.topic);
+  });
+
+  it("leaves an explicit category alone", async () => {
+    const created = await ok("POST", "/cards", cardInput("tidy-fourth", { title: "第四張", topic: "主題甲", category: "待分類" }));
+    assert.equal(created.card.category, "待分類", "a deliberate 待分類 was overwritten");
+  });
+});
+
+describe("duplicates", () => {
+  // `\W` looked like the way to strip punctuation from a title and is not:
+  // with `\w` meaning [A-Za-z0-9_], every Chinese character counts as
+  // punctuation, so all-Chinese titles normalised to "" and matched each other.
+  // A cabinet written in Chinese reported itself as entirely duplicate.
+  it("does not call two different Chinese titles the same", async () => {
+    await ok("POST", "/cards", cardInput("dup-a", { title: "檢索增強生成", summary: "甲的內容與乙毫不相干。", analogy: "甲。", detail: "甲甲甲。" }));
+    await ok("POST", "/cards", cardInput("dup-b", { title: "重新排序", summary: "乙談的是另一件事。", analogy: "乙。", detail: "乙乙乙。" }));
+    const { duplicates } = await ok("GET", "/cards/duplicates");
+    const pair = duplicates.find((item) => [item.source_id, item.target_id].includes("dup-a") && [item.source_id, item.target_id].includes("dup-b"));
+    assert.ok(!pair || pair.reason !== "標題相同", "two unrelated Chinese titles were called identical");
+  });
+
+  it("still catches the same title twice, punctuation aside", async () => {
+    await ok("POST", "/cards", cardInput("dup-c", { title: "檢索、增強生成" }));
+    const { duplicates } = await ok("GET", "/cards/duplicates");
+    const pair = duplicates.find((item) => [item.source_id, item.target_id].includes("dup-a") && [item.source_id, item.target_id].includes("dup-c"));
+    assert.ok(pair, "a title differing only by punctuation was not caught");
+    assert.equal(pair.reason, "標題相同");
+    assert.ok(pair.source_title && pair.target_title, "the pair does not say which cards it means");
+  });
+
+  it("no longer offers a batch organiser", async () => {
+    const result = await call("POST", "/cards/batch/organize", { card_ids: [], apply: false });
+    assert.equal(result.status, 404);
+    const root = await ok("GET", "");
+    assert.ok(!root.capabilities.includes("cards.batch.organize"), "the capability list still advertises it");
+  });
+});

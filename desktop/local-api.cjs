@@ -245,6 +245,13 @@ function normalizedTags(tags) {
   return result;
 }
 
+/**
+ * The spelling each tag already has in this cabinet.
+ *
+ * "RAG" and "rag" are one tag to a reader and two to a filter, which is what
+ * the batch organiser existed to clean up after. Cards now adopt the spelling
+ * on the way in, so there is nothing to clean up later.
+ */
 function canonicalTagMap(cards) {
   const canonical = new Map();
   for (const card of cards) {
@@ -256,41 +263,50 @@ function canonicalTagMap(cards) {
   return canonical;
 }
 
-function batchOrganize(store, cardIds = []) {
-  const selected = new Set(cardIds);
-  const cards = store.cards.filter((card) => !card.deleted_at && (selected.size === 0 || selected.has(card.id)));
-  const canonicalTags = canonicalTagMap(cards);
-  const suggestions = cards.map((card) => {
-    const suggestedCategory = card.category && card.category !== "待分類" ? card.category : card.topic || "待分類";
-    const suggestedTags = normalizedTags(card.tags).map((tag) => canonicalTags.get(tag.toLocaleLowerCase()) || tag);
-    return {
-      id: card.id,
-      title: card.title,
-      current_category: card.category || "待分類",
-      suggested_category: suggestedCategory,
-      current_tags: card.tags || [],
-      suggested_tags: suggestedTags,
-      changed: suggestedCategory !== (card.category || "待分類") || JSON.stringify(suggestedTags) !== JSON.stringify(card.tags || []),
-    };
-  });
+/**
+ * Pairs that look like the same card twice.
+ *
+ * The rest of what the batch organiser reported is either automatic now (tag
+ * spelling, the category falling back to the topic) or was already on screen
+ * elsewhere: its "relation suggestions" were a copy of the relations the
+ * cabinet rebuilds by itself after every change. Duplicates are the one thing
+ * that needs a person to look, so they are all that is left — and they are
+ * surfaced without being asked for.
+ */
+/**
+ * A title with its spacing and punctuation taken out.
+ *
+ * `\W` looked like the way to do this and is not: with `\w` meaning
+ * [A-Za-z0-9_], every Chinese character counts as punctuation, so an all-Chinese
+ * title normalised to the empty string and every pair of them matched. A
+ * cabinet written in Chinese reported itself as entirely duplicate.
+ */
+function titleKey(title) {
+  return String(title).normalize("NFKC").replace(/[\s\p{P}\p{S}]+/gu, "").toLocaleLowerCase();
+}
+
+function findDuplicates(store) {
+  const cards = store.cards.filter((card) => !card.deleted_at);
   const duplicates = [];
-  const relations = [];
   for (let firstIndex = 0; firstIndex < cards.length; firstIndex += 1) {
     for (let secondIndex = firstIndex + 1; secondIndex < cards.length; secondIndex += 1) {
       const first = cards[firstIndex];
       const second = cards[secondIndex];
       // A card with no vector can still be caught as a duplicate by title.
       const score = comparable(first, second) ? cosine(first.embedding, second.embedding) : 0;
-      const titleSame = String(first.title).replace(/\W+/gu, "").toLocaleLowerCase() === String(second.title).replace(/\W+/gu, "").toLocaleLowerCase();
-      if (titleSame || score >= 0.9) duplicates.push({ source_id: first.id, target_id: second.id, score: Math.round(Math.max(score, titleSame ? 1 : score) * 10000) / 10000, reason: titleSame ? "標題相同" : "語意高度重複" });
-      if (score >= RELATION_MIN_SCORE) {
-        const sharedTag = normalizedTags(first.tags).some((tag) => normalizedTags(second.tags).some((item) => item.toLocaleLowerCase() === tag.toLocaleLowerCase()));
-        const sameCategory = first.category && first.category !== "待分類" && first.category === second.category;
-        relations.push({ source_id: first.id, target_id: second.id, score: Math.round(score * 10000) / 10000, reason: sameCategory ? "同分類 + 語意相似" : sharedTag ? "共享標籤 + 語意相似" : "語意相似" });
-      }
+      const titleSame = titleKey(first.title) === titleKey(second.title);
+      if (!titleSame && score < 0.9) continue;
+      duplicates.push({
+        source_id: first.id,
+        source_title: first.title,
+        target_id: second.id,
+        target_title: second.title,
+        score: Math.round(Math.max(score, titleSame ? 1 : score) * 10000) / 10000,
+        reason: titleSame ? "標題相同" : "語意高度重複",
+      });
     }
   }
-  return { cards: suggestions, duplicates, relations: relations.sort((first, second) => second.score - first.score).slice(0, Math.max(RELATION_LIMIT * 2, 12)) };
+  return duplicates.sort((first, second) => second.score - first.score);
 }
 
 function unitValue(digest, offset) {
@@ -445,7 +461,7 @@ function buildCover(embedding, category, accents = null) {
   };
 }
 
-function normalizeCard(input, previous = {}) {
+function normalizeCard(input, previous = {}, canonicalTags = null) {
   const topic = String(input.topic ?? previous.topic ?? "").trim();
   const category = String(input.category ?? previous.category ?? topic).trim() || topic || "待分類";
   const card = {
@@ -459,7 +475,10 @@ function normalizeCard(input, previous = {}) {
     analogy: String(input.analogy ?? previous.analogy ?? "").trim(),
     detail: String(input.detail ?? previous.detail ?? "").trim(),
     source: String(input.source ?? previous.source ?? "").trim(),
-    tags: Array.isArray(input.tags) ? input.tags.map(String).map((tag) => tag.trim()).filter(Boolean) : (previous.tags || []),
+    // Deduplicated case-insensitively, and spelled the way this cabinet
+    // already spells them when the caller knows what that is.
+    tags: normalizedTags(Array.isArray(input.tags) ? input.tags : (previous.tags || []))
+      .map((tag) => canonicalTags?.get(tag.toLocaleLowerCase()) || tag),
     cover: input.cover ?? previous.cover ?? null,
     created_at: previous.created_at ?? input.created_at ?? now(),
     updated_at: now(),
@@ -1475,7 +1494,6 @@ function createApiServer(store, dataFile, modelRuntime, {
           "/cards/{id}/relations/{target_id}/confirm": { post: {} },
           "/cards/{id}/relations/{target_id}": { delete: {} },
           "/cards/duplicates": { get: {} },
-          "/cards/batch/organize": { post: {} },
           "/categories": { get: {}, post: {} },
           "/categories/{name}": { patch: {} },
           "/categories/merge": { post: {} },
@@ -1608,31 +1626,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (request.method === "GET" && segments[0] === "cards" && segments[1] === "duplicates" && segments.length === 2) {
-      sendJson(response, 200, { duplicates: batchOrganize(store).duplicates });
-      return;
-    }
-
-    if (request.method === "POST" && segments[0] === "cards" && segments[1] === "batch" && segments[2] === "organize" && segments.length === 3) {
-      const body = await readBody(request);
-      const analysis = batchOrganize(store, Array.isArray(body.card_ids) ? body.card_ids.map(String) : []);
-      if (!body.apply) {
-        sendJson(response, 200, { status: "preview", ...analysis });
-        return;
-      }
-      let changedCards = 0;
-      for (const suggestion of analysis.cards) {
-        if (!suggestion.changed) continue;
-        const card = getCard(suggestion.id);
-        if (!card) continue;
-        card.category = suggestion.suggested_category;
-        card.tags = suggestion.suggested_tags;
-        await applyEmbedding(card, modelRuntime, store.category_accents);
-        card.updated_at = now();
-        changedCards += 1;
-      }
-      if (changedCards) rebuildSemanticRelations(store);
-      save();
-      sendJson(response, 200, { status: "applied", changed_cards: changedCards, ...analysis });
+      sendJson(response, 200, { duplicates: findDuplicates(store) });
       return;
     }
 
@@ -1776,7 +1770,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         return;
       }
       const existing = store.cards.find((card) => card.id === String(body.id).trim());
-      const card = normalizeCard(body, existing);
+      const card = normalizeCard(body, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at)));
       await applyEmbedding(card, modelRuntime, store.category_accents);
       // Reply with the object the store holds, not the local copy: save() can
       // still change it — repainting a card that introduced a new category —
@@ -1808,7 +1802,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         return;
       }
       const changes = await readBody(request);
-      const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing);
+      const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at && item.id !== existing.id)));
       await applyEmbedding(card, modelRuntime, store.category_accents);
       Object.assign(existing, card);
       rebuildSemanticRelationsFor(store, [existing.id]);

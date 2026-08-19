@@ -56,14 +56,13 @@ export type CategoryRecord = {
   updated_at?: string | null;
 };
 
-export type BatchOrganizeResult = {
-  status?: string;
-  task_id?: string | null;
-  changed_cards?: number;
-  cards?: Array<{ id: string; title: string; suggested_category: string; suggested_tags: string[]; changed: boolean }>;
-  duplicates?: Array<{ source_id: string; target_id: string; score: number; reason: string }>;
-  relations?: Array<{ source_id: string; target_id: string; score: number; reason: string }>;
-  detail?: string;
+export type DuplicatePair = {
+  source_id: string;
+  source_title: string;
+  target_id: string;
+  target_title: string;
+  score: number;
+  reason: string;
 };
 
 export type RelationEdge = {

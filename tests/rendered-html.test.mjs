@@ -687,3 +687,28 @@ test("the app moves on one set of timings", async () => {
   assert.match(page, /"--i": Math\.min\(index, \d+\)/u, "the card stagger is uncapped");
   assert.match(page, /"--s": Math\.min\(order, \d+\)/u, "the category stagger is uncapped");
 });
+
+test("duplicates come to the reader instead of waiting in a panel", async () => {
+  // The AI batch organiser reported four things behind a card selection and a
+  // preview: two of them are done on save now, one was a copy of the relation
+  // view, and this one — the only one that needs a person to look — was the
+  // least likely to be found, since nobody opens a panel to discover something
+  // they do not know is there.
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
+
+  assert.doesNotMatch(page, /批次整理/u, "the batch organiser is back in the toolbar");
+  assert.doesNotMatch(page, /batch\/organize/u, "the batch endpoint is being called again");
+  assert.doesNotMatch(api, /batchOrganize/u, "the batch analysis is back");
+
+  assert.match(page, /const loadDuplicates = async/u, "nothing reads the duplicates");
+  assert.match(page, /void loadDuplicates\(\)/u, "the duplicates are never actually read");
+  assert.match(page, /className="duplicate-notice"/u, "there is nowhere for them to show up");
+  assert.match(css, /\.duplicate-notice \{/u);
+
+  // Each side of a pair opens its own card: a duplicate is not actionable
+  // until you can see both of them.
+  assert.match(page, /setViewerCardId\(pair\.source_id\)/u);
+  assert.match(page, /setViewerCardId\(pair\.target_id\)/u);
+});

@@ -5969,3 +5969,88 @@ a:focus-visible {
 .settings-modal-backdrop.is-closing .model-settings-panel {
   animation: sink-out var(--motion-base) var(--ease-in-out) both;
 }
+
+/* ── Duplicates, unasked for ───────────────────────────────────────────────
+   This used to be one of four things a batch panel reported, behind a card
+   selection and a preview step. Nobody opens a panel to find out something they
+   do not know is there, so it comes to them instead — quietly, and only when
+   there is something to say. */
+
+.duplicate-notice {
+  animation: rise-in var(--motion-slow) var(--ease-out) both;
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 30%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 76%, var(--accent-amber-soft));
+  margin: 0 0 16px;
+  overflow: hidden;
+}
+
+.duplicate-notice__face {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 0.78rem;
+  gap: 8px;
+  padding: 10px 15px;
+  text-align: left;
+  width: 100%;
+}
+
+.duplicate-notice__count {
+  background: color-mix(in srgb, var(--accent-amber) 22%, transparent);
+  border-radius: 999px;
+  color: var(--accent-amber);
+  font-weight: 600;
+  min-width: 22px;
+  padding: 1px 8px;
+  text-align: center;
+}
+
+.duplicate-notice__toggle {
+  color: var(--accent-amber);
+  font-size: 0.72rem;
+  margin-left: auto;
+}
+
+.duplicate-notice__list {
+  animation: rise-in var(--motion-base) var(--ease-out) both;
+  border-top: 1px solid color-mix(in srgb, var(--accent-amber) 20%, var(--line));
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 11px 15px 13px;
+}
+
+.duplicate-notice__list li {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.duplicate-notice__list button {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  padding: 0;
+}
+
+.duplicate-notice__list button:hover {
+  border-bottom-color: var(--accent-amber);
+  color: var(--accent-amber);
+}
+
+.duplicate-notice__list small,
+.duplicate-notice__more {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
