@@ -55,7 +55,8 @@
 .collection-card--coral,
 .reading-related__item--coral,
 .table-card-button--coral,
-.relation-node--coral {
+.relation-node--coral,
+.relation-lane--coral {
   --domain-color: var(--accent-coral);
   --domain-soft: var(--accent-coral-soft);
 }
@@ -63,7 +64,8 @@
 .collection-card--sky,
 .reading-related__item--sky,
 .table-card-button--sky,
-.relation-node--sky {
+.relation-node--sky,
+.relation-lane--sky {
   --domain-color: var(--accent-sky);
   --domain-soft: var(--accent-sky-soft);
 }
@@ -71,7 +73,8 @@
 .collection-card--lavender,
 .reading-related__item--lavender,
 .table-card-button--lavender,
-.relation-node--lavender {
+.relation-node--lavender,
+.relation-lane--lavender {
   --domain-color: var(--accent-lavender);
   --domain-soft: var(--accent-lavender-soft);
 }
@@ -79,7 +82,8 @@
 .collection-card--mint,
 .reading-related__item--mint,
 .table-card-button--mint,
-.relation-node--mint {
+.relation-node--mint,
+.relation-lane--mint {
   --domain-color: var(--accent-mint);
   --domain-soft: var(--accent-mint-soft);
 }
@@ -87,7 +91,8 @@
 .collection-card--amber,
 .reading-related__item--amber,
 .table-card-button--amber,
-.relation-node--amber {
+.relation-node--amber,
+.relation-lane--amber {
   --domain-color: var(--accent-amber);
   --domain-soft: var(--accent-amber-soft);
 }
@@ -95,7 +100,8 @@
 .collection-card--rose,
 .reading-related__item--rose,
 .table-card-button--rose,
-.relation-node--rose {
+.relation-node--rose,
+.relation-lane--rose {
   --domain-color: var(--accent-rose);
   --domain-soft: var(--accent-rose-soft);
 }
@@ -103,7 +109,8 @@
 .collection-card--indigo,
 .reading-related__item--indigo,
 .table-card-button--indigo,
-.relation-node--indigo {
+.relation-node--indigo,
+.relation-lane--indigo {
   --domain-color: var(--accent-indigo);
   --domain-soft: var(--accent-indigo-soft);
 }
@@ -111,7 +118,8 @@
 .collection-card--moss,
 .reading-related__item--moss,
 .table-card-button--moss,
-.relation-node--moss {
+.relation-node--moss,
+.relation-lane--moss {
   --domain-color: var(--accent-moss);
   --domain-soft: var(--accent-moss-soft);
 }
@@ -3857,7 +3865,9 @@ a:focus-visible {
   border: 1px solid rgba(33, 31, 39, 0.11);
   border-radius: 20px;
   cursor: grab;
-  min-height: 500px;
+  /* Grows with the window, since the useful size of a graph is however much of
+     it you can see at once — but stops before it outgrows a laptop screen. */
+  min-height: clamp(560px, 68vh, 900px);
   overflow: hidden;
   position: relative;
   user-select: none;
@@ -3893,6 +3903,35 @@ a:focus-visible {
   inset: 0;
   opacity: 0.24;
   position: absolute;
+}
+
+/* One band per colour, behind the nodes it holds. The tint is the lane's own
+   accent, so the band and the dots inside it say the same thing. */
+.relation-lane {
+  align-items: flex-start;
+  animation: fade-in var(--motion-base) var(--ease-out) both;
+  background: color-mix(in srgb, var(--domain-color, var(--line)) 7%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--domain-color, var(--line)) 24%, transparent);
+  border-radius: 18px;
+  bottom: 5%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  top: 5%;
+  z-index: 0;
+}
+
+.relation-lane small {
+  color: color-mix(in srgb, var(--domain-color, var(--ink)) 72%, var(--ink));
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  max-width: 88%;
+  overflow: hidden;
+  padding-top: 8px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .relation-line {
@@ -4325,7 +4364,7 @@ a:focus-visible {
   }
 
   .relation-canvas {
-    min-height: 550px;
+    min-height: clamp(560px, 64vh, 720px);
   }
 
   .relation-node {
@@ -4515,7 +4554,7 @@ a:focus-visible {
   }
 
   .relation-canvas {
-    min-height: 590px;
+    min-height: clamp(590px, 62vh, 680px);
   }
 
   .relation-node {

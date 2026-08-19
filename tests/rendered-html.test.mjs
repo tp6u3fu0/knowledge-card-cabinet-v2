@@ -712,3 +712,44 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
   assert.match(page, /setViewerCardId\(pair\.source_id\)/u);
   assert.match(page, /setViewerCardId\(pair\.target_id\)/u);
 });
+
+test("the canvas can be arranged by colour", async () => {
+  // A card's colour is its category's colour, so lanes of colour are lanes of
+  // category — the arrangement people were doing by hand, dragging one node at
+  // a time, until the graph was too big to be worth the dragging.
+  const view = await readFile(new URL("../app/collection/relation-view.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(view, /function createColorLayout/u, "there is no colour layout");
+  assert.match(view, /aria-label="節點排列方式"/u, "the arrangement cannot be chosen");
+  assert.match(view, /\["color", "依顏色"\]/u);
+
+  // Warm to cool, so the canvas comes out a spectrum rather than a shuffle.
+  assert.match(view, /const LANE_ORDER = \["coral", "rose", "amber", "moss", "mint", "sky", "indigo", "lavender"\]/u);
+
+  // A laid-out node has to land where a dragged node is allowed to be, or it
+  // could never be dragged back to where it started.
+  const clamps = view.match(/clamp\(nextX, (\d+), (\d+)\)[\s\S]*?clamp\(nextY, (\d+), (\d+)\)/u);
+  assert.ok(clamps, "the drag clamps moved");
+  assert.ok(
+    view.includes(`Math.min(${clamps[2]}, Math.max(${clamps[1]}, laneCenter`),
+    "a lane can put a node outside the draggable width",
+  );
+  assert.ok(
+    view.includes(`Math.min(${clamps[4]}, Math.max(${clamps[3]}, top`),
+    "a lane can put a node outside the draggable height",
+  );
+
+  // Pressing the arrangement you are already in re-deals it, which is the only
+  // way back after dragging half the canvas around.
+  assert.match(view, /setLayoutNonce\(\(current\) => current \+ 1\)/u);
+  assert.match(view, /const layoutKey = `\$\{layoutMode\}\|\$\{layoutNonce\}/u);
+
+  // The lane says which category it is: past eight categories two share a colour.
+  assert.match(view, /className=\{`relation-lane relation-lane--\$\{lane\.accent\}`\}/u);
+  assert.match(css, /\.relation-lane--coral \{/u, "lane bands have no colour of their own");
+
+  // The graph is the whole point of the view, so it gets the window's height
+  // rather than a fixed slab.
+  assert.match(css, /\.relation-canvas \{[^}]*min-height: clamp\(/u, "the canvas is back to a fixed height");
+});

@@ -61,6 +61,80 @@ function createNodePositions(cards: KnowledgeCard[]): Record<string, NodePositio
   }));
 }
 
+/**
+ * Lanes read warm to cool rather than in palette order, so a canvas arranged by
+ * colour comes out as a spectrum instead of a shuffle.
+ */
+const LANE_ORDER = ["coral", "rose", "amber", "moss", "mint", "sky", "indigo", "lavender"];
+
+type ColorLane = { accent: string; label: string; left: number; width: number };
+
+/**
+ * Nodes grouped into one lane per colour.
+ *
+ * A card's colour is its category's colour, so this is category grouping that
+ * needs no labels to be read — but the lane carries the category names anyway,
+ * since past eight categories two of them share a colour.
+ */
+function createColorLayout(cards: KnowledgeCard[]): { positions: Record<string, NodePosition>; lanes: ColorLane[] } {
+  const grouped = new Map<string, KnowledgeCard[]>();
+  cards.forEach((card) => {
+    const bucket = grouped.get(card.accent);
+    if (bucket) bucket.push(card);
+    else grouped.set(card.accent, [card]);
+  });
+
+  const rank = (accent: string) => {
+    const index = LANE_ORDER.indexOf(accent);
+    return index < 0 ? LANE_ORDER.length : index;
+  };
+  const ordered = Array.from(grouped.entries()).sort(([first], [second]) => rank(first) - rank(second));
+
+  const left = 9;
+  const laneWidth = (91 - left) / Math.max(ordered.length, 1);
+  const positions: Record<string, NodePosition> = {};
+  const lanes: ColorLane[] = [];
+
+  ordered.forEach(([accent, laneCards], laneIndex) => {
+    const laneLeft = left + laneWidth * laneIndex;
+    const laneCenter = laneLeft + laneWidth / 2;
+    // A node is about 4% of the canvas wide, so lanes hold as many columns as
+    // fit at that spacing and no more.
+    const maxColumns = Math.max(1, Math.floor(laneWidth / 4.6));
+    // Wider than tall on purpose: every row costs a node's label as well as a
+    // node, so rows crowd sooner than columns do.
+    const columns = Math.max(1, Math.min(maxColumns, Math.ceil(Math.sqrt(laneCards.length / 1.5))));
+    const rows = Math.ceil(laneCards.length / columns);
+    const columnStep = columns > 1 ? Math.min((laneWidth * 0.74) / (columns - 1), 6) : 0;
+    // Rows compress rather than overflow: a crowded lane is readable at a lower
+    // zoom, a lane running off the canvas is not readable at all.
+    const rowStep = rows > 1 ? Math.min(11, 68 / (rows - 1)) : 0;
+    const top = 50 - ((rows - 1) * rowStep) / 2;
+
+    const categories = Array.from(new Set(laneCards.map((card) => card.category || "待分類")));
+    lanes.push({
+      accent,
+      label: categories.length > 2 ? `${categories.slice(0, 2).join("・")}…` : categories.join("・"),
+      left: laneLeft,
+      width: laneWidth,
+    });
+
+    laneCards.forEach((card, index) => {
+      const row = Math.floor(index / columns);
+      const column = index % columns;
+      // The last row centres on whatever it actually holds instead of hanging
+      // off to the left of a full row above it.
+      const rowWidth = Math.min(columns, laneCards.length - row * columns);
+      positions[card.id] = {
+        x: Math.min(90, Math.max(10, laneCenter + (column - (rowWidth - 1) / 2) * columnStep)),
+        y: Math.min(88, Math.max(12, top + row * rowStep)),
+      };
+    });
+  });
+
+  return { positions, lanes };
+}
+
 export function RelationView({
   cards,
   edges,
@@ -77,6 +151,10 @@ export function RelationView({
   onRelationCreated: () => void;
 }) {
   const [relationFilter, setRelationFilter] = useState<RelationFilter>("all");
+  const [layoutMode, setLayoutMode] = useState<"free" | "color">("free");
+  // Bumped on every press of the arrangement buttons, so pressing the mode you
+  // are already in re-deals the canvas after you have dragged it about.
+  const [layoutNonce, setLayoutNonce] = useState(0);
   const [relationStrength, setRelationStrength] = useState<RelationStrength>("all");
   const [relationCategory, setRelationCategory] = useState("全部");
   const [isRelationComposerOpen, setIsRelationComposerOpen] = useState(false);
@@ -144,15 +222,20 @@ export function RelationView({
   }, [zoom]);
   const showNodeLabels = zoom >= 1;
   const cardSignature = cards.map((card) => card.id).join("|");
+  const focusedSignature = focusedCards.map((card) => card.id).join("|");
+  const colorLayout = layoutMode === "color" ? createColorLayout(focusedCards) : null;
   const visiblePairKey = visiblePairs.map(([first, second]) => `${first}-${second}`).join("|");
 
-  // Re-deal the canvas when the card set changes. Adjusting during render is
-  // React's documented alternative to resetting state from an effect, which
-  // would render once with the stale layout first.
-  const [lastCardSignature, setLastCardSignature] = useState(cardSignature);
-  if (cardSignature !== lastCardSignature) {
-    setLastCardSignature(cardSignature);
-    setPositions(createNodePositions(cards));
+  // Re-deal the canvas when the card set or the arrangement changes. Adjusting
+  // during render is React's documented alternative to resetting state from an
+  // effect, which would render once with the stale layout first.
+  // Colour lanes are dealt from the cards actually on screen, so the category
+  // filter re-deals them; the free layout only cares about the whole set.
+  const layoutKey = `${layoutMode}|${layoutNonce}|${layoutMode === "color" ? focusedSignature : cardSignature}`;
+  const [lastLayoutKey, setLastLayoutKey] = useState(layoutKey);
+  if (layoutKey !== lastLayoutKey) {
+    setLastLayoutKey(layoutKey);
+    setPositions(colorLayout ? colorLayout.positions : createNodePositions(cards));
     setPan({ x: 0, y: 0 });
   }
 
@@ -442,6 +525,26 @@ export function RelationView({
             <span aria-hidden="true">＋</span>
             自製關聯
           </button>
+          <span className="relation-toolbar__label">排列</span>
+          <div className="relation-filter" aria-label="節點排列方式">
+            {([
+              ["free", "自由"],
+              ["color", "依顏色"],
+            ] as const).map(([mode, label]) => (
+              <button
+                className={layoutMode === mode ? "is-active" : ""}
+                key={mode}
+                type="button"
+                onClick={() => {
+                  setLayoutMode(mode);
+                  setLayoutNonce((current) => current + 1);
+                }}
+                aria-pressed={layoutMode === mode}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <CardSelect
             className="relation-select-control"
             label="分類"
@@ -563,6 +666,16 @@ export function RelationView({
           style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
         >
           <span className="relation-canvas__grid" aria-hidden="true" />
+          {colorLayout?.lanes.map((lane) => (
+            <span
+              className={`relation-lane relation-lane--${lane.accent}`}
+              key={lane.accent}
+              style={{ left: `${lane.left}%`, width: `${lane.width}%` }}
+              aria-hidden="true"
+            >
+              <small>{lane.label}</small>
+            </span>
+          ))}
           {displayEdges.map((edge) => {
             const pair = relationKey(edge.source_id, edge.target_id);
             // A manual link is an assertion, not a measurement, so it draws at a

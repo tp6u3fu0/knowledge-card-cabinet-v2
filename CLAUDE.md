@@ -157,6 +157,8 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
 | `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
 | `setting-cards.tsx` 的卡片結構 | `globals.css` 的 `.setting-card` 覆寫（`.collection-card__copy span` 與 `__tags` 在收藏頁是 `display:none`） | 設定卡的說明與標籤整片消失 |
+| 關聯圖的節點版面（`createColorLayout`） | 算出來的位置必須落在 `moveDrag` 的 clamp 範圍內（目前 x 10–90、y 12–88） | 節點被排到拖不回來的地方；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
+| 顏色分道的色帶 | accent 類別要同時掛給 `.relation-lane--<色>`（`--domain-*` 只設在列出來的選擇器上） | 色帶全變灰，等於沒有分道 |
 | `.card-deck__item` 加上任何 transform／filter／container-type | `card-drag.ts` 的 `holderOf()` 必須把它攤平 | 被拿起的卡片以卡槽為定位基準，會跟游標差一個展開位移 |
 | `CardDeck` 的展開版面 | 位置只能用量出來的 px（`translate()` 裡的 `%` 是以被移動的卡片為基準）；展開是換行的牆，不是一長排 | 間距算出 0、卡堆永遠展不開（不會報錯）；或八張卡擠成一排，每張只剩右緣一條 |
 | `SettingCard` 的拖曳 | 點擊路徑必須保留（鍵盤與螢幕閱讀器只有這條） | 拖不動的人完全無法換模型 |
