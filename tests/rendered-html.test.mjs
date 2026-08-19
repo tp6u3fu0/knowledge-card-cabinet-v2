@@ -300,6 +300,18 @@ test("the docs only reference scripts and files that exist", async () => {
 
   assert.equal(manifest.license, "MIT");
   await access(new URL("../LICENSE", import.meta.url));
+
+  // The always-on-host path in the README is a docker build, which nothing
+  // else runs. It copied backend/seed.json for months after the Python service
+  // was deleted, so the very first COPY failed and the documented command
+  // could not have worked for anyone who tried it.
+  const dockerfile = await readFile(new URL("../Dockerfile.standalone", import.meta.url), "utf8");
+  const copied = [...dockerfile.matchAll(/^COPY (?!--from)(.+?) \S+$/gmu)].flatMap((match) => match[1].trim().split(/\s+/u));
+  assert.ok(copied.length > 3, `only found ${copied.length} COPY sources to check`);
+  for (const source of copied) {
+    if (source.includes("*")) continue;
+    await access(new URL(`../${source}`, import.meta.url));
+  }
 });
 
 test("the card back bounds its copy as one region", async () => {

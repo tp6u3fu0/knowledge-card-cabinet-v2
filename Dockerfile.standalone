@@ -44,7 +44,11 @@ COPY --from=builder /app/public ./public
 COPY --from=runtime-deps /app/desktop/node_modules ./desktop/node_modules
 COPY desktop/*.cjs ./desktop/
 COPY desktop/package.json ./desktop/
-COPY backend/seed.json ./backend/seed.json
+# server.cjs reads this next to itself, and `COPY desktop/*.cjs` does not bring
+# it. The line here used to name backend/seed.json, from before the Python
+# service was removed — a path that has not existed for some time, which made
+# `docker build` fail on its first COPY.
+COPY desktop/seed.json ./desktop/seed.json
 
 # The data volume has to be writable by the unprivileged user the app runs as.
 RUN mkdir -p /data && chown -R node:node /data /app
