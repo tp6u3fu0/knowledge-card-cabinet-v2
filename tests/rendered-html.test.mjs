@@ -588,3 +588,58 @@ test("the dimension guide states the choice, not an essay per option", async () 
   assert.match(css, /\.dimension-guide__face \{/u, "the guide has no face to click");
   assert.match(css, /@keyframes dimension-guide-open \{/u);
 });
+
+test("each explanation is given once, where it changes a decision", async () => {
+  // The settings page had grown a habit of saying the same thing three times:
+  // in the section description, again in the slot hint under it, and a third
+  // time in the glossary card beside it. The rule is one statement per fact,
+  // at the place it changes what someone does — background lives in the
+  // glossary card, and only there.
+  const [panels, glossary, catalogue] = await Promise.all([
+    readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/collection/glossary.ts", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/model-runtime.cjs", import.meta.url), "utf8"),
+  ]);
+
+  // Changing embedding rebuilds every card. Said where a change is committed,
+  // not on individual catalogue entries, where it read as a property of those
+  // two models rather than of the choice.
+  const rebuildOnCards = catalogue.match(/description: "[^"]*重建[^"]*"/gu) ?? [];
+  assert.deepEqual(rebuildOnCards, [], `the rebuild warning is back on ${rebuildOnCards.length} model cards`);
+  assert.match(panels, /若動到 embedding，儲存後會重建所有卡片的向量與關聯/u, "the save bar no longer says what saving costs");
+  assert.match(panels, /換模型會重建所有卡片的向量/u, "the simple picker applies a model immediately and no longer says so");
+
+  // Background that belongs to the glossary card, and is not also said inline
+  // a few lines above it: `kept` is what the card must still explain, `gone` is
+  // the inline copy of it.
+  for (const [term, kept, gone] of [
+    ["onnx", "onnx-community", "onnx-community"],
+    ["local-vs-api", "完全不離開這台機器", "用本機供應商時"],
+    ["api-dimensions", "數數看回來幾個數字", "服務不會用別的方式"],
+  ]) {
+    assert.ok(glossary.includes(kept), `the ${term} card lost its explanation`);
+    assert.ok(!panels.includes(gone), `${term} is explained inline as well as in the glossary`);
+  }
+
+  // What must not be trimmed: the sentences someone loses data or privacy by
+  // not reading.
+  for (const warning of [
+    "這會清除目前所有啟用卡片、垃圾桶卡片與關聯",
+    "不含 API 金鑰",
+    "匯入會取代目前的本機資料",
+    "Tailscale",
+  ]) {
+    assert.ok(panels.includes(warning), `a warning was trimmed away: ${warning}`);
+  }
+
+  // A section description that repeats its own slot hint is the shape the trim
+  // was about; the two must not be the same sentence.
+  const descriptions = [...panels.matchAll(/description="([^"]+)"/gu)].map((match) => match[1]);
+  const hints = [...panels.matchAll(/slotHint="([^"]+)"/gu)].map((match) => match[1]);
+  for (const hint of hints) {
+    const core = hint.replace(/[。，、]/gu, "").slice(0, 8);
+    for (const description of descriptions) {
+      assert.ok(!description.replace(/[。，、]/gu, "").includes(core), `a description repeats its slot hint: ${core}`);
+    }
+  }
+});

@@ -162,6 +162,7 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `SettingCard` 的拖曳 | 點擊路徑必須保留（鍵盤與螢幕閱讀器只有這條） | 拖不動的人完全無法換模型 |
 | 翻卡的圓角 | 面與邊都吃 `--card-radius`，只改一邊會對不上 | 圓角卡片底下露出方角的邊 |
 | 翻卡的厚度畫法 | 是「同一個輪廓沿 z 疊很多層」，不是站在四邊的平板 | 平板在圓角處切過去，看起來像板子從卡片長出來，四個角還是開的 |
+| 新增介面文案 | 一件事只講一次，講在它會改變決定的地方；「這是什麼」交給旁邊的術語卡，不要inline 再講一遍 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——同一句話出現在描述、卡槽提示、術語卡三個地方 |
 | 新增一個會跑很久的工作（下載、重建向量） | 後端回 202 + `task_id`，前端用 `watchBackgroundTask` 接手，**不要 await**；設定關掉後靠 `.background-task-dock` 顯示 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——整個 app 會被一個跟閱讀無關的工作鎖住好幾分鐘 |
 | 拖曳卡片放開後的回位 | `card-drag.ts` 的 `clear()` 必須「還原 → flush → 才解開 transition」 | 卡片先飛回原位，接著卡槽再帶著它從最左邊滑一次 |
 | 新增一個下拉選單 | 用 `CardSelect`，不要用原生 `<select>`；面板是 portal 到 body 的 fixed 元素 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——原生選單長得像另一個程式，而且會被容器裁掉 |

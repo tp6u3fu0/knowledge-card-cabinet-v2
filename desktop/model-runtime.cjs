@@ -107,7 +107,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 12,
     tier: "進階硬體",
     languages: "多語言，中文品質需實測",
-    description: "較完整的指令微調模型，能嘗試更自然的摘要與欄位整理；CPU 推論會較慢。",
+    description: "較完整的指令微調模型，摘要更自然，CPU 推論較慢。",
     builtin: false,
   },
   {
@@ -125,7 +125,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 16,
     tier: "進階硬體",
     languages: "多語言，包含中文",
-    description: "以多語言 mT5 為基礎，較適合中文筆記；模型較大，CPU 下載與整理時間也會增加。",
+    description: "以多語言 mT5 為基礎，較適合中文筆記；模型較大，也比較慢。",
     builtin: false,
   },
   {
@@ -161,7 +161,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 4,
     tier: "輕量硬體",
     languages: "英文語意搜尋",
-    description: "真正的句向量模型，維持 384 維，適合英文資料與需要較自然語意關聯的收藏。",
+    description: "真正的句向量模型，維持 384 維，適合英文收藏。",
     builtin: false,
   },
   {
@@ -180,7 +180,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 8,
     tier: "平衡硬體",
     languages: "中文、英文與多語言",
-    description: "適合知識卡冊的中英文語意關聯；切換後會重新建立所有卡片的向量與關聯。",
+    description: "適合知識卡冊的中英文語意關聯。",
     builtin: false,
   },
   {
@@ -202,7 +202,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 4,
     tier: "輕量硬體",
     languages: "中文語意搜尋",
-    description: "專為中文訓練的輕量句向量模型。下載很小、CPU 也跑得快，是中文收藏在不想下載大模型時的預設選擇。",
+    description: "專為中文訓練的輕量句向量模型，下載很小、CPU 也跑得快。",
     builtin: false,
   },
   {
@@ -221,7 +221,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 8,
     tier: "平衡硬體",
     languages: "中文語意搜尋",
-    description: "1024 維、專為中文訓練。純中文收藏的語意關聯品質最好，代價是下載與每張卡片的處理時間都比較長。",
+    description: "1024 維、專為中文訓練。純中文收藏品質最好，下載與處理都比較久。",
     builtin: false,
   },
   {
@@ -261,7 +261,7 @@ const MODEL_CATALOG = [
     min_memory_gb: 8,
     tier: "平衡硬體",
     languages: "中文、英文與多語言長文",
-    description: "1024 維、支援長文的多語言模型，中文語意關聯品質明顯優於 384 維模型。下載較大，切換後會重建所有卡片的向量與關聯。",
+    description: "1024 維、支援長文的多語言模型，中文語意關聯品質明顯優於 384 維。下載較大。",
     builtin: false,
   },
 ];

@@ -354,14 +354,14 @@ function DeviceManagementPanel({
       <div className="settings-api-intro settings-api-intro--devices">
         <span className="model-settings-kicker">DEVICE PAIRING / HOST ONLY</span>
         <strong>讓你的裝置安全取得自己的憑證</strong>
-        <p>配對碼只可使用一次，十分鐘後失效。桌面版不會顯示或保存裝置 token；iPhone 應將 token 儲存在 Keychain。遠端連線仍須透過 TLS 或 Tailscale／WireGuard。</p>
+        <p>每台裝置拿到的鑰匙只屬於它自己，桌面這邊不會顯示也不會保存。要從外網連，請走 Tailscale 或 WireGuard。</p>
       </div>
 
       <section className="device-pairing-card">
         <div>
           <span className="model-settings-kicker">01 / PAIRING CODE</span>
           {pairingCode ? <strong className="device-pairing-code">{pairingCode.code}</strong> : <p>產生配對碼後，在 iPhone 的知識卡冊輸入即可。</p>}
-          {pairingCode ? <small>請在 {expiry} 前完成配對。每次產生新碼都會使舊碼失效。</small> : null}
+          {pairingCode ? <small>請在 {expiry} 前完成配對；產生新碼會讓舊碼失效。</small> : null}
           {pairingPayload ? <PairingQRCode payload={pairingPayload} /> : pairingCode ? <small>啟用同一 Wi‑Fi 分享後，即可顯示可掃描的 iPhone 配對碼。</small> : null}
         </div>
         <button className="create-card-submit" type="button" onClick={onIssueCode} disabled={isIssuingCode}>
@@ -451,7 +451,7 @@ function PairingQRCode({ payload }: { payload: string }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt="iPhone 配對 QR code" />
       ) : <span>產生 QR code 中…</span>}
-      <p>在 iPhone 點選「掃描主機配對碼」；QR 不包含裝置 token，且配對碼只能使用一次。</p>
+      <p>在 iPhone 點選「掃描主機配對碼」。QR 裡只有配對碼，沒有鑰匙。</p>
     </div>
   );
 }
@@ -489,14 +489,14 @@ export function DataManagementPanel({
       <div className="settings-api-intro settings-api-intro--data">
         <span className="model-settings-kicker">LOCAL DATA / SAFETY</span>
         <strong>先備份，再整理本機資料</strong>
-        <p>資料會留在這台電腦的本機資料庫。匯出會下載一份 JSON 備份；重置只會清除卡片、垃圾桶與關聯，不會刪除模型檔案或資料表結構。</p>
+        <p>資料都留在這台電腦。動任何東西之前，先下載一份備份。</p>
       </div>
 
       <section className="settings-data-card">
         <div className="settings-block__heading">
           <span className="model-settings-kicker">01 / BACKUP</span>
           <h3>匯出本機資料</h3>
-          <p>包含卡片內容、封面資料、embedding、垃圾桶內容與卡片關聯。API 金鑰不會寫入備份檔。匯入會取代目前本機資料。</p>
+          <p>含卡片、封面、向量、垃圾桶與關聯，不含 API 金鑰。匯入會取代目前的本機資料。</p>
         </div>
         <GlossaryAside ids={["backup"]} />
         <div className="settings-data-actions">
@@ -603,10 +603,9 @@ function AddModelForm({
     <form className="model-add-form" onSubmit={submit}>
       <div className="model-add-form__heading">
         <span className="model-settings-kicker">ADD FROM HUGGING FACE</span>
-        <strong>貼上模型 id，就多一張{kind === "embedding" ? "向量" : "整理"}卡</strong>
+        <strong>貼上模型 id</strong>
         <p>
-          填 <code>作者/模型名稱</code>，其餘資訊會自動從 Hugging Face 讀取。本機只跑得動 ONNX 權重，
-          所以請挑有 ONNX 版本的模型——<code>Xenova</code> 與 <code>onnx-community</code> 轉檔的都可以。
+          填 <code>作者/模型名稱</code>，其餘資訊會自動從 Hugging Face 讀取。本機只跑得動 ONNX 權重。
         </p>
       </div>
       <div className="model-add-form__row">
@@ -789,7 +788,7 @@ function SimpleModelPicker({
         kind="summary"
         kicker="01 / 整理筆記"
         title="要多大的整理模型？"
-        description="模型越大越能理解句子脈絡，但下載更久、每次整理也更慢。攤開卡堆後，點一下或拖進卡槽都可以，隨時能改。"
+        description="越大的模型讀得越懂上下文，下載和整理也越慢。隨時可以換，不影響已經存好的卡片。"
         slotKicker="ACTIVE / 整理"
         slotLabel="整理卡槽"
         slotHint="貼上筆記時，由這張卡負責拆成欄位。"
@@ -816,7 +815,7 @@ function SimpleModelPicker({
         kind="embedding"
         kicker="02 / 搜尋與關聯"
         title="你的筆記主要用什麼語言？"
-        description="這會決定卡片之間的語意距離。每個語言與大小的組合都有一個專門訓練的模型；換模型會重建所有卡片的向量。"
+        description="每個語言與大小的組合都有專門訓練的模型。換模型會重建所有卡片的向量。"
         slotKicker="ACTIVE / 向量"
         slotLabel="向量卡槽"
         slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
@@ -1213,7 +1212,7 @@ export function ModelSettingsPanel({
                           : `這個服務回傳 ${dimensionProbe.dimensions} 維，和現有卡片一致。`}
                   </span>
                 ) : (
-                  <span>送一小段文字過去，數回傳幾個數字——服務不會用別的方式告訴你這件事。</span>
+                  <span>送一小段文字過去，數回傳幾個數字。</span>
                 )}
               </div>
             ) : null}
@@ -1251,7 +1250,7 @@ export function ModelSettingsPanel({
             ) : null}
           </div>
         ) : null}
-        {kind === "embedding" ? <p className="settings-provider-card__note">目前資料庫向量固定為 {setting?.dimensions ?? 384} 維；自訂 embedding 必須回傳這個維度，才可以重新建立關聯。</p> : null}
+        {kind === "embedding" ? <p className="settings-provider-card__note">目前卡片是 {setting?.dimensions ?? 384} 維，自訂 embedding 必須回傳同樣的維度。</p> : null}
         </div>
         {/* One explanation per term per tab: the two provider blocks are the
             same choice made twice, and the answer does not change between
@@ -1335,8 +1334,7 @@ export function ModelSettingsPanel({
             <strong>接入你熟悉的模型供應商</strong>
             <p>
               支援 OpenAI-compatible 的服務，包含在本機執行的 <b>Ollama</b> 與 <b>LM Studio</b>，以及 Hugging Face TEI。
-              選擇供應商會自動填入位址，按「偵測可用模型」就能列出該服務已經載入的模型。
-              用本機供應商時，卡片內容不會離開這台電腦。
+              選擇供應商會自動填入位址。
             </p>
           </div>
           {providerFields("summary", "摘要與欄位整理", "用來把筆記整理成可檢查的知識卡草稿。")}
@@ -1346,7 +1344,7 @@ export function ModelSettingsPanel({
           <div className={`settings-api-actions${hasUnsavedSettings ? " is-dirty" : ""}`}>
             <p>
               {hasUnsavedSettings
-                ? "有尚未儲存的變更。儲存後若 embedding 設定有變更，系統會重新建立現有卡片的向量與關聯。"
+                ? "有尚未儲存的變更。若動到 embedding，儲存後會重建所有卡片的向量與關聯。"
                 : "目前的設定都已儲存。"}
             </p>
             <button className="create-card-submit" type="submit" disabled={isSettingsSaving || isBackgroundTaskRunning || !hasUnsavedSettings}>
@@ -1390,7 +1388,7 @@ export function ModelSettingsPanel({
             kind="summary"
             kicker="01 / SUMMARY"
             title="摘要與欄位整理"
-            description="決定「先貼上筆記」時，模型如何幫你整理卡片。攤開卡堆後，點一下或把卡片拖進卡槽都可以。"
+            description="所有可用的整理模型。越大讀得越懂上下文，下載和整理也越慢。"
             slotKicker="ACTIVE / 整理"
             slotLabel="整理卡槽"
             slotHint="貼上筆記時，由這張卡負責拆成欄位。"
@@ -1411,7 +1409,7 @@ export function ModelSettingsPanel({
             kind="embedding"
             kicker="02 / EMBEDDING"
             title="語意向量與關聯圖"
-            description="決定卡片之間的語意距離與搜尋結果。每個語言與大小的組合都有一個專門訓練的模型。"
+            description="每個語言與大小的組合都有專門訓練的模型；維度的取捨在下面。"
             slotKicker="ACTIVE / 向量"
             slotLabel="向量卡槽"
             slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
@@ -1432,7 +1430,6 @@ export function ModelSettingsPanel({
           </AdvancedModelSection>
           </>
           )}
-          <p className="model-settings-footnote">本機模型執行在 CPU／ONNX runtime；切換到自訂 API 時，只有產生摘要或向量的請求會送到你填入的服務。</p>
         </>
       ) : null}
     </section>
