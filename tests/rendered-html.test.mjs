@@ -711,6 +711,15 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
   // until you can see both of them.
   assert.match(page, /setViewerCardId\(pair\.source_id\)/u);
   assert.match(page, /setViewerCardId\(pair\.target_id\)/u);
+
+  // Saying "duplicate" about two cards that merely belong together is worse
+  // than saying nothing. The evidence is the wording — never a cosine against
+  // a constant (§1.3), and not the collection's own range either: on a small
+  // cabinet that range is noise, and it voted against a retyped card while
+  // giving two unrelated cards a perfect score.
+  const duplicateRule = api.slice(api.indexOf("function findDuplicates"), api.indexOf("function unitValue"));
+  assert.match(duplicateRule, /overlap < DUPLICATE_MIN_OVERLAP/u, "wording is not being checked at all");
+  assert.doesNotMatch(duplicateRule, /cosine\(/u, "similarity is back in the duplicate rule");
 });
 
 test("the canvas can be arranged by colour", async () => {

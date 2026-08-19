@@ -1954,7 +1954,7 @@ export default function CollectionPage() {
                     <button type="button" onClick={() => setViewerCardId(pair.source_id)}>{pair.source_title || pair.source_id}</button>
                     <span aria-hidden="true">↔</span>
                     <button type="button" onClick={() => setViewerCardId(pair.target_id)}>{pair.target_title || pair.target_id}</button>
-                    <small>{pair.reason}{pair.reason === "標題相同" ? "" : ` · ${Math.round(pair.score * 100)}%`}</small>
+                    <small>{pair.reason}{pair.reason === "標題相同" ? "" : ` · 用字重疊 ${Math.round(pair.score * 100)}%`}</small>
                   </li>
                 ))}
                 {duplicatePairs.length > 8 ? <li className="duplicate-notice__more">還有 {duplicatePairs.length - 8} 組</li> : null}

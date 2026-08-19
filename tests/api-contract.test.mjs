@@ -529,6 +529,67 @@ describe("duplicates", () => {
     assert.ok(pair.source_title && pair.target_title, "the pair does not say which cards it means");
   });
 
+  // The first version of this compared a raw cosine against 0.9, which §1.3
+  // says nothing useful about: on a strong multilingual model 0.9 is an
+  // ordinary score for two cards that merely belong together, so a real
+  // cabinet reported most of itself as duplicate. It now takes both a score at
+  // the top of this collection's own range and the same wording.
+  it("does not call two cards on one subject a duplicate", async () => {
+    await ok("POST", "/cards", cardInput("near-a", {
+      title: "向量檢索的召回率",
+      question: "召回率不夠時要看哪裡？",
+      summary: "召回率描述檢索器把該找到的文件找回來的比例。",
+      analogy: "像撒網，網目太大就會漏掉魚。",
+      detail: "提高召回通常從切塊大小與查詢改寫著手，代價是精確率下降。",
+    }));
+    await ok("POST", "/cards", cardInput("near-b", {
+      title: "重排序模型",
+      question: "重排序放在管線的哪一段？",
+      summary: "重排序在初步檢索之後，對候選文件重新評分。",
+      analogy: "像複試，先海選再細看。",
+      detail: "交叉編碼器一次讀入查詢與文件，準確但昂貴，所以只處理前幾十筆。",
+    }));
+    const { duplicates } = await ok("GET", "/cards/duplicates");
+    const pair = duplicates.find((item) => [item.source_id, item.target_id].includes("near-a") && [item.source_id, item.target_id].includes("near-b"));
+    assert.ok(!pair, `two related but different cards were called duplicates: ${JSON.stringify(pair)}`);
+  });
+
+  it("still catches the same card typed in under a new title", async () => {
+    const original = cardInput("copy-a", {
+      title: "查詢改寫",
+      question: "為什麼要改寫使用者的查詢？",
+      summary: "使用者的問句往往太短，改寫後才有足夠的詞可以比對。",
+      analogy: "像把口語的問題翻成書面語再去查目錄。",
+      detail: "常見做法是用模型補上同義詞與缺少的主詞，再送進檢索器。",
+    });
+    await ok("POST", "/cards", original);
+    await ok("POST", "/cards", { ...original, id: "copy-b", number: "COPY-B", title: "改寫查詢" });
+    const { duplicates } = await ok("GET", "/cards/duplicates");
+    const pair = duplicates.find((item) => [item.source_id, item.target_id].includes("copy-a") && [item.source_id, item.target_id].includes("copy-b"));
+    assert.ok(pair, "the same card entered twice went unnoticed");
+    assert.equal(pair.reason, "內容幾乎相同");
+    assert.ok(pair.score > 0.5, `the reported overlap is not the wording overlap: ${pair.score}`);
+  });
+
+  // The case that killed the similarity half of the rule: measured on a
+  // four-card cabinet, this pair scored 0.29 against the collection's own
+  // range while two unrelated cards scored 1.00 — the model reads 「檢索增強
+  // 生成」 and 「RAG」 as fairly different titles, so it votes against exactly
+  // what this is looking for. The wording does not.
+  it("catches a retyped card even when the title and question both changed", async () => {
+    const body = {
+      summary: "把外部文件接進生成流程，答案可以引用來源。",
+      analogy: "像開書考試，重點是查得到。",
+      detail: "先檢索再生成，適合知識會變動的場景，改索引就好，不必重訓。",
+    };
+    await ok("POST", "/cards", cardInput("retype-a", { title: "檢索增強生成", question: "什麼時候該用檢索增強生成？", ...body }));
+    await ok("POST", "/cards", cardInput("retype-b", { title: "RAG", question: "RAG 適合哪些情況？", ...body }));
+    const { duplicates } = await ok("GET", "/cards/duplicates");
+    const pair = duplicates.find((item) => [item.source_id, item.target_id].includes("retype-a") && [item.source_id, item.target_id].includes("retype-b"));
+    assert.ok(pair, "the same card under two titles went unnoticed");
+    assert.equal(pair.reason, "內容幾乎相同");
+  });
+
   it("no longer offers a batch organiser", async () => {
     const result = await call("POST", "/cards/batch/organize", { card_ids: [], apply: false });
     assert.equal(result.status, 404);

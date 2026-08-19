@@ -60,6 +60,13 @@ const RELATION_LIMIT = 6;
 // on a real cabinet: genuine cross-topic links land at 0.44–0.49 while pairs
 // that merely share a generic tag fall to 0.26.
 const RELATION_MIN_SCORE = 0.42;
+// Duplicate detection is deliberately harder to trigger than a relation: the
+// claim is "you wrote this card twice", and being wrong about that sends the
+// reader looking for a difference that is not there. Measured on a real
+// cabinet, no two different cards share more than 0.092 of their wording, while
+// a card retyped under a new title shares 0.69–0.84 — so half is a wide, empty
+// gap to put the line in.
+const DUPLICATE_MIN_OVERLAP = 0.5;
 const RELATION_KEYWORD_WEIGHT = 0.35;
 const KEYWORD_WEIGHT = 0.25;
 
@@ -285,24 +292,68 @@ function titleKey(title) {
   return String(title).normalize("NFKC").replace(/[\s\p{P}\p{S}]+/gu, "").toLocaleLowerCase();
 }
 
+/** Everything a reader would compare, with spacing and punctuation taken out. */
+function duplicateText(card) {
+  return [card.title, card.question, card.summary, card.analogy, card.detail]
+    .join("")
+    .normalize("NFKC")
+    .replace(/[\s\p{P}\p{S}]+/gu, "")
+    .toLocaleLowerCase();
+}
+
+/** Character bigrams: the unit that works for a language without spaces. */
+function bigrams(text) {
+  const grams = new Set();
+  for (let index = 0; index + 1 < text.length; index += 1) grams.add(text.slice(index, index + 2));
+  return grams;
+}
+
+/** How much of the two cards' actual wording is the same, 0 to 1. */
+function wordingOverlap(first, second) {
+  if (first.size === 0 || second.size === 0) return 0;
+  let shared = 0;
+  for (const gram of first) if (second.has(gram)) shared += 1;
+  return shared / (first.size + second.size - shared);
+}
+
 function findDuplicates(store) {
   const cards = store.cards.filter((card) => !card.deleted_at);
+  const grams = new Map(cards.map((card) => [card.id, bigrams(duplicateText(card))]));
   const duplicates = [];
+
   for (let firstIndex = 0; firstIndex < cards.length; firstIndex += 1) {
     for (let secondIndex = firstIndex + 1; secondIndex < cards.length; secondIndex += 1) {
       const first = cards[firstIndex];
       const second = cards[secondIndex];
-      // A card with no vector can still be caught as a duplicate by title.
-      const score = comparable(first, second) ? cosine(first.embedding, second.embedding) : 0;
-      const titleSame = titleKey(first.title) === titleKey(second.title);
-      if (!titleSame && score < 0.9) continue;
+      // Two cards with the same title are the same card twice however they are
+      // written — that is what a title is for.
+      if (titleKey(first.title) === titleKey(second.title)) {
+        duplicates.push({
+          source_id: first.id, source_title: first.title,
+          target_id: second.id, target_title: second.title,
+          score: 1, reason: "標題相同",
+        });
+        continue;
+      }
+
+      // Otherwise the evidence is the wording, and only the wording.
+      //
+      // Similarity was tried as a second condition and had to go: a cabinet
+      // measures similarity against its own spread (§1.3), and on a small one
+      // that spread is noise — measured on four cards, a card retyped under a
+      // new title scored 0.29 while two unrelated cards scored 1.00. The model
+      // also reads "檢索增強生成" and "RAG" as fairly different titles, so it
+      // votes against the very case this is looking for. Two cards that are
+      // about the same thing in different words are a relation, and the
+      // relation view already draws those.
+      const overlap = wordingOverlap(grams.get(first.id), grams.get(second.id));
+      if (overlap < DUPLICATE_MIN_OVERLAP) continue;
+
       duplicates.push({
-        source_id: first.id,
-        source_title: first.title,
-        target_id: second.id,
-        target_title: second.title,
-        score: Math.round(Math.max(score, titleSame ? 1 : score) * 10000) / 10000,
-        reason: titleSame ? "標題相同" : "語意高度重複",
+        source_id: first.id, source_title: first.title,
+        target_id: second.id, target_title: second.title,
+        score: Math.round(overlap * 10000) / 10000,
+        reason: "內容幾乎相同",
       });
     }
   }
