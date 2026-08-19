@@ -40,10 +40,17 @@ jobs:
       # its prepare step — so it goes here, between packaging and uploading,
       # rather than in `npm test`.
       - run: npm run check:packaging
+      # Only the finished packages. electron-builder also leaves the unpacked
+      # app beside them — 600 MB and thousands of files per runner — which
+      # would be uploaded, downloaded again, and then handed to the release as
+      # a directory it cannot attach.
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.name }}
-          path: release/*
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
           if-no-files-found: error
 
   release:
@@ -58,5 +65,9 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: release/*
+          files: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
           generate_release_notes: true
+          fail_on_unmatched_files: true
