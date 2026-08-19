@@ -229,7 +229,7 @@ node_modules/electron/dist/electron.exe desktop/main.cjs --remote-debugging-port
 
 ## 5. 雙平台：現況與還沒做的
 
-macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + zip）、`build-icon.mjs` 同時產 `.ico` 與 `.icns`、release workflow 用 `macos-13`（Intel）與 `macos-14`（Apple Silicon）兩個 runner 各自建置後合併上傳、`mcp-server.cjs` 會查 `~/Library/Application Support/`。核心本來就不用改：`onnxruntime-node` 附有 `darwin/arm64` 與 `darwin/x64` 預編譯檔，`node:sqlite` 是 Node 內建。
+macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + zip）、`build-icon.mjs` 同時產 `.ico` 與 `.icns`、release workflow 用 `macos-14`（Apple Silicon）建置——**Intel 刻意不建**，那台 runner 排隊排掉近一小時，而且是 Apple 已經不賣的機器；Intel 使用者可以自己從原始碼建、`mcp-server.cjs` 會查 `~/Library/Application Support/`。核心本來就不用改：`onnxruntime-node` 附有 `darwin/arm64` 與 `darwin/x64` 預編譯檔，`node:sqlite` 是 Node 內建。
 
 **還沒做的：**
 

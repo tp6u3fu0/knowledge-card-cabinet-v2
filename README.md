@@ -245,8 +245,9 @@ npm run verify:runtime   # 驗證 runtime capability 契約
 ```
 
 GitHub Actions 會在 push／Pull Request 執行 lint、build、測試與 runtime contract；推送符合
-`vX.Y.Z` 的 tag 時，Windows runner 會建立安裝程式，macOS runner 會分別建立 Intel 與 Apple
-Silicon 的 DMG／ZIP，最後一起上傳至 GitHub Release。這是目前 Installer 與後續自動更新功能的發佈基礎。
+`vX.Y.Z` 的 tag 時，Windows runner 會建立安裝程式，macOS runner 會建立 Apple Silicon 的
+DMG／ZIP，最後一起上傳至 GitHub Release。Intel Mac 不提供預建安裝檔，可以自己跑
+`npm run desktop:dist`。這是目前 Installer 與後續自動更新功能的發佈基礎。
 
 ## 專案文件
 

@@ -254,9 +254,11 @@ test("desktop packaging points to the local runtime", async () => {
   assert.match(builder, /mac:[\s\S]*icon: build\/icon\.icns/);
   await access(new URL("../build/icon.icns", import.meta.url));
   const releaseWorkflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-  assert.match(releaseWorkflow, /macos-13/);
   assert.match(releaseWorkflow, /macos-14/);
   assert.match(releaseWorkflow, /--mac --arm64/);
+  // Intel is deliberately not built: that runner queued for most of an hour
+  // while the other two were done, for a machine Apple no longer sells.
+  assert.doesNotMatch(releaseWorkflow, /macos-13|--mac --x64/u);
   const afterPack = await readFile(new URL("../desktop/after-pack.cjs", import.meta.url), "utf8");
   assert.match(afterPack, /electronPlatformName === "darwin"/);
   assert.match(afterPack, /Contents[\s\S]*Resources/);
