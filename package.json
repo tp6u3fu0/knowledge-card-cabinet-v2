@@ -31,6 +31,7 @@
     "test:api": "node --test tests/api-contract.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs tests/cover-art.test.mjs tests/model-catalogue.test.mjs tests/category-colour.test.mjs tests/lan-certificate.test.mjs",
     "verify:runtime": "node tests/runtime-contract.mjs",
     "release:check": "node scripts/release-check.mjs",
+    "check:packaging": "node scripts/check-packaging.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

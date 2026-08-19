@@ -822,33 +822,6 @@ test("the package leaves out only what it cannot reach", async () => {
   assert.match(builder, /- "!\*\*\/\*\.map"/u, "source maps are shipping again");
   assert.match(builder, /electronLanguages:[\s\S]*zh-TW/u, "every Chromium locale is shipping again");
 
-  // The one that can break the app rather than just fatten it: onnxruntime-web
-  // is excluded wholesale and its Node entry added back by name. If the
-  // package renames that file, the app ships without the module transformers
-  // imports at load time — and nothing else would notice.
-  const ortWeb = JSON.parse(await readFile(new URL("../desktop/node_modules/onnxruntime-web/package.json", import.meta.url), "utf8"));
-  // Some packages hang their conditions off "." and some off the root.
-  const ortConditions = ortWeb.exports?.["."] ?? ortWeb.exports ?? {};
-  const nodeEntries = Object.values(ortConditions.node ?? {}).map((entry) => entry.replace(/^\.\//u, ""));
-  assert.ok(nodeEntries.length > 0, "onnxruntime-web no longer declares a node export");
-  for (const entry of nodeEntries) {
-    assert.ok(
-      builder.includes(`- "node_modules/onnxruntime-web/${entry}"`),
-      `onnxruntime-web resolves to ${entry} in Node, which the package excludes`,
-    );
-    await access(new URL(`../desktop/node_modules/onnxruntime-web/${entry}`, import.meta.url));
-  }
-
-  // Same check for transformers: Node resolves to dist/transformers.node.*,
-  // and those must not be caught by the exclusions aimed at its browser half.
-  const transformers = JSON.parse(await readFile(new URL("../desktop/node_modules/@huggingface/transformers/package.json", import.meta.url), "utf8"));
-  const conditions = transformers.exports?.["."] ?? transformers.exports ?? {};
-  const resolved = [conditions.node?.import?.default, conditions.node?.require?.default];
-  for (const entry of resolved) {
-    assert.ok(entry?.includes("transformers.node."), `transformers now resolves to ${entry} in Node`);
-    assert.ok(!builder.includes(`!node_modules/@huggingface/transformers/${entry.replace(/^\.\//u, "")}`));
-  }
-
   // Each platform keeps its own onnxruntime binary and drops the others.
   const windows = builder.slice(builder.indexOf("\nwin:"), builder.indexOf("\nmac:"));
   assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u);
@@ -857,4 +830,19 @@ test("the package leaves out only what it cannot reach", async () => {
   const mac = builder.slice(builder.indexOf("\nmac:"), builder.indexOf("\nnsis:"));
   assert.match(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u);
   assert.doesNotMatch(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u, "the macOS build excludes its own runtime");
+
+  // The exclusion that can break the app rather than merely fatten it —
+  // onnxruntime-web is dropped wholesale and its Node entry added back by name
+  // — is checked against the installed packages by scripts/check-packaging.mjs.
+  // That needs desktop/node_modules, which only exists after
+  // `npm run desktop:prepare`; CI does not install it, and a test that reads it
+  // unconditionally is how this suite first went red. The release workflow runs
+  // the script after packaging, before anything is uploaded.
+  const { checkPackaging } = await import("../scripts/check-packaging.mjs");
+  try {
+    await access(new URL("../desktop/node_modules/onnxruntime-web/package.json", import.meta.url));
+  } catch {
+    return;
+  }
+  await checkPackaging();
 });
