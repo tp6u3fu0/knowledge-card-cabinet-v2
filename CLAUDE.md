@@ -107,7 +107,7 @@ const save = (changedCards) => { … refreshStaleCovers(store) … db.save(store
 - **介面本身沒有登入機制。** `KCC_HOST=0.0.0.0` 等於讓所有能連到這個埠的人讀寫你的卡片。只能用在私人網路（Tailscale / WireGuard）。
 - 不要新增任何把權杖送到瀏覽器的程式碼。
 - 區網分享是**另一個** server（`startLanApi`，HTTPS、8443），不是把 loopback server 改成監聽 `0.0.0.0`。loopback 那個永遠維持原樣。
-- **裝置權杖的權限比本機權杖小。** `deviceSafeRoute` 只放行 `cards`、`categories`、`search`、`trash`；模型、設定、資料庫、裝置管理都是 403。新增路由時要想清楚它屬於哪一邊——預設是**不**放行。
+- **裝置權杖的權限比本機權杖小。** `deviceMayReach()` 是唯一的判斷點：`cards`、`categories`、`search`、`trash` 全開；`GET /settings`、`GET /tasks`、`GET /app/version` **只能讀**；其餘（模型、資料庫、裝置管理、區網）一律 403。唯讀那三條是刻意加的——沒有它們，手機的設定頁只能是一個「關於這支手機」的頁面；有了寫入權，一支被撿走的手機就能重設主機或把整櫃資料匯出去。**新增路由時要想清楚它屬於哪一邊——預設是不放行**，而且唯讀清單是一條一條列的，不是用前綴：`/app/version` 可讀不代表未來的 `/app/*` 可讀。`tests/api-contract.test.mjs` 有一張政策表擋著。
 - 配對碼一次性且十分鐘失效，`pair()` 在發出 token 前先清掉它。不要為了「使用者重試比較方便」把這個拿掉：一個看得見的碼就只能換一把鑰匙。
 - 裝置清單**永遠不回傳 token**，資料庫裡也只存 SHA-256。`tests/api-contract.test.mjs` 有斷言擋著。
 
@@ -155,7 +155,8 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | 手動叫 `electron-builder`（例如只想建 `--dir`） | 一定要帶 `--config desktop/electron-builder.yml`；漏掉就沒有 extraResources、`productName`、圖示 | 打包成功、exit code 0，開起來卻停在「找不到前端 runtime」 |
 | README 提到的 npm script | `package.json` 必須真的有 | `tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | `networkController.status()` 的欄位 | `types.ts` 的 `LanSharingStatus`、`panels.tsx` 的顯示 | 介面顯示 `undefined`，或宣稱一個不存在的能力 |
-| `deviceSafeRoute` 白名單 | 想清楚新路由該不該給手機；預設不給 | 配對過的裝置拿到主機管理權限 |
+| `deviceMayReach()` 白名單 | 想清楚新路由該不該給手機；預設不給，唯讀的要一條條列不要用前綴 | 配對過的裝置拿到主機管理權限；`tests/api-contract.test.mjs` 的政策表會失敗（刻意的） |
+| 手機看得到的主機狀態欄位 | iOS 端 `KCCAPIClient` 與設定頁；新能力要加進根路徑的 `capabilities`，讓舊版 App 能優雅降級 | 舊版 App 猜路由存在、拿到 403 當成壞掉 |
 | `setting-cards.tsx` 的卡片結構 | `globals.css` 的 `.setting-card` 覆寫（`.collection-card__copy span` 與 `__tags` 在收藏頁是 `display:none`） | 設定卡的說明與標籤整片消失 |
 | 動到 `electron-builder.yml` 的 `files` 排除規則 | onnxruntime-web 與 transformers 是「整包排除、再把 Node 入口加回來」；改版時要對照它們 package.json 的 `exports.node` | 打包版少掉 transformers 在 module load 就 import 的模組，整個模型堆疊在打包版才炸，開發模式看不出來；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | 首頁的內容 | 改 `site/landing.tsx`，不要在 `app/` 底下重開一個首頁路由；`app/page.tsx` 只能是轉址 | 首頁又會被打包進每一個桌面版；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
@@ -257,7 +258,8 @@ macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + z
 
 - API 路由已有版本前綴 `/api/v1/`，根路徑回報 `capabilities` 陣列供協商
 - **裝置配對**：`desktop/device-auth.cjs`。桌面端產生一次性配對碼（十分鐘、只能換一把鑰匙），手機端拿 `kcc_dv_…` 長期 token，可個別撤銷；資料庫只存 SHA-256
-- **權限分級**：裝置 token 只能碰卡片相關路由，主機管理一律 403（見 1.8）
+- **權限分級**：裝置 token 全開的是卡片相關路由；主機狀態（設定、背景任務、版本）**只能讀**；其餘一律 403（見 1.8）
+- **手機的建置有 CI**：`knowledge-card-cabinet-ios` 的 `.github/workflows/ci.yml` 用 macOS runner 建模擬器版本。這個專案是在一台沒有 Swift 也沒有 Xcode 的 Windows 上寫的，那條 workflow 就是編譯器——**不要在沒讓它跑綠之前說 iOS 端改好了**
 - **傳輸**：`startLanApi` 在 8443 開一個獨立的 HTTPS server，憑證自簽、**要求手機端 pin 指紋**（`pairing_requires_fingerprint`）。桌面 loopback server 完全不受影響
 - **配對 QR code**：帶 `{host, certificate_fingerprint, pairing_code}`，所以手機不需要 mDNS 也能連
 - 已有稽核記錄（`audit.jsonl`），裝置的動作記成 `device:<id>`

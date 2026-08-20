@@ -891,6 +891,14 @@ test("the app can tell you which build it is", async () => {
   assert.match(check, /24 \* 60 \* 60 \* 1000/u, "the once-a-day cap is gone");
   const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
   assert.match(api, /KCC_UPDATE_CHECK/u, "there is no way to switch the update check off");
+  // A paired phone may read the last answer and may not cause a new request.
+  // The two suites cannot tell these apart at runtime — with the check off
+  // they return the same thing — so the branch is asserted where it is made.
+  assert.match(
+    api,
+    /authScope === "device" \? updateCheck\.status\(\) : await updateCheck\.check\(\)/u,
+    "a paired device can make the host reach the network",
+  );
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   assert.match(readme, /KCC_UPDATE_CHECK/u, "the one network call the app makes is undocumented");
 });

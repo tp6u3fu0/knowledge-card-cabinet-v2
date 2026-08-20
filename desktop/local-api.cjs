@@ -1034,6 +1034,33 @@ function draftFromContent(content, source) {
   };
 }
 
+/**
+ * What a paired phone is allowed to ask for.
+ *
+ * Cards and the things that organise them are the phone's whole job, so those
+ * are open to it. Host administration is not: a phone that is lost or unlocked
+ * must not be able to repoint the model, open the cabinet to the network, hand
+ * out or revoke other devices, or export the database.
+ *
+ * The three read-only exceptions exist because without them the phone's
+ * settings page could only ever be a page about the phone. Being able to see
+ * which model the host is running, how far a long job has got, and which build
+ * the host is, changes nothing on the host and answers the questions people
+ * actually open that page to ask. GET only, and named one by one rather than
+ * by prefix — `/app/version` is readable, a future `/app/anything` is not
+ * until someone decides it is.
+ */
+const DEVICE_ROUTES = ["cards", "categories", "search", "trash"];
+
+function deviceMayReach(method, segments) {
+  if (DEVICE_ROUTES.includes(segments[0])) return true;
+  if (method !== "GET") return false;
+  if (segments[0] === "settings" && segments.length === 1) return true;
+  if (segments[0] === "tasks" && segments.length <= 2) return true;
+  if (segments[0] === "app" && segments[1] === "version" && segments.length === 2) return true;
+  return false;
+}
+
 function createApiServer(store, dataFile, modelRuntime, {
   authToken = "",
   taskManager,
@@ -1143,14 +1170,13 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
     request.kccActor = actor;
 
-    const deviceSafeRoute = ["cards", "categories", "search", "trash"].includes(segments[0]);
-    if (authScope === "device" && !deviceSafeRoute) {
+    if (authScope === "device" && !deviceMayReach(request.method, segments)) {
       sendJson(response, 403, { detail: "裝置權杖沒有這項主機管理權限。" });
       return;
     }
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
       return;
     }
 
@@ -1249,7 +1275,9 @@ function createApiServer(store, dataFile, modelRuntime, {
         sendJson(response, 503, { detail: "版本資訊尚未就緒。" });
         return;
       }
-      sendJson(response, 200, await updateCheck.check());
+      // A device reads the last answer; it does not get to make the host go
+      // and ask for a new one. Updating is the desktop's business either way.
+      sendJson(response, 200, authScope === "device" ? updateCheck.status() : await updateCheck.check());
       return;
     }
 
@@ -2091,4 +2119,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, categoryPalette, assignCategoryAccents, COVER_VERSION };

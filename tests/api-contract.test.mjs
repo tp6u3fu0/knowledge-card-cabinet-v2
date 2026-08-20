@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 const require = createRequire(import.meta.url);
-const { startLocalApi } = require("../desktop/local-api.cjs");
+const { startLocalApi, deviceMayReach } = require("../desktop/local-api.cjs");
 
 /** Mirrors RELATION_LIMIT in desktop/local-api.cjs and RELATED_LIMIT in backend config. */
 const RELATION_LIMIT = 6;
@@ -94,6 +94,40 @@ after(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
+describe("what a paired device is allowed to ask for", () => {
+  // The table rather than the server: this is a policy, and it should be
+  // readable as one. Every line that says false is something a stolen phone
+  // cannot do to the cabinet it was paired with.
+  const allowed = [
+    ["GET", ["cards"]], ["POST", ["cards"]], ["PATCH", ["cards", "abc"]], ["DELETE", ["cards", "abc"]],
+    ["POST", ["cards", "draft"]], ["GET", ["cards", "duplicates"]],
+    ["GET", ["categories"]], ["POST", ["categories", "merge"]],
+    ["GET", ["search"]], ["GET", ["trash"]], ["DELETE", ["trash", "abc"]],
+    ["GET", ["settings"]], ["GET", ["tasks"]], ["GET", ["tasks", "abc"]], ["GET", ["app", "version"]],
+  ];
+  const refused = [
+    ["PUT", ["settings"]], ["POST", ["tasks", "abc", "cancel"]], ["POST", ["tasks", "abc", "retry"]],
+    ["GET", ["models"]], ["POST", ["models", "select"]], ["DELETE", ["models", "abc"]],
+    ["GET", ["database", "export"]], ["POST", ["database", "import"]], ["POST", ["database", "reset"]],
+    ["GET", ["devices"]], ["POST", ["devices", "pairing-code"]], ["DELETE", ["devices", "abc"]],
+    ["GET", ["network", "lan"]], ["POST", ["network", "lan"]],
+    // Readable routes are named one at a time, never by prefix.
+    ["GET", ["app"]], ["GET", ["app", "logs"]], ["GET", ["settings", "secret"]],
+  ];
+
+  it("lets a phone do the whole of the card job", () => {
+    for (const [method, segments] of allowed) {
+      assert.equal(deviceMayReach(method, segments), true, `${method} /${segments.join("/")} should be allowed`);
+    }
+  });
+
+  it("lets a phone read the host's state and change none of it", () => {
+    for (const [method, segments] of refused) {
+      assert.equal(deviceMayReach(method, segments), false, `${method} /${segments.join("/")} should be refused`);
+    }
+  });
+});
+
 describe("which build this is", () => {
   const declared = JSON.parse(readFileSync(new URL("../desktop/package.json", import.meta.url), "utf8")).version;
 
@@ -154,10 +188,36 @@ describe("authentication", () => {
     const deviceHeaders = { Authorization: `Bearer ${paired.body.token}` };
 
     assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 200);
-    assert.equal((await fetch(`${base}/settings`, { headers: deviceHeaders })).status, 403);
-    // Checking for updates is host administration too: it is the one route
-    // that can make the machine reach the network.
-    assert.equal((await fetch(`${base}/app/version`, { headers: deviceHeaders })).status, 403);
+
+    // A phone may look at the host and may not touch it. Without the reading
+    // half its settings page could only ever be a page about the phone; with
+    // the writing half, a lost phone could repoint the model or empty the
+    // cabinet. Named one by one — a new route under /app is not readable
+    // until somebody decides it is.
+    for (const path of ["/settings", "/tasks", "/app/version"]) {
+      assert.equal((await fetch(`${base}${path}`, { headers: deviceHeaders })).status, 200, `${path} is not readable from a paired device`);
+    }
+    assert.equal((await fetch(`${base}/app/anything-else`, { headers: deviceHeaders })).status, 403);
+
+    // The host's own secrets stay the host's, even in what a device can read.
+    const visible = await (await fetch(`${base}/settings`, { headers: deviceHeaders })).json();
+    assert.equal(Object.hasOwn(visible.embedding, "api_key"), false, "a device can read the embedding API key");
+    assert.equal(Object.hasOwn(visible.summary, "api_key"), false, "a device can read the summary API key");
+
+    const changes = [
+      ["PUT", "/settings"],
+      ["POST", "/models/select"],
+      ["GET", "/models"],
+      ["GET", "/database/export"],
+      ["POST", "/database/reset"],
+      ["GET", "/devices"],
+      ["POST", "/devices/pairing-code"],
+      ["GET", "/network/lan"],
+    ];
+    for (const [method, path] of changes) {
+      const status = (await fetch(`${base}${path}`, { method, headers: deviceHeaders })).status;
+      assert.equal(status, 403, `${method} ${path} is reachable from a paired device`);
+    }
     await ok("DELETE", `/devices/${paired.body.device.id}`);
     assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 401);
   });
