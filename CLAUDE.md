@@ -291,6 +291,7 @@ macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + z
 - **不要加第二套推論引擎**（llama.cpp / GGUF）。使用者已明確要求本體輕量。需要 GGUF 的話，透過設定頁的 Ollama / LM Studio 供應商即可，那本來就是 llama.cpp。
 - **不要把範例卡片自動塞進全新安裝。** 全新安裝是空的，這是刻意的決定。範例卡只在明確要求時載入。
 - **不要在沒實測的情況下宣稱修好了。** 這個專案有過「改了設定檔就以為修好」的紀錄。前端改動請照第 4 節實際抓畫面。
+- **不要為了「修掉 npm audit」升 `@huggingface/transformers` 到 4.x。** 實測過（2026-08-20）：v4 的 `exports.node` 路徑沒變、打包排除規則仍然對得上，但它**沒有修掉任何一個現有漏洞**，反而多帶進兩個——onnxruntime-node 1.24.3 與它的 adm-zip。剩下的兩個（sharp <0.35 的 libvips CVE、transformers 因它被連坐）在**任何已發行版本都沒有修**，而且都在影像解碼路徑上，這個 app 只做文字。要升 v4 請為了它的 WebGPU 與 BERT 加速，不要為了安全數字。
 - **不要相信自己對現況的記憶。** 寫文件或回報前，先去讀程式碼。README 曾經在多個 commit 中悄悄與現實脫節。
 - **不要只在自己這台機器上驗平台相關的功能。** 在 macOS 上寫的區網分享曾經寫死 OpenSSL 路徑與 `/usr/bin/dns-sd`，在 Windows 上是「按下去就整個 main process 掛掉」。改到 `desktop/` 裡任何碰到檔案系統、網路介面或子行程的地方，先問「另一個平台上這個東西存在嗎」。
 
