@@ -15,6 +15,7 @@ import type {
   ApiCard,
   ApiProbeResult,
   ApiRelation,
+  AppVersion,
   BackgroundTask,
   DuplicatePair,
   CardDraft,
@@ -564,6 +565,7 @@ export default function CollectionPage() {
   const [isViewerClosing, setIsViewerClosing] = useState(false);
   const [isSettingsClosing, setIsSettingsClosing] = useState(false);
   const [cardsRefreshKey, setCardsRefreshKey] = useState(0);
+  const [appVersion, setAppVersion] = useState<AppVersion | null>(null);
 
   const isBackgroundTaskRunning = backgroundTask?.status === "queued" || backgroundTask?.status === "running";
 
@@ -586,6 +588,27 @@ export default function CollectionPage() {
       setDuplicatePairs([]);
     }
   };
+
+  /**
+   * Which build this is, and whether a newer one exists.
+   *
+   * Asked once when the collection opens, never on a timer. The answer is
+   * cached for a day on the API side, so opening the app twice in an afternoon
+   * is one request, and no answer at all is the ordinary offline case — which
+   * is why a failure here sets nothing and says nothing.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/app/version", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: AppVersion | null) => {
+        if (!cancelled && payload && typeof payload.version === "string") setAppVersion(payload);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1836,14 +1859,32 @@ export default function CollectionPage() {
   return (
     <main className="collection-page-shell">
       <header className="collection-page-header">
-        <a className="brand" href="/">
+        {/*
+          Not a link. The product has no front page — `/` redirects straight
+          back here — so both of these used to be a way of clicking on the page
+          you were already on. What belongs in that corner instead is the one
+          thing the reader cannot otherwise find out: which build this is.
+        */}
+        <span className="brand">
           <span className="brand-mark">◎</span>
           <span>知識卡冊</span>
-        </a>
+        </span>
         <span className="collection-page-label">DATABASE / COLLECTION</span>
-        <a className="collection-page-back" href="/">
-          ↖ 回到首頁
-        </a>
+        {appVersion ? (
+          appVersion.update_available && appVersion.release_url ? (
+            <a
+              className="collection-page-version collection-page-version--update"
+              href={appVersion.release_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="collection-page-version__dot" aria-hidden="true" />
+              有新版本 {appVersion.latest_version} ↗
+            </a>
+          ) : (
+            <span className="collection-page-version">v{appVersion.version}</span>
+          )
+        ) : null}
       </header>
 
       <section className="collection-section collection-page-section">

@@ -9,6 +9,16 @@ if (root.version === "0.0.0" || !/^\d+\.\d+\.\d+$/u.test(root.version)) {
   throw new Error(`invalid release version: ${root.version}`);
 }
 
+// The update check reads the repository out of the desktop manifest to decide
+// whose releases to compare against, so a fork that changes one and not the
+// other would point its own users at this repository's downloads.
+if (root.repository?.url !== desktop.repository?.url) {
+  throw new Error(`root repository ${root.repository?.url} != desktop repository ${desktop.repository?.url}`);
+}
+if (!/^git\+https:\/\/github\.com\/[^/]+\/[^/]+\.git$/u.test(desktop.repository?.url ?? "")) {
+  throw new Error(`desktop repository url is not a GitHub URL the update check can read: ${desktop.repository?.url}`);
+}
+
 // Any other version literal in the shipped sources is a copy that will drift.
 // The MCP bridge carried one for a whole release before anyone noticed.
 const sources = ["../desktop/mcp-server.cjs", "../desktop/main.cjs", "../desktop/local-api.cjs"];

@@ -184,6 +184,9 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | 在 `.collection-card` 之外用 `SeededCoverArt` | 該元素要自己定義 `--cover-color` / `--cover-soft-color` / `--cover-background` | 封面圖整片透明（術語卡的縮圖就這樣消失過一次） |
 | `glossary.ts` 的 `glyph` / `accent` | 必須是 `cover-art.tsx` 畫得出來的 glyph、`visualAccents` 裡有的顏色 | `tests/cover-art.test.mjs` 會失敗（刻意的）；否則會靜靜退回同一個圖案 |
 | 新增設定分頁 | `glossary.ts` 要有對應 `scope` 的條目 | 測試會失敗；使用者少一整區白話說明 |
+| 更新檢查的行為 | 它是整個 app 唯一的對外請求：每天最多一次、`KCC_UPDATE_CHECK=off` 可完全關閉、失敗一律當成「沒有新版」。放寬任何一條之前先想清楚——這個產品的賣點就是不連外 | 一個號稱資料留在本機的工具在每次啟動時打電話回家；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
+| `desktop/package.json` 的 `repository` | 根 `package.json` 要一致（`release:check` 會擋）。更新檢查是從這裡讀出要查哪個 repo 的 release | fork 出去的版本把自己的使用者導到上游的下載頁 |
+| 產品裡任何指向 `/` 的連結 | 不要加。產品沒有首頁，`/` 只會轉回 `/collection` | 使用者點了「回到首頁」，回到自己正在看的那一頁；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | 新增 `desktop/` 的執行期相依 | `desktop/package.json`（打包用，鎖定版號）**與**根 `package.json`（CI 測試用） | CI 綠、打包版 require 失敗，或反過來 |
 
 ---
@@ -199,6 +202,7 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重 |
 | `category-colour.test.mjs` | 同分類同色、分布平均、既有分類不變色、三方一致 |
 | `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣；術語卡的 glyph／顏色／編號一致 |
+| `update-check.test.mjs` | 版號比較（含 prerelease 不算數）、一天只查一次且跨重啟、離線／限流不會壞、關得掉、送出去的請求不帶識別資訊 |
 | `lan-certificate.test.mjs` | 選對網卡（含 Windows 虛擬網卡）、憑證指紋穩定、mDNS 缺席不會炸、LAN TLS 真的服務 v1 |
 | `rendered-html.test.mjs` | 前端能 render、雙平台打包設定、README 指令存在、CLAUDE.md 引用的檔案存在 |
 
@@ -234,7 +238,7 @@ macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + z
 
 **還沒做的：**
 
-1. **簽章與公證。** 沒有 Apple Developer ID 的話使用者會被 Gatekeeper 隔離，比 Windows SmartScreen 更難繞過。這是要花錢的決定。
+1. **簽章與公證。** 沒有 Apple Developer ID 的話使用者會被 Gatekeeper 隔離，比 Windows SmartScreen 更難繞過。這是要花錢的決定。在簽章之前**不要**改成 electron-updater：macOS 的 Squirrel 會拒絕未簽章的更新，裝出去的自動更新是壞的。目前的做法是查到新版就給一行連結，使用者自己下載。
 2. **Windows 防火牆。** 第一次啟用區網分享時，Windows 會跳出允許 `知識卡冊.exe` 監聽的提示。使用者按了「取消」就會靜靜地連不上。目前只在 README 說明，沒有程式處理（加防火牆規則要管理員權限）。
 3. **Windows 沒有 mDNS。** 需要 Apple Bonjour 才有 `dns-sd.exe`。目前的做法是誠實回報並要使用者掃 QR code——這是可接受的，因為 QR 本來就帶了位址。若要補齊，就是用 `dgram` 寫一個純 Node 的 mDNS responder，**不要**改成叫系統工具。
 4. **產品名是中文（`知識卡冊`）。** appId 沒問題，但兩邊的 bundle 路徑都要實機確認過才算數。

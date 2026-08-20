@@ -1,0 +1,23 @@
+name: 功能想法
+description: 想要卡冊多做一件事，或某個地方用起來很彆扭
+labels: ["idea"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解決的問題
+      description: |
+        先講問題，不要直接講解法——「我想要一個匯出按鈕」比不上「我換電腦的時候不知道怎麼把卡片帶走」，
+        後者才看得出真正該做的是什麼。
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: 你現在怎麼繞過去
+      description: 沒有繞法也請寫「沒有」。
+  - type: markdown
+    attributes:
+      value: |
+        這是一個人維護的個人工具，方向很明確：**資料留在自己的裝置上、離線可用、不要變重**。
+        跟這個方向衝突的功能大概不會做，但把它寫出來仍然有價值——至少讓下一個有同樣想法的人看得到答案。

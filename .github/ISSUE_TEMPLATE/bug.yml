@@ -1,0 +1,54 @@
+name: 回報問題
+description: 應用程式壞掉、當掉，或做了跟你預期不一樣的事
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        寫之前先確認一件事：**不要貼你的卡片內容**。知識卡冊的資料只在你自己的電腦上，
+        issue 是公開的，貼上來就出去了。描述你做了什麼就夠，需要範例的話請自己編一張假卡。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 收藏頁右上角有版號，例如 1.0.0。從原始碼跑的話請附 commit。
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 系統與安裝方式
+      options:
+        - Windows / Setup.exe
+        - macOS Apple Silicon / .dmg
+        - macOS Apple Silicon / .zip
+        - macOS Intel（自己從原始碼建置）
+        - 從原始碼跑（npm run desktop:dev 或 npm run serve）
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 發生了什麼
+      description: 你原本預期會怎樣，實際上是怎樣。錯誤訊息可以直接截圖或貼文字。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎麼重現
+      description: 一步一步寫。如果只發生過一次、重現不了，也請說明——那本身就是線索。
+      placeholder: |
+        1. 開啟設定
+        2. 把某個模型卡拖到插槽
+        3. …
+  - type: textarea
+    id: audit
+    attributes:
+      label: audit.jsonl（選填）
+      description: |
+        資料夾（Windows 是「文件\知識卡冊」，macOS 是「文件／知識卡冊」）裡的 `audit.jsonl`，
+        出問題前後幾行就好。它只記錄呼叫了哪個路徑、狀態碼與耗時，**不含任何卡片內容**。
+      render: json

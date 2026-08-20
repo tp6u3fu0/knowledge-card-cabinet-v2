@@ -330,3 +330,18 @@ export const visualPatterns = ["orbit", "grid", "ladder", "shelf"] as const;
 export type CollectionView = "cards" | "relations" | "table";
 export type RelationFilter = "all" | "semantic" | "manual";
 export type RelationStrength = "all" | "strong";
+
+/**
+ * What build this is, and whether a newer one has been published.
+ *
+ * Every field after the version is allowed to be absent: the check is capped
+ * at once a day, can be switched off entirely, and fails silently when there
+ * is no network — all of which arrive here as "nothing to say".
+ */
+export type AppVersion = {
+  version: string;
+  update_available?: boolean;
+  latest_version?: string | null;
+  release_url?: string | null;
+  checked_at?: string | null;
+};

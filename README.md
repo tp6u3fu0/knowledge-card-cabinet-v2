@@ -78,6 +78,18 @@ VITE_KCC_DOWNLOAD_URL=https://github.com/<you>/<repo>/releases/latest npm run bu
 
 資料位置可用 `KCC_DATA_DIR` 覆寫。
 
+### 版本與更新
+
+收藏頁右上角是目前的版號。桌面版**沒有自動更新**：macOS 的自動更新需要簽章，而這個版本沒有簽；與其為此塞進一整套更新機制，卡冊只做最小的事——每天最多一次向 GitHub 查最新的 release，有新版就把版號換成一行連結，其餘時間完全不連外。
+
+這是整個應用程式唯一一個對外的網路請求。不想要就關掉：
+
+```sh
+KCC_UPDATE_CHECK=off
+```
+
+關掉之後版號照常顯示，只是不再查有沒有新版。查詢失敗（離線、被擋、GitHub 掛掉）一律當成「沒有新版」，不會有錯誤訊息。
+
 ```sh
 npm install
 npm run desktop:dev
@@ -128,6 +140,7 @@ docker run -d --name kcc -p 3000:3000 -v kcc-data:/data \
 | `KCC_HOST` | `127.0.0.1` | 介面監聽位址 |
 | `KCC_PORT` | `3000` | 介面連接埠 |
 | `KCC_API_TOKEN` | 每次啟動隨機產生 | 固定 API 權杖 |
+| `KCC_UPDATE_CHECK` | `on` | 設成 `off` 就不再查有沒有新版本，也不會有任何對外請求 |
 
 > **對外開放前請先讀這段。** 本機 API 只監聽 loopback，由前端在伺服器端代理，權杖不會經過網路。但**介面本身沒有登入機制**，所以把 `KCC_HOST` 設成 `0.0.0.0` 等於讓所有能連到這個埠的人都能讀寫你的卡片。請只在私人網路使用（例如 Tailscale、WireGuard），不要直接對公網開放。
 
@@ -249,7 +262,11 @@ npm run verify:runtime   # 驗證 runtime capability 契約
 GitHub Actions 會在 push／Pull Request 執行 lint、build、測試與 runtime contract；推送符合
 `vX.Y.Z` 的 tag 時，Windows runner 會建立安裝程式，macOS runner 會建立 Apple Silicon 的
 DMG／ZIP，最後一起上傳至 GitHub Release。Intel Mac 不提供預建安裝檔，可以自己跑
-`npm run desktop:dist`。這是目前 Installer 與後續自動更新功能的發佈基礎。
+`npm run desktop:dist`。
+
+發布流程本身可以先空跑：在 Actions 手動觸發 **Knowledge Card Cabinet Release**（`workflow_dispatch`），
+兩個 runner 會照常建置、跑打包檢查、上傳 artifact，只是不會建立 release。加這個是因為
+release 只在推 tag 時才跑，前兩次的失敗都是到那一刻才發現的。
 
 ## 專案文件
 

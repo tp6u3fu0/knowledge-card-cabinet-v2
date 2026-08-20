@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 下載最新版本
+    url: https://github.com/tp6u3fu0/knowledge-card-cabinet-v2/releases/latest
+    about: 回報之前先確認你的版本是最新的——問題可能已經修掉了。
+  - name: 安裝與使用說明
+    url: https://github.com/tp6u3fu0/knowledge-card-cabinet-v2#readme
+    about: 資料存在哪、怎麼備份、怎麼從原始碼跑起來。

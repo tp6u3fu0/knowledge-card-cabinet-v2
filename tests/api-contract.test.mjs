@@ -15,6 +15,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,6 +69,10 @@ function cardInput(id, overrides = {}) {
 }
 
 before(async () => {
+  // The suite must never reach the network. The update check's own logic is
+  // covered against a stubbed GitHub in tests/update-check.test.mjs; what is
+  // checked here is only that the route is wired, guarded, and honours this.
+  process.env.KCC_UPDATE_CHECK = "off";
   if (process.env.KCC_CONTRACT_URL) {
     base = `${process.env.KCC_CONTRACT_URL}/api/v1`;
     headers = { Authorization: `Bearer ${process.env.KCC_CONTRACT_TOKEN ?? ""}` };
@@ -87,6 +92,31 @@ before(async () => {
 after(async () => {
   if (runtime) await runtime.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+describe("which build this is", () => {
+  const declared = JSON.parse(readFileSync(new URL("../desktop/package.json", import.meta.url), "utf8")).version;
+
+  it("names its version in health, where a bug report can find it", async () => {
+    const health = await ok("GET", "/health");
+    assert.equal(health.version, declared);
+    assert.equal(health.status, "ok");
+  });
+
+  it("reports the running version whether or not it can look one up", async () => {
+    const version = await ok("GET", "/app/version");
+    assert.equal(version.version, declared);
+    // Switched off means switched off: no answer about a newer release, and
+    // above all no request made to find one out.
+    assert.equal(version.update_check, "off");
+    assert.equal(version.update_available, false);
+    assert.equal(version.latest_version, null);
+  });
+
+  it("keeps the update route behind the token", async () => {
+    const response = await fetch(`${base}/app/version`);
+    assert.equal(response.status, 401, "an unauthenticated caller can make the app reach the network");
+  });
 });
 
 describe("authentication", () => {
@@ -125,6 +155,9 @@ describe("authentication", () => {
 
     assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 200);
     assert.equal((await fetch(`${base}/settings`, { headers: deviceHeaders })).status, 403);
+    // Checking for updates is host administration too: it is the one route
+    // that can make the machine reach the network.
+    assert.equal((await fetch(`${base}/app/version`, { headers: deviceHeaders })).status, 403);
     await ok("DELETE", `/devices/${paired.body.device.id}`);
     assert.equal((await fetch(`${base}/cards`, { headers: deviceHeaders })).status, 401);
   });

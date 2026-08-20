@@ -1556,14 +1556,39 @@ a:focus-visible {
   margin-left: auto;
 }
 
-.collection-page-back {
+/*
+  The build number, and the only place the app ever mentions an update.
+
+  It sits where "back to the front page" used to, at the quietest weight in the
+  header: a version you are not being asked to do anything about should read as
+  a footnote. When there is something to do, the dot and the accent colour are
+  the whole of the difference — no banner, no dialog, nothing that interrupts a
+  person who opened the app to read their cards.
+*/
+.collection-page-version {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
   transition: color var(--motion-base) var(--ease-out);
 }
 
-.collection-page-back:hover {
+.collection-page-version--update {
+  align-items: center;
   color: var(--ink);
+  display: inline-flex;
+  gap: 6px;
+}
+
+.collection-page-version--update:hover {
+  color: var(--accent-coral);
+}
+
+.collection-page-version__dot {
+  background: var(--accent-coral);
+  border-radius: 50%;
+  height: 6px;
+  width: 6px;
 }
 
 .collection-page-section {

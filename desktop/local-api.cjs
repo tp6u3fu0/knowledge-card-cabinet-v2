@@ -10,6 +10,8 @@ const { createTaskManager } = require("./task-manager.cjs");
 const { createDeviceAuth } = require("./device-auth.cjs");
 const { ensureLanCertificate, lanAddresses, defaultLanAddress } = require("./lan-certificate.cjs");
 const { advertiseKnowledgeCardHost } = require("./bonjour.cjs");
+const { createUpdateCheck } = require("./update-check.cjs");
+const desktopPackage = require("./package.json");
 
 /** Width of the built-in hash embedding, and the width covers are drawn from. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
@@ -1039,6 +1041,7 @@ function createApiServer(store, dataFile, modelRuntime, {
   corsOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"],
   deviceAuth,
   networkController,
+  updateCheck,
   serverFactory = (handler) => http.createServer(handler),
   db,
 } = {}) {
@@ -1227,8 +1230,26 @@ function createApiServer(store, dataFile, modelRuntime, {
 
     if (request.method === "GET" && segments[0] === "health") {
       // The data directory is reported so the app can show people where their
-      // cards actually live rather than leaving them to guess.
-      sendJson(response, 200, { status: "ok", data_dir: path.dirname(dataFile), ...modelRuntime.health() });
+      // cards actually live rather than leaving them to guess. The version
+      // goes with it so a bug report can name a build without the reporter
+      // having to remember which installer they ran.
+      sendJson(response, 200, {
+        status: "ok",
+        version: updateCheck ? updateCheck.status().version : "",
+        data_dir: path.dirname(dataFile),
+        ...modelRuntime.health(),
+      });
+      return;
+    }
+
+    // Behind the token on purpose: this is the one route that can cause an
+    // outbound request, and a paired phone has no business updating the host.
+    if (request.method === "GET" && segments[0] === "app" && segments[1] === "version" && segments.length === 2) {
+      if (!updateCheck) {
+        sendJson(response, 503, { detail: "版本資訊尚未就緒。" });
+        return;
+      }
+      sendJson(response, 200, await updateCheck.check());
       return;
     }
 
@@ -1566,6 +1587,7 @@ function createApiServer(store, dataFile, modelRuntime, {
           "/models/custom/{id}": { delete: {} },
           "/models/api/probe": { post: {} },
           "/models/api/probe-embedding": { post: {} },
+          "/app/version": { get: {} },
           "/settings": { get: {}, put: {} },
           "/devices": { get: {} },
           "/devices/pairing-code": { post: {} },
@@ -1910,7 +1932,11 @@ function createApiServer(store, dataFile, modelRuntime, {
   });
 }
 
-async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromToken = "", loadSeed = false, modelsDir, port = 0, authToken = "", corsOrigins } = {}) {
+async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromToken = "", loadSeed = false, modelsDir, port = 0, authToken = "", corsOrigins,
+  // Both default to what the desktop package declares, so nothing has a
+  // second copy of the version to keep in step (scripts/release-check.mjs
+  // fails the build on any version literal that could drift).
+  appVersion = desktopPackage.version, repository = desktopPackage.repository } = {}) {
   // The store is opened first so the model runtime can start out knowing the
   // width the existing cards already use. Without that, a custom embedding API
   // returning a different width after a restart would be adopted as the new
@@ -1978,6 +2004,12 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
     },
     disable: async () => stopLanApi(),
   };
+  const updateCheck = createUpdateCheck({
+    currentVersion: appVersion,
+    repository,
+    statePath: path.join(path.dirname(dataFile), "update-check.json"),
+    enabled: String(process.env.KCC_UPDATE_CHECK || "").toLowerCase() !== "off",
+  });
   const server = createApiServer(store, dataFile, modelRuntime, {
     authToken: resolvedAuthToken,
     taskManager,
@@ -1985,6 +2017,7 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
     corsOrigins,
     deviceAuth,
     networkController,
+    updateCheck,
     db,
   });
   await new Promise((resolve, reject) => {
@@ -2003,6 +2036,7 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
       corsOrigins,
       deviceAuth,
       networkController,
+      updateCheck,
       serverFactory: (handler) => https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath), minVersion: "TLSv1.2" }, handler),
       db,
     });

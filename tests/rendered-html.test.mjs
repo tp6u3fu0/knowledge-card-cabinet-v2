@@ -75,6 +75,10 @@ test("standalone server renders the knowledge card pages", async (context) => {
   const collection = await fetch(`http://127.0.0.1:${runtime.port}/collection`);
   assert.equal(collection.status, 200);
   const collectionHtml = await collection.text();
+  // Nothing in the product may offer a way back to a page that is not in it.
+  // Two links in this header did, and both landed the reader on the page they
+  // were already reading.
+  assert.doesNotMatch(collectionHtml, /href="\/"/u, "the product still links to a front page it does not ship");
   assert.match(collectionHtml, /收藏瀏覽/);
   assert.match(collectionHtml, /設定/);
   assert.match(collectionHtml, /卡片視圖/);
@@ -859,4 +863,34 @@ test("the package leaves out only what it cannot reach", async () => {
     return;
   }
   await checkPackaging();
+});
+
+test("the app can tell you which build it is", async () => {
+  // 1.0.0 shipped with no version anywhere in the interface and no way to
+  // learn that a newer one exists. A fix that cannot reach anyone is not a
+  // fix, and a bug report that cannot name a build is hard to act on.
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  assert.ok(page.includes('fetch("/api/app/version"'), "the interface never asks which version it is");
+  assert.ok(page.includes("collection-page-version"), "the version is fetched and then not shown");
+  assert.ok(page.includes("有新版本"), "there is no way for a published fix to announce itself");
+
+  // Asked once, on mount — not on a timer, and not on every render.
+  const effect = page.slice(page.indexOf('fetch("/api/app/version"'));
+  assert.match(effect.slice(0, 400), /\}, \[\]\);/u, "the version check is not pinned to a single mount");
+  assert.doesNotMatch(page, /setInterval\([^)]*app\/version/u, "the app polls for updates");
+
+  // The route it calls has to exist, and has to go to the local API rather
+  // than to GitHub from the browser.
+  const route = await readFile(new URL("../app/api/app/version/route.ts", import.meta.url), "utf8");
+  assert.match(route, /backendFetch\("\/app\/version"/u);
+  assert.doesNotMatch(route, /api\.github\.com/u, "the page would call GitHub itself, exposing the reader's browser");
+
+  // And the check itself must stay switchable and rare, because an app that
+  // promises to keep to itself cannot quietly call home on every launch.
+  const check = await readFile(new URL("../desktop/update-check.cjs", import.meta.url), "utf8");
+  assert.match(check, /24 \* 60 \* 60 \* 1000/u, "the once-a-day cap is gone");
+  const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
+  assert.match(api, /KCC_UPDATE_CHECK/u, "there is no way to switch the update check off");
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /KCC_UPDATE_CHECK/u, "the one network call the app makes is undocumented");
 });

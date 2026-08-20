@@ -5,6 +5,10 @@
   "author": "Knowledge Card Cabinet",
   "license": "MIT",
   "main": "main.cjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tp6u3fu0/knowledge-card-cabinet-v2.git"
+  },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
     "@modelcontextprotocol/sdk": "1.25.0",
