@@ -78,6 +78,29 @@ VITE_KCC_DOWNLOAD_URL=https://github.com/<you>/<repo>/releases/latest npm run bu
 
 資料位置可用 `KCC_DATA_DIR` 覆寫。
 
+### macOS 說「檔案已損毀，無法打開」
+
+這不是下載壞掉，重抓也沒有用。`.dmg` 沒有 Apple Developer ID 簽章與公證，而從瀏覽器下載的檔案會被標上 `com.apple.quarantine`；macOS 對「已隔離 + 未公證」的 app 顯示的就是這句話，而不是老實說「開發者未簽章」。
+
+把 app 拖進「應用程式」之後，執行一次：
+
+```sh
+xattr -dr com.apple.quarantine /Applications/知識卡冊.app
+```
+
+然後照常打開。如果連 `.dmg` 都掛不起來，先對它做同一件事：
+
+```sh
+xattr -dr com.apple.quarantine ~/Downloads/KnowledgeCardCabinet-*.dmg
+```
+
+幾件相關的事：
+
+- **右鍵 →「打開」不再是解法。** macOS 15 之後那條路徑對已隔離的未公證 app 沒有效果；「系統設定 → 隱私權與安全性」的「仍要打開」按鈕也只會在訊息是「無法驗證開發者」時出現，「已損毀」通常沒有那顆按鈕。
+- **`.zip` 版本情況一樣**，解壓後對 `.app` 下同一道指令即可。
+- **想確認檔案真的沒壞**，用 `shasum -a 256` 比對 release 頁的檔案，或先看檔案大小是否與 release 頁一致。
+- **官方只建置 Apple Silicon 版。** Intel Mac 請自行 `npm run desktop:dist` 從原始碼建置——本機建置出來的產物不帶 quarantine 屬性，不會有這個問題。
+
 ### 版本與更新
 
 收藏頁右上角是目前的版號。桌面版**沒有自動更新**：macOS 的自動更新需要簽章，而這個版本沒有簽；與其為此塞進一整套更新機制，卡冊只做最小的事——每天最多一次向 GitHub 查最新的 release，有新版就把版號換成一行連結，其餘時間完全不連外。

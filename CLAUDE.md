@@ -238,7 +238,7 @@ macOS 支援已經進來了。`electron-builder.yml` 有 `mac:` 區塊（dmg + z
 
 **還沒做的：**
 
-1. **簽章與公證。** 沒有 Apple Developer ID 的話使用者會被 Gatekeeper 隔離，比 Windows SmartScreen 更難繞過。這是要花錢的決定。在簽章之前**不要**改成 electron-updater：macOS 的 Squirrel 會拒絕未簽章的更新，裝出去的自動更新是壞的。目前的做法是查到新版就給一行連結，使用者自己下載。
+1. **簽章與公證。** 沒有 Apple Developer ID 的話使用者會被 Gatekeeper 隔離，比 Windows SmartScreen 更難繞過——訊息還會寫成「檔案已損毀」，看不出是簽章問題（README 的「macOS 說『檔案已損毀』」一節給了 `xattr -dr com.apple.quarantine` 的解法）。這是要花錢的決定。在簽章之前**不要**改成 electron-updater：macOS 的 Squirrel 會拒絕未簽章的更新，裝出去的自動更新是壞的。目前的做法是查到新版就給一行連結，使用者自己下載。
 2. **Windows 防火牆。** 第一次啟用區網分享時，Windows 會跳出允許 `知識卡冊.exe` 監聽的提示。使用者按了「取消」就會靜靜地連不上。目前只在 README 說明，沒有程式處理（加防火牆規則要管理員權限）。
 3. **Windows 沒有 mDNS。** 需要 Apple Bonjour 才有 `dns-sd.exe`。目前的做法是誠實回報並要使用者掃 QR code——這是可接受的，因為 QR 本來就帶了位址。若要補齊，就是用 `dgram` 寫一個純 Node 的 mDNS responder，**不要**改成叫系統工具。
 4. **產品名是中文（`知識卡冊`）。** appId 沒問題，但兩邊的 bundle 路徑都要實機確認過才算數。
