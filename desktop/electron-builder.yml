@@ -11,6 +11,15 @@ files:
   - "**/*"
   # 1,071 source maps, ~42 MB, and nothing in a packaged app reads one.
   - "!**/*.map"
+  # The project must never appear inside its own package. On the Windows runner
+  # `npm install --prefix desktop` left a link to the repo root in
+  # desktop/node_modules, and with it went release/ — so the 1.0.0 installer
+  # shipped a second copy of Electron and came out 337 MB heavier than the same
+  # build made by hand. Both lines are belt and braces; scripts/check-packaging
+  # fails the build if either is ever needed and missing.
+  - "!node_modules/knowledge-card-cabinet"
+  - "!**/release/**"
+  - "!**/dist-site/**"
   # onnxruntime-web resolves to a 25 KB stub here: its package exports map
   # sends "node" to dist/ort.node.min.*. The other 87 MB of dist/ is browser
   # bundles and WASM the main process can never reach. The package itself has
