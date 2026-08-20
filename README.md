@@ -68,6 +68,8 @@ VITE_KCC_DOWNLOAD_URL=https://github.com/<you>/<repo>/releases/latest npm run bu
 
 輸出使用相對路徑，所以放在網域根目錄或 `/<repo>/` 子目錄都可以（GitHub Pages 是後者）。
 
+`.github/workflows/pages.yml` 會在每次推上 `master` 時建置並發佈到 GitHub Pages，下載連結指向 `releases/latest`，所以發新版本不需要重建首頁。它刻意不設路徑過濾：首頁的卡片與樣式來自 `app/`，過濾少寫一條就會留下一個看起來正常的舊頁面。
+
 ## 桌面版
 
 桌面版使用 Electron 啟動內嵌的本機 API 與前端 standalone server，完全離線可用。

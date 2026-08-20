@@ -1,0 +1,61 @@
+name: Knowledge Card Cabinet Front Page
+
+# The front page is not the product. It is built from site/ by its own Vite
+# config and published on its own, so what a reader downloads stays the cabinet
+# alone (see vite.config.site.ts).
+#
+# No path filter: the page pulls the card components and the stylesheet out of
+# app/, so almost any change to the cabinet can change how it looks. The build
+# is a few seconds of static Vite, and a filter that misses one of those paths
+# leaves a stale page up with no sign that anything is wrong.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# One deployment at a time, and never cancel one halfway: an interrupted
+# deploy-pages leaves the live page in whatever state it got to.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:site
+        env:
+          # Read by site/landing.tsx. The name must start with VITE_ and be
+          # read through import.meta.env — Vite replaces process.env with {},
+          # so a mistake here does not fail the build, it just quietly removes
+          # the download button. tests/rendered-html.test.mjs checks the names
+          # on both sides still agree.
+          #
+          # /releases/latest resolves to whatever the newest release is, so the
+          # page never needs rebuilding when a version ships.
+          VITE_KCC_DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/latest
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

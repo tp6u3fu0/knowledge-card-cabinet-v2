@@ -811,6 +811,18 @@ test("what gets downloaded is the cabinet, not the advertisement", async () => {
   assert.match(landing, /import\.meta\.env\.VITE_KCC_APP_URL/u);
   assert.doesNotMatch(landing, /process\.env/u, "Vite replaces process.env with {} — the setting would silently be empty");
   assert.doesNotMatch(landing, /href="\/collection"/u, "the page still links to a route it no longer sits next to");
+
+  // The workflow that publishes the page is the only place those settings are
+  // ever supplied, and supplying the wrong name is invisible: the build still
+  // succeeds and the download button simply is not there. So the names have to
+  // agree on both sides, and the build has to be the site build.
+  const pages = await readFile(new URL("../.github/workflows/pages.yml", import.meta.url), "utf8");
+  assert.match(pages, /npm run build:site/u, "the page workflow builds something other than the page");
+  for (const setting of landing.match(/VITE_KCC_[A-Z_]+/gu) ?? []) {
+    if (setting === "VITE_KCC_APP_URL") continue; // Optional: no public copy of the cabinet is hosted.
+    assert.ok(pages.includes(`${setting}:`), `${setting} is read by the page and never set when it is published`);
+  }
+  assert.match(pages, /releases\/latest/u, "the download link would need a rebuild for every release");
 });
 
 test("the package leaves out only what it cannot reach", async () => {
