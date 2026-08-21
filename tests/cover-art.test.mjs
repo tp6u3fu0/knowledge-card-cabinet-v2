@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { buildCover, COVER_VERSION, hashEmbedding } = require("../desktop/local-api.cjs");
+const { buildCover, COVER_VERSION, hashEmbedding, coverState, coverNeedsRedraw, embeddingSourceHash } = require("../desktop/local-api.cjs");
 
 /**
  * The glyph names the frontend can actually draw. A cover naming anything else
@@ -102,4 +102,61 @@ test("the settings glossary is coherent and draws only real glyphs", async () =>
   for (const id of referenced) {
     assert.ok(ids.has(id), `panels.tsx asks for glossary card "${id}", which glossary.ts does not define`);
   }
+});
+
+/**
+ * Covers hold still when the model changes.
+ *
+ * A cabinet's covers are how a person finds a card by eye. Rebuilding them from
+ * whatever vector is current means every upgrade repaints the whole shelf: the
+ * categories are untouched, the colours are untouched, and yet nothing looks
+ * like itself. The rule is that the art describes what the card *said*, so only
+ * the writing changing — or the card never having had a real vector — earns a
+ * redraw.
+ */
+const cardWithArt = (overrides = {}) => {
+  const card = {
+    id: "card", number: "K-1", title: "標題", question: "問題", summary: "摘要",
+    analogy: "比喻", detail: "細節", topic: "主題", category: "分類", source: "", tags: [],
+    embedding: hashEmbedding("原本的內容", 384),
+    ...overrides,
+  };
+  card.embedding_source_hash = overrides.embedding_source_hash ?? embeddingSourceHash(card);
+  // Mirrors coverVector(): a card with no model vector is still drawn, from the
+  // hashed stand-in. `in` rather than `??` so an explicit null survives.
+  const source = Array.isArray(card.embedding) && card.embedding.length > 0
+    ? card.embedding
+    : hashEmbedding("原本的內容", 384);
+  card.cover = "cover" in overrides ? overrides.cover : buildCover(source, card.category);
+  return card;
+};
+
+test("switching models does not redraw a cover", () => {
+  const card = cardWithArt();
+  const before = coverState(card);
+  // What a model switch does: the same writing, a brand new vector.
+  card.embedding = hashEmbedding("原本的內容", 512);
+  assert.equal(coverNeedsRedraw(card, before), false);
+});
+
+test("editing what a card says does redraw its cover", () => {
+  const card = cardWithArt();
+  card.title = "改過的標題";
+  const before = coverState(card);
+  assert.equal(coverNeedsRedraw(card, before), true);
+});
+
+test("a card that never had a real vector gets its cover drawn once it does", () => {
+  // Before a model answers, a card carries art from the hashed stand-in. That
+  // art is a placeholder and must give way to the real thing.
+  const card = cardWithArt({ embedding: null });
+  const before = coverState(card);
+  card.embedding = hashEmbedding("原本的內容", 384);
+  assert.equal(coverNeedsRedraw(card, before), true);
+});
+
+test("a card with no cover at all always gets one", () => {
+  const card = cardWithArt({ cover: null });
+  const before = coverState(card);
+  assert.equal(coverNeedsRedraw(card, before), true);
 });

@@ -931,7 +931,42 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken 
  * real vectors as though the result meant something. Clearing the model id is
  * what lets reindexStore find the card and try again later.
  */
+/**
+ * What a card's cover was drawn from, read *before* the vector is replaced.
+ *
+ * Two things decide whether the art still describes the card: whether it was
+ * drawn from a real model vector at all — a card with no vector yet carries the
+ * hashed stand-in — and whether the writing it was drawn from is still the
+ * writing on the card.
+ */
+function coverState(card) {
+  return {
+    hadModelVector: Array.isArray(card.embedding) && card.embedding.length > 0,
+    textUnchanged: card.embedding_source_hash === embeddingSourceHash(card),
+  };
+}
+
+/**
+ * A cover is a picture of what the card said when it was written, not a live
+ * view of whatever vector the cabinet happens to hold now.
+ *
+ * It is redrawn when the writing changed, or when the art is still the hashed
+ * stand-in — but **not** merely because the model changed. Redrawing on a model
+ * switch repainted every cover in the cabinet at once: categories untouched,
+ * colours untouched, and yet nothing looked like itself any more. Recognising a
+ * card by its cover is most of what the cover is for, so the art holds still
+ * for the same reason category colour does — a cabinet must not rearrange
+ * itself while its owner is out.
+ *
+ * Colour staleness is a separate question with its own rule, in
+ * `refreshStaleCovers`.
+ */
+function coverNeedsRedraw(card, before) {
+  return !card.cover || !before.hadModelVector || !before.textUnchanged;
+}
+
 async function applyEmbedding(card, modelRuntime, accents = null) {
+  const before = coverState(card);
   try {
     card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback: false });
     card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
@@ -939,11 +974,11 @@ async function applyEmbedding(card, modelRuntime, accents = null) {
     card.embedding = null;
     card.embedding_model_id = null;
   }
-  // The accents matter: rebuilding a vector redraws the cover, and without the
-  // cabinet's colour assignment that redraw silently reverts the card to the
-  // hashed fallback colour — which is what a model switch used to do to every
-  // card at once.
-  card.cover = buildCover(coverVector(card), card.category, accents);
+  // The accents matter: a redraw without the cabinet's colour assignment
+  // silently reverts the card to the hashed fallback colour.
+  if (coverNeedsRedraw(card, before)) {
+    card.cover = buildCover(coverVector(card), card.category, accents);
+  }
   card.embedding_source_hash = embeddingSourceHash(card);
   return card;
 }
@@ -971,16 +1006,23 @@ async function reindexStore(store, modelRuntime, { allowFallback = false, progre
   let completed = 0;
   for (const card of cardsToUpdate) {
     if (allowFallback) {
+      const before = coverState(card);
       card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
       card.embedding_model_id = currentModel;
-      card.cover = buildCover(coverVector(card), card.category, store.category_accents);
+      if (coverNeedsRedraw(card, before)) {
+        card.cover = buildCover(coverVector(card), card.category, store.category_accents);
+      }
       card.embedding_source_hash = embeddingSourceHash(card);
     } else {
       // One card the model chokes on must not abort the whole rebuild; it keeps
       // a null model id and gets picked up by the next pass.
       await applyEmbedding(card, modelRuntime, store.category_accents);
     }
-    card.updated_at = now();
+    // `updated_at` is deliberately not touched. It says when a person last
+    // changed the card; a reindex is the machine's work, not theirs. Stamping
+    // it here made a model switch mark the entire cabinet as just-edited, which
+    // silently reordered every "recently updated" view on both the desktop and
+    // the phone — the cabinet's history rewritten by a maintenance job.
     completed += 1;
     progress?.(10 + Math.floor(completed / Math.max(1, cardsToUpdate.length) * 70), `已建立 ${completed}/${cardsToUpdate.length} 張卡片向量`);
   }
@@ -1737,7 +1779,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (request.method === "GET" && segments[0] === "search") {
-      const queryVector = await modelRuntime.embed(requestUrl.searchParams.get("q") || "");
+      const queryVector = await modelRuntime.embed(requestUrl.searchParams.get("q") || "", { kind: "query" });
       const limit = Math.min(50, Math.max(1, Number(requestUrl.searchParams.get("limit") || 10)));
       const query = requestUrl.searchParams.get("q") || "";
       const category = requestUrl.searchParams.get("category") || "";
@@ -2119,4 +2161,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, coverState, coverNeedsRedraw, embeddingSourceHash, categoryPalette, assignCategoryAccents, COVER_VERSION };

@@ -51,6 +51,19 @@ function apiBackedRuntime(root, apiUrl, apiDimensions = 0) {
   return createModelRuntime({ modelsDir, hashEmbedding, templateDraft: () => ({}), apiDimensions });
 }
 
+/**
+ * Point the runtime at an empty directory for bundled weights, so a test can
+ * describe a build that ships none. Returns the cleanup for `t.after`.
+ */
+function withoutBundledWeights(root) {
+  const previous = process.env.KCC_BUNDLED_MODELS_DIR;
+  process.env.KCC_BUNDLED_MODELS_DIR = join(root, "no-bundled-weights");
+  return () => {
+    if (previous === undefined) delete process.env.KCC_BUNDLED_MODELS_DIR;
+    else process.env.KCC_BUNDLED_MODELS_DIR = previous;
+  };
+}
+
 test("a custom API wider than the old hardcoded 384 is accepted", async (t) => {
   const api = await fakeEmbeddingApi();
   const root = mkdtempSync(join(tmpdir(), "kcc-dims-"));
@@ -184,6 +197,10 @@ test("falling back to the built-in model is reported, not silent", (t) => {
     embedding_model_id: "embedding-model-that-no-longer-exists",
   }), "utf8");
 
+  // Describes a build with no bundled weights, so the fallback under test is
+  // the built-in one. Without this the answer depends on whether this machine
+  // happens to have run `npm run models:bundle`.
+  t.after(withoutBundledWeights(root));
   const runtime = createModelRuntime({ modelsDir, hashEmbedding, templateDraft: () => ({}) });
   // Dropping to the built-in model rebuilds every vector at 384 dimensions and
   // makes semantic search quietly worse, so it must not pass unannounced.
@@ -197,7 +214,9 @@ test("a local model keeps its own declared width", (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const modelsDir = join(root, "models");
   mkdirSync(modelsDir, { recursive: true });
+  t.after(withoutBundledWeights(root));
   const runtime = createModelRuntime({ modelsDir, hashEmbedding, templateDraft: () => ({}) });
-  // Default is the built-in hash embedding, whose width is genuinely 384.
+  // With nothing bundled the default is the built-in hash embedding, whose
+  // width is genuinely 384.
   assert.equal(runtime.expectedEmbeddingDimensions(), 384);
 });

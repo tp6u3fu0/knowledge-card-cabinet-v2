@@ -11,7 +11,7 @@ const BUILTIN_EMBEDDING_MODEL = "embedding-hash-384";
  * embedding when the files are not there (a plain `npm run build`, or a build
  * where scripts/fetch-bundled-model.mjs was skipped).
  */
-const BUNDLED_EMBEDDING_MODEL = "embedding-multilingual-384";
+const BUNDLED_EMBEDDING_MODEL = "embedding-gemma-300m-768";
 /** Width of the built-in hash embedding. Not the width of every model. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
 const SETTINGS_VERSION = 1;
@@ -41,6 +41,19 @@ const DIMENSION_GUIDE = [
     per_card: "2 KB／張",
     strengths: ["專為中文訓練，短句判斷比多語言 384 維穩", "下載比任何其他選項都小", "CPU 推論負擔很低"],
     limits: ["英文內容的表現不如英文專用模型", "長文的區辨力仍不及 1024 維"],
+  },
+  {
+    dimensions: 768,
+    label: "768 維",
+    headline: "多語言，同義詞最強",
+    download: "約 320 MB",
+    per_card: "3 KB／張",
+    strengths: ["同義但用詞完全不同的卡片也抓得到", "支援 100 種以上語言，中英夾雜的收藏不用選邊", "體積只有 1024 維選項的一半多一點"],
+    // The floor is the honest caveat: this model's unrelated pairs sit around
+    // 0.67, so its numbers look higher across the board. That is a property of
+    // the model, not a sign that everything is related — which is why scores
+    // are read relative to each model's own band rather than a fixed cutoff.
+    limits: ["分數整體偏高，不能拿其他模型的門檻來看", "每張卡片的處理時間比輕量選項長", "建議 8 GB 以上記憶體"],
   },
   {
     dimensions: 1024,
@@ -244,6 +257,35 @@ const MODEL_CATALOG = [
     builtin: false,
   },
   {
+    id: "embedding-gemma-300m-768",
+    kind: "embedding",
+    language: "multi",
+    label: "EmbeddingGemma",
+    short_label: "多語最佳",
+    provider: "transformers.js",
+    model_id: "onnx-community/embeddinggemma-300m-ONNX",
+    task: "feature-extraction",
+    dtype: "q8",
+    dimensions: 768,
+    // Taught with an instruction in front of the text, and a different one for
+    // a question than for a card. Measured here: the same word embedded with
+    // and without the prefix lands at 0.79 similarity, so dropping them is not
+    // cosmetic — it aims queries at a different part of the space than the
+    // cards were filed in.
+    query_prefix: "task: search result | query: ",
+    document_prefix: "title: none | text: ",
+    size_label: "約 320 MB",
+    download_size_bytes: 320_000_000,
+    min_memory_gb: 8,
+    tier: "平衡硬體",
+    languages: "100 種以上語言",
+    // Measured on this project's own runtime at q8: ~118ms per card once warm,
+    // and "汽車"↔"轎車" at 0.96 with no character in common — the case that
+    // separates a language model from word overlap.
+    description: "768 維、支援 100 種以上語言，是 500M 以下品質最好的一批。同義詞辨識明顯較強，體積介於中文輕量與 BGE-M3 之間。",
+    builtin: false,
+  },
+  {
     id: "embedding-bge-m3-1024",
     kind: "embedding",
     language: "multi",
@@ -293,7 +335,7 @@ const SUMMARY_TIERS = [
  */
 const EMBEDDING_TIERS = [
   { tier: "light", tier_label: "輕量", dimensions: [384, 512] },
-  { tier: "precise", tier_label: "高精度", dimensions: [1024] },
+  { tier: "precise", tier_label: "高精度", dimensions: [768, 1024] },
 ];
 
 const EMBEDDING_LANGUAGES = [
@@ -394,7 +436,20 @@ const API_PROVIDERS = [
   },
 ];
 
-const BUNDLED_MODEL_REPOSITORY = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+/**
+ * Which repository the bundled weights come from.
+ *
+ * Derived from the catalogue rather than written out again: this and
+ * BUNDLED_EMBEDDING_MODEL are the same decision, and when they were two
+ * independent strings changing one left the app looking for a directory that
+ * belonged to the other. Nothing failed loudly — the app simply decided no
+ * weights were bundled, or found the *previous* model's files and started up on
+ * a model nobody had chosen.
+ *
+ * scripts/fetch-bundled-model.mjs downloads into this same path, so it has to
+ * agree with this too.
+ */
+const BUNDLED_MODEL_REPOSITORY = MODEL_CATALOG.find((model) => model.id === BUNDLED_EMBEDDING_MODEL)?.model_id || "";
 
 /**
  * Where the bundled weights live: beside the packaged resources in an installed
@@ -402,8 +457,17 @@ const BUNDLED_MODEL_REPOSITORY = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
  * which is what every code path treats as "behave exactly as before".
  */
 function bundledModelsDir() {
+  // An explicitly named directory is the answer, whether or not it has weights
+  // in it: saying where the bundle is and then being handed a different one is
+  // never what the caller meant. It is also the only way to describe "a build
+  // with no bundled weights" on a machine that happens to have some sitting in
+  // build/models — which is how two tests ended up passing or failing according
+  // to whether anyone had run `npm run models:bundle` lately.
+  const declared = process.env.KCC_BUNDLED_MODELS_DIR;
+  if (declared) {
+    return fs.existsSync(path.join(declared, BUNDLED_MODEL_REPOSITORY, "config.json")) ? declared : "";
+  }
   const candidates = [
-    process.env.KCC_BUNDLED_MODELS_DIR,
     process.resourcesPath ? path.join(process.resourcesPath, "kcc-models") : "",
     path.resolve(__dirname, "..", "build", "models"),
   ].filter(Boolean);
@@ -1187,7 +1251,25 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     throw error;
   }
 
-  async function embed(text, { allowFallback = true } = {}) {
+  /**
+   * Turn text into a vector.
+   *
+   * `kind` says whether this text is a card being filed or a question being
+   * asked. Most models treat both the same and the distinction costs nothing —
+   * but the retrieval-trained ones are taught with an instruction in front of
+   * the text, and a *different* instruction for queries than for documents.
+   * Getting that wrong does not fail: the two simply land in slightly different
+   * parts of the space and every score quietly gets worse.
+   *
+   * A catalogue entry declares its own prefixes. Models with none behave
+   * exactly as before, which is why adding this changed no existing vector —
+   * introducing a prefix for a model already in use would silently re-aim every
+   * query against a library that was embedded without one.
+   *
+   * Custom API models get no prefix: the cabinet does not know what is on the
+   * other end, and guessing an instruction would be worse than none.
+   */
+  async function embed(text, { allowFallback = true, kind = "document" } = {}) {
     if (settings.sources.embedding === "api") {
       try {
         const payload = await requestApi("embedding", String(text || ""));
@@ -1211,7 +1293,8 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     if (model.builtin) return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
     try {
       const extractor = await loadPipeline(model);
-      const output = await extractor(String(text || ""), { pooling: "mean", normalize: true });
+      const prefix = (kind === "query" ? model.query_prefix : model.document_prefix) || "";
+      const output = await extractor(prefix + String(text || ""), { pooling: "mean", normalize: true });
       const vector = Array.from(output?.data || []);
       if (vector.length !== model.dimensions) throw new Error(`embedding 維度不符：取得 ${vector.length}，預期 ${model.dimensions}`);
       return vector;
@@ -1348,6 +1431,11 @@ module.exports = {
   embeddingChoices,
   BUILTIN_EMBEDDING_MODEL,
   BUILTIN_SUMMARY_MODEL,
+  // Exported so tests can ask which model ships in the installer instead of
+  // naming one. A suite that hardcodes it keeps passing after the bundle
+  // changes, while quietly checking the model that used to be there.
+  BUNDLED_EMBEDDING_MODEL,
+  BUNDLED_MODEL_REPOSITORY,
   DIMENSION_GUIDE,
   MODEL_CATALOG,
   createModelRuntime,

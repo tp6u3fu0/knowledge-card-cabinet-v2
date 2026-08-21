@@ -11,6 +11,8 @@ import test from "node:test";
 const { startLocalApi } = await import("../desktop/local-api.cjs");
 const require = createRequire(import.meta.url);
 const { createTaskManager } = require("../desktop/task-manager.cjs");
+const { BUILTIN_EMBEDDING_MODEL, BUNDLED_EMBEDDING_MODEL, MODEL_CATALOG } = require("../desktop/model-runtime.cjs");
+const widthOf = (id) => MODEL_CATALOG.find((model) => model.id === id)?.dimensions;
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
@@ -115,16 +117,18 @@ test("local API exposes separate summary and embedding model choices", async (co
 
   const health = await (await fetch(`${runtime.baseUrl}/health`)).json();
   // Which embedding a fresh cabinet starts on depends on whether this build
-  // bundled weights (see tests/model-catalogue.test.mjs); either way it is a
-  // 384-dim model, and summaries always start on the rule-based template.
-  assert.ok(["embedding-hash-384", "embedding-multilingual-384"].includes(health.embedding_model), health.embedding_model);
-  assert.equal(health.embedding_dimensions, 384);
+  // bundled weights (see tests/model-catalogue.test.mjs). The width follows
+  // from that choice — it used to be written out as 384, which was only ever
+  // true because both candidates happened to be that wide. Summaries always
+  // start on the rule-based template.
+  assert.ok([BUILTIN_EMBEDDING_MODEL, BUNDLED_EMBEDDING_MODEL].includes(health.embedding_model), health.embedding_model);
+  assert.equal(health.embedding_dimensions, widthOf(health.embedding_model));
   assert.equal(health.summary_model, "summary-template");
 
   const settingsResponse = await fetch(`${runtime.baseUrl}/settings`, { headers: auth });
   assert.equal(settingsResponse.status, 200);
   const settings = await settingsResponse.json();
-  assert.equal(settings.embedding.dimensions, 384);
+  assert.equal(settings.embedding.dimensions, widthOf(health.embedding_model));
   assert.equal(Object.hasOwn(settings.embedding, "api_key"), false);
 
   const invalidSettings = await fetch(`${runtime.baseUrl}/settings`, {

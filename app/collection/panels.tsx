@@ -110,7 +110,10 @@ export function modelGlyph(model: ModelOption): CoverMotif["shape"] {
 }
 
 function modelTags(model: ModelOption): string[] {
-  const tags = [model.size_label];
+  // A bundled model's size is a fact about the installer, not about anything
+  // the reader has to wait for, so it says "隨程式附帶" instead of a number
+  // that reads as a pending download.
+  const tags = [model.bundled ? "隨程式附帶" : model.size_label];
   if (model.kind === "embedding" && model.dimensions) tags.push(`${model.dimensions} 維`);
   if (model.custom) tags.push("自訂");
   return tags;
@@ -119,6 +122,7 @@ function modelTags(model: ModelOption): string[] {
 function modelState(model: ModelOption, isBusy: boolean): string {
   if (model.active) return "使用中";
   if (model.status === "downloading" || isBusy) return "準備中…";
+  if (model.bundled) return "已內建";
   if (model.installed) return "已下載";
   return model.size_label ? `下載 ${model.size_label}` : "未下載";
 }
@@ -847,7 +851,9 @@ function SimpleModelPicker({
             <p>
               這個組合用的是 <strong>{selected.model_label}</strong>
               （{selected.size_label}{selected.dimensions ? ` · ${selected.dimensions} 維` : ""}）
-              {selectedModel?.installed ? "，已經放進左邊的卡槽。" : "，下載完成後就會放進左邊的卡槽。"}
+              {selectedModel?.bundled
+                ? "，隨程式附帶，不需要下載。"
+                : selectedModel?.installed ? "，已經放進左邊的卡槽。" : "，下載完成後就會放進左邊的卡槽。"}
             </p>
             {selected.note ? <p className="is-caveat">{selected.note}</p> : null}
             {selectedModel && !selectedModel.installed ? (

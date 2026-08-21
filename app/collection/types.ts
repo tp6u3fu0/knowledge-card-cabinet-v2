@@ -128,6 +128,12 @@ export type ModelOption = {
   languages: string;
   description: string;
   builtin: boolean;
+  /**
+   * Its weights ship inside the installer, so it is ready without a download.
+   * The API has always sent this; nothing displayed it, which meant the bundled
+   * model advertised a download size it did not need.
+   */
+  bundled?: boolean;
   /** Added by the user from a Hugging Face id rather than shipped with the app. */
   custom?: boolean;
   added_at?: string;

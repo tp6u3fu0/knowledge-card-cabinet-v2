@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { API_PROVIDERS, DIMENSION_GUIDE, MODEL_CATALOG, lookupHuggingFace } = require("../desktop/model-runtime.cjs");
+const { API_PROVIDERS, BUNDLED_EMBEDDING_MODEL, BUNDLED_MODEL_REPOSITORY, DIMENSION_GUIDE, MODEL_CATALOG, lookupHuggingFace } = require("../desktop/model-runtime.cjs");
 
 const { startLocalApi } = await import("../desktop/local-api.cjs");
 const projectRoot = new URL("../", import.meta.url);
@@ -193,7 +193,13 @@ test("the Hugging Face lookup keeps the org/name separator intact", async () => 
 });
 
 test("a build that bundles weights starts semantic, and one that does not still works", async (t) => {
-  const bundled = existsSync(new URL("../build/models/Xenova/paraphrase-multilingual-MiniLM-L12-v2/config.json", import.meta.url));
+  // Both the path and the id come from the runtime's own constants. Written out
+  // by hand, this suite went on testing the model that used to be bundled after
+  // the bundle changed — passing while checking nothing that shipped.
+  const shipped = MODEL_CATALOG.find((model) => model.id === BUNDLED_EMBEDDING_MODEL);
+  assert.ok(shipped, `BUNDLED_EMBEDDING_MODEL ${BUNDLED_EMBEDDING_MODEL} is not in the catalogue`);
+  assert.equal(shipped.model_id, BUNDLED_MODEL_REPOSITORY, "the bundled id and its repository have drifted apart");
+  const bundled = existsSync(new URL(`../build/models/${BUNDLED_MODEL_REPOSITORY}/config.json`, import.meta.url));
   await withRuntime(async ({ json }) => {
     const { body } = await json("/health");
     if (!bundled) {
@@ -207,19 +213,19 @@ test("a build that bundles weights starts semantic, and one that does not still 
 
     // Weights are shipped: a fresh cabinet must already be on the real model
     // rather than waiting for someone to find the settings page.
-    assert.equal(body.embedding_model, "embedding-multilingual-384");
-    assert.equal(body.embedding_dimensions, 384);
+    assert.equal(body.embedding_model, BUNDLED_EMBEDDING_MODEL);
+    assert.equal(body.embedding_dimensions, shipped.dimensions);
     assert.equal(body.semantic_mode, true);
 
     const catalogue = await json("/models");
-    const model = catalogue.body.models.find((candidate) => candidate.id === "embedding-multilingual-384");
+    const model = catalogue.body.models.find((candidate) => candidate.id === BUNDLED_EMBEDDING_MODEL);
     assert.equal(model.installed, true, "bundled model should need no download");
     assert.equal(model.bundled, true);
     assert.equal(model.storage.status, "ready");
 
     // Its files are part of the install, so "clean up the cache" is meaningless
     // and must not pretend to work.
-    const removal = await json("/models/embedding-multilingual-384", { method: "DELETE" });
+    const removal = await json(`/models/${BUNDLED_EMBEDDING_MODEL}`, { method: "DELETE" });
     assert.equal(removal.status, 409);
   });
 });
@@ -269,6 +275,49 @@ test("the built-in catalogue stays internally consistent", () => {
   assert.ok(DIMENSION_GUIDE.length >= 2);
 });
 
+test("a catalogue id pins the exact weights, quantization included", () => {
+  // `embedding_model_id` on a card is a catalogue id, and it is the whole basis
+  // for deciding whether two vectors may be compared. Quantization changes the
+  // weights, so the same repository at q8 and at q4 produces different vectors
+  // — which means one id must never be able to mean both. Each entry therefore
+  // pins exactly one dtype; a second precision needs a second id.
+  //
+  // This matters most for anything outside this process that recomputes a
+  // vector and expects it to line up with the cabinet's own — a phone running
+  // the same model, for instance.
+  for (const model of MODEL_CATALOG) {
+    if (model.builtin || model.kind !== "embedding") continue;
+    assert.equal(typeof model.dtype, "string", `${model.id} does not pin a dtype`);
+    assert.ok(model.dtype.length > 0, `${model.id} pins an empty dtype`);
+  }
+
+  const byWeights = new Map();
+  for (const model of MODEL_CATALOG) {
+    if (model.builtin || model.kind !== "embedding") continue;
+    const key = `${model.model_id}@${model.dtype}`;
+    assert.equal(byWeights.has(key), false, `${model.id} and ${byWeights.get(key)} are the same weights under two ids`);
+    byWeights.set(key, model.id);
+  }
+});
+
+test("a model that needs task prefixes declares both of them", () => {
+  // Retrieval-trained models are taught with an instruction in front of the
+  // text, and a different one for a question than for a document. Declaring
+  // only one half is worse than declaring neither: queries and cards would land
+  // in different parts of the space, and nothing would report an error — every
+  // score would simply get a little worse.
+  for (const model of MODEL_CATALOG) {
+    if (model.kind !== "embedding") continue;
+    const hasQuery = typeof model.query_prefix === "string" && model.query_prefix.length > 0;
+    const hasDocument = typeof model.document_prefix === "string" && model.document_prefix.length > 0;
+    assert.equal(
+      hasQuery,
+      hasDocument,
+      `${model.id} declares only one of query_prefix/document_prefix; a model either uses both or neither`,
+    );
+  }
+});
+
 test("an embedding API's vector width can be measured before it is saved", async () => {
   // A stand-in for Ollama/LM Studio: OpenAI-compatible, 1024 wide. The point of
   // the probe is that nothing else on the wire reveals this — /models lists
@@ -311,8 +360,14 @@ test("an embedding API's vector width can be measured before it is saved", async
         method: "POST",
         body: JSON.stringify({ api_url: endpoint, model: "bge-m3", api_format: "openai" }),
       });
-      assert.equal(after.body.store_dimensions, 384, "a stored card fixes the library's width");
-      assert.equal(after.body.matches_store, false, "1024 against a 384 library must be reported as incompatible");
+      // Read from the runtime rather than written out: which width a fresh card
+      // gets depends on which model this build ships, and hardcoding the old
+      // default made this fail the day the bundle changed. The invariant being
+      // checked is that storing a card fixes the width at all.
+      const { body: health } = await json("/health");
+      assert.equal(after.body.store_dimensions, health.embedding_dimensions, "a stored card fixes the library's width");
+      assert.notEqual(health.embedding_dimensions, 1024, "this check needs the probe's 1024 to differ from the library");
+      assert.equal(after.body.matches_store, false, "a 1024-dim API against a library of another width must be reported as incompatible");
     });
   } finally {
     await new Promise((resolve) => service.close(resolve));
