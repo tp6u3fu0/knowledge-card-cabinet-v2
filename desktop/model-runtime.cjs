@@ -1006,7 +1006,22 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     if (pipelinePromises.has(model.id)) return pipelinePromises.get(model.id);
 
     const pipelinePromise = getTransformers()
-      .then(({ pipeline }) => pipeline(model.task, model.model_id, { dtype: model.dtype || "q8" }))
+      .then(({ pipeline }) => pipeline(model.task, model.model_id, {
+        dtype: model.dtype || "q8",
+        // ONNX Runtime's BFC arena doubles its reservation every time it grows,
+        // so a few extensions in it asks for 2 GiB in one go. Node answers a
+        // failed allocation with null and the model simply errors; Chromium's
+        // allocator answers it with a trap, so the whole app disappears with no
+        // message at all — Electron 43.4.1 on macOS 26A5406e, 8 GB, embedding a
+        // card. EmbeddingGemma died on its first inference every time; BGE-M3
+        // died once in every few dozen, which is worse, because it looks random.
+        //
+        // Without the arena each tensor is allocated on its own, and the 2 GiB
+        // request never happens. Measured over thirty embeddings it costs
+        // nothing: 73 ms per card against 77 ms with the arena, and peak memory
+        // drops (BGE-M3 989 MB, EmbeddingGemma 698 MB).
+        session_options: { enableCpuMemArena: false },
+      }))
       .catch((error) => {
         pipelinePromises.delete(model.id);
         throw error;
