@@ -840,6 +840,17 @@ function SimpleModelPicker({
   const byId = new Map(models.map((model) => [model.id, model]));
   const selected = choices.embedding.find((choice) => choice.language === language && choice.tier === tier);
   const selectedModel = selected ? byId.get(selected.model_id) : undefined;
+  /**
+   * What goes in brackets after the chosen model's name.
+   *
+   * A bundled model's size is a fact about the installer, not something anyone
+   * waits for — the rule `modelTags` already follows. Printed here it sat two
+   * words away from "不需要下載", and read as a download that had not started.
+   */
+  const chosenDetails = [
+    selectedModel?.bundled ? null : selected?.size_label,
+    selected?.dimensions ? `${selected.dimensions} 維` : null,
+  ].filter(Boolean).join(" · ");
 
   /**
    * Picking an axis is the choice, so it applies itself.
@@ -923,7 +934,7 @@ function SimpleModelPicker({
           <div className="simple-picker__chosen">
             <p>
               這個組合用的是 <strong>{selected.model_label}</strong>
-              （{selected.size_label}{selected.dimensions ? ` · ${selected.dimensions} 維` : ""}）
+              {chosenDetails ? `（${chosenDetails}）` : ""}
               {selectedModel?.bundled
                 ? "，隨程式附帶，不需要下載。"
                 : selectedModel?.installed ? "，已經放進左邊的卡槽。" : "，下載完成後就會放進左邊的卡槽。"}
