@@ -962,6 +962,71 @@ function refreshStaleCovers(store) {
   return stale.map((card) => card.id);
 }
 
+/** A cancelled task should stop working, not finish and then be ignored. */
+function abortIfCancelled(cancelled) {
+  if (!cancelled?.()) return;
+  throw Object.assign(new Error("已取消"), { name: "AbortError" });
+}
+
+/**
+ * Rebuild every vector with an incoming model, putting none of them into
+ * service.
+ *
+ * The new vectors land in `embedding_pending`, a field the store's schema does
+ * not know about and therefore never writes to disk. Meanwhile the vectors
+ * already on the cards keep answering searches, from the model that is still
+ * active. The cabinet stays whole for the entire rebuild.
+ *
+ * What this replaces: switching the active model first and converting
+ * afterwards. `/search` embeds the query with the active model and then drops
+ * every card whose vector is a different width, so each unconverted card was
+ * invisible. Measured on a 91-card cabinet moving from BGE-M3 to
+ * EmbeddingGemma, the first search after the switch returned **one** card, and
+ * it took fifteen seconds to come back — on a cabinet of two thousand it would
+ * be most of ten minutes of a cabinet that looks like it has been emptied.
+ *
+ * A crash in the middle is also better this way: nothing was applied, so the
+ * cabinet is still consistently on the old model. Switching first left half the
+ * cards on each side of a boundary nothing would have repaired on its own.
+ */
+async function stageEmbeddings(store, embedder, { progress, cancelled } = {}) {
+  const cards = store.cards.filter((card) => !card.deleted_at);
+  let completed = 0;
+  for (const card of cards) {
+    abortIfCancelled(cancelled);
+    card.embedding_pending = await embedder.embed(embeddingText(card));
+    // Recorded with the vector: a card edited during the rebuild must not end
+    // up claiming that this vector describes the new wording.
+    card.embedding_pending_hash = embeddingSourceHash(card);
+    completed += 1;
+    progress?.(5 + Math.floor(completed / Math.max(1, cards.length) * 75), `已重算 ${completed}/${cards.length} 張卡片向量`);
+  }
+  return cards.length;
+}
+
+/** Put every staged vector into service at once, so no search sees a half-built index. */
+function commitStagedEmbeddings(store, modelId) {
+  const committed = [];
+  for (const card of store.cards) {
+    if (!Array.isArray(card.embedding_pending)) continue;
+    card.embedding = card.embedding_pending;
+    card.embedding_model_id = modelId;
+    card.embedding_source_hash = card.embedding_pending_hash;
+    delete card.embedding_pending;
+    delete card.embedding_pending_hash;
+    committed.push(card.id);
+  }
+  store.embedding_model_id = modelId;
+  return committed;
+}
+
+function discardStagedEmbeddings(store) {
+  for (const card of store.cards) {
+    delete card.embedding_pending;
+    delete card.embedding_pending_hash;
+  }
+}
+
 async function reindexStore(store, modelRuntime, { allowFallback = false, progress } = {}) {
   const currentModel = modelRuntime.activeEmbeddingModelId();
   const allCards = store.cards.filter((card) => !card.deleted_at);
@@ -1108,24 +1173,51 @@ function createApiServer(store, dataFile, modelRuntime, {
     }, { retryPayload: { model_id: modelId } });
   };
 
-  const startModelSelectTask = (kind, modelId, selection, previousEmbedding) => taskManager.start(
+  /**
+   * Rebuild with the incoming model, then switch — never the other way round.
+   *
+   * Because nothing is applied until every card is converted, there is no
+   * rollback to get wrong: a failure part-way through leaves the cabinet
+   * exactly as it was, still searchable, still on the model it was on.
+   */
+  const applyEmbeddingPlan = async (context, plan, label) => {
+    try {
+      const embedder = modelRuntime.embedderFor(plan.embedding_plan);
+      context.update(5, `正在以${label}重算向量，搜尋期間照常可用`);
+      await stageEmbeddings(store, embedder, {
+        progress: (progress, message) => context.update(progress, message),
+        cancelled: context.cancelled,
+      });
+      abortIfCancelled(context.cancelled);
+    } catch (error) {
+      discardStagedEmbeddings(store);
+      throw error;
+    }
+    const applied = plan.apply();
+    context.update(84, "正在切換到新的向量");
+    commitStagedEmbeddings(store, modelRuntime.activeEmbeddingModelId());
+    store.summary_model_id = modelRuntime.activeSummaryModelId();
+    context.update(88, "正在重建語意關聯");
+    rebuildSemanticRelations(store);
+    // A card written while the rebuild was running carries a vector from the
+    // model that has just been retired, and a card edited during it carries one
+    // that describes the old wording. Usually there are none of either.
+    context.update(95, "正在處理重建期間的異動");
+    await reindexStore(store, modelRuntime, { allowFallback: false });
+    save();
+    return applied;
+  };
+
+  const startModelSelectTask = (kind, modelId, plan) => taskManager.start(
     "model_select",
     `啟用 ${modelId} 並重建 embedding`,
     async (context) => {
-      try {
-        await reindexStore(store, modelRuntime, { allowFallback: false, progress: (progress, message) => context.update(progress, message) });
-        save();
-        return { status: "active", selection, reindexed_cards: store.cards.filter((card) => !card.deleted_at).length, models: modelRuntime.catalog() };
-      } catch (error) {
-        try {
-          await modelRuntime.select("embedding", previousEmbedding);
-        } catch {
-          // Preserve the last valid model selection if rollback fails.
-        }
-        throw error;
-      }
+      const selection = await applyEmbeddingPlan(context, plan, "新模型");
+      return { status: "active", selection, reindexed_cards: store.cards.filter((card) => !card.deleted_at).length, models: modelRuntime.catalog() };
     },
-    { retryPayload: { kind, model_id: modelId, previous_model_id: previousEmbedding } },
+    // No previous model to record: a failed switch never took effect, so
+    // retrying is just asking for the same switch again.
+    { retryPayload: { kind, model_id: modelId } },
   );
 
   async function handle(request, response) {
@@ -1289,27 +1381,23 @@ function createApiServer(store, dataFile, modelRuntime, {
 
     if (request.method === "PUT" && segments[0] === "settings" && segments.length === 1) {
       const body = await readBody(request);
-      const previous = modelRuntime.settingsState();
       try {
-        const result = modelRuntime.updateSettings(body);
-        if (!result.embedding_changed) {
+        const plan = modelRuntime.planSettings(body);
+        if (!plan.embedding_changed) {
+          plan.apply();
           save();
           sendJson(response, 200, { status: "saved", settings: modelRuntime.settings(), reindexed_cards: 0 });
           return;
         }
+        // Pointing at a different embedding API is a rebuild like any other, so
+        // it waits the same way. Nothing is applied until it succeeds, which is
+        // why there is no settings state to restore here any more.
         const task = taskManager.start("settings_update", "套用模型設定並重建 embedding", async (context) => {
-          try {
-            await reindexStore(store, modelRuntime, { allowFallback: false, progress: (progress, message) => context.update(progress, message) });
-            save();
-            return { status: "saved", settings: modelRuntime.settings(), reindexed_cards: store.cards.filter((card) => !card.deleted_at).length };
-          } catch (error) {
-            modelRuntime.restoreSettingsState(previous);
-            throw error;
-          }
+          await applyEmbeddingPlan(context, plan, "新設定");
+          return { status: "saved", settings: modelRuntime.settings(), reindexed_cards: store.cards.filter((card) => !card.deleted_at).length };
         });
-        sendJson(response, 202, { status: "accepted", task_id: task.task_id, settings: modelRuntime.settings() });
+        sendJson(response, 202, { status: "accepted", task_id: task.task_id });
       } catch (error) {
-        modelRuntime.restoreSettingsState(previous);
         const status = error instanceof Error && /必須|位址|格式/u.test(error.message) ? 400 : 502;
         sendJson(response, status, { detail: error.message || "套用設定失敗" });
       }
@@ -1447,8 +1535,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         if (previousTask.operation === "model_download") {
           task = startDownloadTask(String(payload.model_id));
         } else if (previousTask.operation === "model_select") {
-          const selection = await modelRuntime.select(String(payload.kind), String(payload.model_id));
-          task = startModelSelectTask(String(payload.kind), String(payload.model_id), selection, String(payload.previous_model_id));
+          task = startModelSelectTask(String(payload.kind), String(payload.model_id), modelRuntime.planSelect(String(payload.kind), String(payload.model_id)));
         } else {
           throw new Error("這個任務目前無法自動重試，請重新提交設定");
         }
@@ -1561,16 +1648,19 @@ function createApiServer(store, dataFile, modelRuntime, {
       const body = await readBody(request);
       const kind = String(body.kind || "");
       const modelId = String(body.model_id || "");
-      const previousEmbedding = modelRuntime.activeEmbeddingModelId();
       try {
-        const selection = await modelRuntime.select(kind, modelId);
-        if (kind !== "embedding" || !selection.changed) {
+        // Planned, not applied: a switch that needs a rebuild must not take
+        // effect until the rebuild finishes, or every card not yet converted
+        // disappears from search while it runs.
+        const plan = modelRuntime.planSelect(kind, modelId);
+        if (kind !== "embedding" || !plan.changed) {
+          const selection = plan.apply();
           save();
           sendJson(response, 200, { status: "active", selection, reindexed_cards: 0, models: modelRuntime.catalog() });
           return;
         }
-        const task = startModelSelectTask(kind, modelId, selection, previousEmbedding);
-        sendJson(response, 202, { status: "accepted", task_id: task.task_id, selection, models: modelRuntime.catalog() });
+        const task = startModelSelectTask(kind, modelId, plan);
+        sendJson(response, 202, { status: "accepted", task_id: task.task_id, models: modelRuntime.catalog() });
       } catch (error) {
         const status = error?.code === "MODEL_NOT_INSTALLED" ? 409 : 500;
         sendJson(response, status, { detail: error instanceof Error ? error.message : String(error) });

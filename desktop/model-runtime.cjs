@@ -1094,7 +1094,16 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     };
   }
 
-  async function select(kind, modelId) {
+  /**
+   * What selecting this model would do, without doing it.
+   *
+   * Switching the active model is the last step of a rebuild, not the first:
+   * the caller converts every card with the incoming model while the outgoing
+   * one still answers searches, and only then calls `apply`. Validation has to
+   * happen up front regardless, so that a model that is not installed fails
+   * before any work is done.
+   */
+  function planSelect(kind, modelId) {
     if (kind !== "summary" && kind !== "embedding") throw new Error("模型類型必須是 summary 或 embedding");
     const model = findModel(modelId);
     if (!model || model.kind !== kind) throw new Error("找不到符合類型的模型");
@@ -1105,19 +1114,27 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     }
     const previous = getActive(kind).id;
     const previousSource = settings.sources[kind];
-    // Switching to a local model retires whatever width the custom API used.
-    if (kind === "embedding") observedApiDimensions = 0;
-    settings.sources[kind] = "local";
-    if (kind === "summary") settings.summary_model_id = model.id;
-    else settings.embedding_model_id = model.id;
-    saveSettings();
+    const changed = previous !== model.id || previousSource !== "local";
     return {
-      previous,
-      current: model.id,
-      previous_source: previousSource,
-      current_source: "local",
-      changed: previous !== model.id || previousSource !== "local",
-      model: describeModel(model),
+      kind,
+      changed,
+      embedding_plan: kind === "embedding" ? { source: "local", model_id: model.id } : null,
+      apply() {
+        // Switching to a local model retires whatever width the custom API used.
+        if (kind === "embedding") observedApiDimensions = 0;
+        settings.sources[kind] = "local";
+        if (kind === "summary") settings.summary_model_id = model.id;
+        else settings.embedding_model_id = model.id;
+        saveSettings();
+        return {
+          previous,
+          current: model.id,
+          previous_source: previousSource,
+          current_source: "local",
+          changed,
+          model: describeModel(model),
+        };
+      },
     };
   }
 
@@ -1162,13 +1179,8 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     return JSON.parse(JSON.stringify({ sources: settings.sources, custom: settings.custom }));
   }
 
-  function restoreSettingsState(state) {
-    settings.sources = JSON.parse(JSON.stringify(state.sources));
-    settings.custom = JSON.parse(JSON.stringify(state.custom));
-    saveSettings();
-  }
-
-  function updateSettings(payload) {
+  /** What these settings would do, without doing it. See `planSelect`. */
+  function planSettings(payload) {
     const previous = settingsState();
     const nextCustom = {};
     for (const kind of ["summary", "embedding"]) {
@@ -1180,27 +1192,39 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       else if (!apiKey) apiKey = old.api_key;
       nextCustom[kind] = { ...validated, api_key: apiKey };
     }
-    settings.sources = {
+    const nextSources = {
       summary: payload.summary.source,
       embedding: payload.embedding.source,
     };
-    settings.custom = nextCustom;
     const previousEmbedding = { ...previous.custom.embedding };
-    const nextEmbedding = { ...settings.custom.embedding };
+    const nextEmbedding = { ...nextCustom.embedding };
     delete previousEmbedding.api_key;
     delete nextEmbedding.api_key;
-    const embeddingChanged = previous.sources.embedding !== settings.sources.embedding
+    const embeddingChanged = previous.sources.embedding !== nextSources.embedding
       || JSON.stringify(previousEmbedding) !== JSON.stringify(nextEmbedding);
-    // Pointing at a different embedding API means the width recorded from the
-    // old one no longer applies; the caller rebuilds every vector after this,
-    // so the next response is free to set a new one.
-    if (embeddingChanged) observedApiDimensions = 0;
-    saveSettings();
-    return { embedding_changed: embeddingChanged, settings: settingsView() };
+    return {
+      embedding_changed: embeddingChanged,
+      embedding_plan: nextSources.embedding === "api"
+        ? { source: "api", custom: nextCustom.embedding }
+        : { source: "local", model_id: getActive("embedding").id },
+      apply() {
+        settings.sources = nextSources;
+        settings.custom = nextCustom;
+        // Pointing at a different embedding API means the width recorded from
+        // the old one no longer applies; the caller has rebuilt every vector by
+        // now, so the next response is free to set a new one.
+        if (embeddingChanged) observedApiDimensions = 0;
+        saveSettings();
+        return { embedding_changed: embeddingChanged, settings: settingsView() };
+      },
+    };
   }
 
-  async function requestApi(kind, text) {
-    const config = settings.custom[kind];
+  function updateSettings(payload) {
+    return planSettings(payload).apply();
+  }
+
+  async function requestApi(kind, text, config = settings.custom[kind]) {
     const headers = { "Content-Type": "application/json" };
     if (config.api_key) headers.Authorization = `Bearer ${config.api_key}`;
     const body = kind === "embedding"
@@ -1269,6 +1293,17 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
    * Custom API models get no prefix: the cabinet does not know what is on the
    * other end, and guessing an instruction would be worse than none.
    */
+  /** One vector from one named model, whether or not that model is the active one. */
+  async function embedWithModel(model, text, kind) {
+    if (model.builtin) return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
+    const extractor = await loadPipeline(model);
+    const prefix = (kind === "query" ? model.query_prefix : model.document_prefix) || "";
+    const output = await extractor(prefix + String(text || ""), { pooling: "mean", normalize: true });
+    const vector = Array.from(output?.data || []);
+    if (vector.length !== model.dimensions) throw new Error(`embedding 維度不符：取得 ${vector.length}，預期 ${model.dimensions}`);
+    return vector;
+  }
+
   async function embed(text, { allowFallback = true, kind = "document" } = {}) {
     if (settings.sources.embedding === "api") {
       try {
@@ -1290,18 +1325,55 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       }
     }
     const model = getActive("embedding");
-    if (model.builtin) return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
     try {
-      const extractor = await loadPipeline(model);
-      const prefix = (kind === "query" ? model.query_prefix : model.document_prefix) || "";
-      const output = await extractor(prefix + String(text || ""), { pooling: "mean", normalize: true });
-      const vector = Array.from(output?.data || []);
-      if (vector.length !== model.dimensions) throw new Error(`embedding 維度不符：取得 ${vector.length}，預期 ${model.dimensions}`);
-      return vector;
+      return await embedWithModel(model, text, kind);
     } catch (error) {
       modelErrors.set(model.id, error instanceof Error ? error.message : String(error));
       return fallbackOrThrow(text, error, allowFallback);
     }
+  }
+
+  /**
+   * An embedder aimed at a model that is not the active one.
+   *
+   * A rebuild used to switch first and convert afterwards, which left every
+   * card that had not been converted yet unsearchable — on a real cabinet,
+   * the first search after a switch returned one card out of ninety-one.
+   * Converting first needs the incoming model to run while the outgoing one is
+   * still answering searches. Pipelines are cached per model, so both being
+   * loaded at once is the only cost.
+   */
+  function embedderFor(plan) {
+    if (plan?.source === "api") {
+      const config = plan.custom;
+      let width = 0;
+      return {
+        modelId: `custom-api:${config.model}`,
+        async embed(text) {
+          const payload = await requestApi("embedding", String(text || ""), config);
+          const vector = config.api_format === "tei" ? payload?.[0] : payload?.data?.[0]?.embedding;
+          if (!Array.isArray(vector) || vector.length === 0) throw new Error("embedding API 沒有回傳向量");
+          const numeric = vector.map(Number);
+          if (numeric.some((value) => !Number.isFinite(value))) throw new Error("embedding 回傳了非數字內容");
+          // The width is unknown until the first answer, and every later answer
+          // has to agree with it, or one rebuild mixes two vector spaces.
+          if (width && numeric.length !== width) throw new Error(`embedding 維度不符：取得 ${numeric.length}，先前是 ${width}`);
+          width = numeric.length;
+          return numeric;
+        },
+      };
+    }
+    const model = findModel(plan?.model_id);
+    if (!model || model.kind !== "embedding") throw new Error("找不到符合類型的模型");
+    if (!isInstalled(model)) {
+      const error = new Error("請先下載模型，再啟用它");
+      error.code = "MODEL_NOT_INSTALLED";
+      throw error;
+    }
+    return {
+      modelId: model.id,
+      embed: (text, { kind = "document" } = {}) => embedWithModel(model, String(text || ""), kind),
+    };
   }
 
   function parseDraftOutput(generated, content, source) {
@@ -1408,13 +1480,14 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     probeApi,
     probeApiEmbedding,
     download,
-    select,
+    planSelect,
+    planSettings,
+    embedderFor,
     embed,
     draft,
     settings: settingsView,
     updateSettings,
     settingsState,
-    restoreSettingsState,
     health,
     expectedEmbeddingDimensions,
     getActive: (kind) => getActive(kind),

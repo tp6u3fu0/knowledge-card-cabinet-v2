@@ -100,7 +100,29 @@ if (first.length !== second.length) throw new Error(`embedding 維度不符…`)
 
 漏掉第 1 步的結果是：新安裝正常、舊使用者永遠看到舊版本，而且沒有任何錯誤訊息。
 
-### 1.7 `save()` 是唯一的寫入收斂點
+### 1.7 換 embedding 模型：先重算，最後才切換
+
+`/search` 用**啟用中**的模型把查詢轉成向量，再丟掉所有寬度不同的卡（`hasUsableEmbedding(card, queryVector.length)`）。所以只要「先切換、後重算」，每一張還沒轉換的卡就是不存在的。
+
+實測 91 張卡從 BGE-M3 換到 EmbeddingGemma：**切換後第一次搜尋只回 1 筆**，花 15 秒才長回 50 筆。兩千張卡就是將近十分鐘、卡冊看起來被清空。
+
+正確順序在 `applyEmbeddingPlan()`：
+
+1. `planSelect()` / `planSettings()` 只驗證，**不套用**
+2. `stageEmbeddings()` 用新模型算完全部，寫進 `card.embedding_pending`
+3. `plan.apply()` → `commitStagedEmbeddings()` 一次換掉
+4. `reindexStore()` 收尾，處理重建期間新增或編輯的卡
+
+要點：
+
+- **`embedding_pending` 不在 `store.cjs` 的 SCHEMA 裡，這是刻意的。** 暫存向量永遠不落盤，所以中途崩潰＝什麼都沒發生。舊做法會留下一半新一半舊，而且沒有東西會自己修好。
+- **不要新增「立刻切換模型」的函式。** `select()` 與 `restoreSettingsState()` 已經移除——一個先套用，一個收拾先套用的後果。要立即套用就寫 `planSelect(...).apply()`，讓它讀起來是個決定。
+- 重建期間會同時載入兩個模型（`loadPipeline` 按模型快取）。這是這個做法唯一的成本。
+- 取消現在真的會取消：`taskManager` 的 context 多了 `cancelled()`，worker 必須自己問。以前取消只是把任務標成 cancelled，工作照跑照套用。
+
+`tests/model-migration.test.mjs` 用一個會慢慢回應的假 embedding 服務守著這三件事，不需要權重也不需要網路。三個測試都驗證過：把順序改回去會紅在「search shrank during the rebuild: 0, 0, 0, …」。
+
+### 1.8 `save()` 是唯一的寫入收斂點
 
 ```js
 const save = (changedCards) => { … refreshStaleCovers(store) … db.save(store, { cards }) }
@@ -110,7 +132,7 @@ const save = (changedCards) => { … refreshStaleCovers(store) … db.save(store
 - `changedCards` 只寫指定的列。**重新上色的卡片必須併進這個集合**，否則變更會遺失。
 - API 回應要送 **store 裡的物件**，不是本地副本。`Object.assign(existing, card)` 之後 `card` 已經是另一個物件，回傳它會讓前端拿到 `save()` 重新上色前的舊值。這個 bug 真的發生過。
 
-### 1.8 安全邊界
+### 1.9 安全邊界
 
 - 桌面 API **只監聽 loopback**，權杖由前端在伺服器端代理，不經過網路。
 - **介面本身沒有登入機制。** `KCC_HOST=0.0.0.0` 等於讓所有能連到這個埠的人讀寫你的卡片。只能用在私人網路（Tailscale / WireGuard）。
@@ -120,7 +142,7 @@ const save = (changedCards) => { … refreshStaleCovers(store) … db.save(store
 - 配對碼一次性且十分鐘失效，`pair()` 在發出 token 前先清掉它。不要為了「使用者重試比較方便」把這個拿掉：一個看得見的碼就只能換一把鑰匙。
 - 裝置清單**永遠不回傳 token**，資料庫裡也只存 SHA-256。`tests/api-contract.test.mjs` 有斷言擋著。
 
-### 1.9 平台差異寫在一個地方，而且要誠實回報
+### 1.10 平台差異寫在一個地方，而且要誠實回報
 
 Windows 與 macOS 的差異只允許出現在 `desktop/` 的少數幾個檔案裡（`bonjour.cjs`、`lan-certificate.cjs`、`main.cjs` 的圖示、`mcp-server.cjs` 的 manifest 路徑）。其餘程式碼一律跨平台。
 
@@ -129,19 +151,19 @@ Windows 與 macOS 的差異只允許出現在 `desktop/` 的少數幾個檔案�
 - **能力不存在時要說實話。** mDNS 在 macOS 一定有，在 Windows 只有裝了 Apple Bonjour 才有。`status()` 回報 `discovery_active` / `discovery_detail`，介面照著顯示。**不要寫死「Bonjour 已啟用」**——之前就是這樣，在沒有 Bonjour 的機器上直接騙人。
 - **子行程的 `error` 事件一定要接。** `spawn` 找不到執行檔是**非同步**的 `error` 事件，沒接就會 throw 掉整個 Electron main process。而且要 `await` 到它落定再回報狀態，否則 `active` 會先是 true 再偷偷變 false。
 
-### 1.10 向量大小是「輕量／高精度」，不是「384／1024」
+### 1.11 向量大小是「輕量／高精度」，不是「384／1024」
 
 實測過：**Hugging Face 上沒有 384 維、專為中文訓練又有 ONNX 權重的句向量模型。** 384 那一檔全是 MiniLM 家族，不是英文就是多語言蒸餾版。最小的中文專用模型是 `bge-small-zh-v1.5`，512 維。
 
 所以介面上的按鈕是**大小分級**，實際寬度寫在被選中的卡片上。不要為了「比較整齊」把它改回 384/1024 兩個按鈕——那個承諾只能靠偷偷回傳別種語言的模型來兌現，而那正是使用者要求修掉的行為。
 
-### 1.11 版號只有一份
+### 1.12 版號只有一份
 
 `package.json` 是唯一來源。`scripts/release-check.mjs` 會掃 `desktop/*.cjs`，出現不一致的版號字面值就失敗。
 
 會這樣是因為 MCP bridge 曾寫死 `0.1.0` 對所有 AI 工具回報錯版本，而 OpenAPI 文件寫死 `0.4.0`——一個既不是 app 版本也不是路由 `v1` 的數字。
 
-### 1.12 備份校驗碼只能由產生它的實作驗證
+### 1.13 備份校驗碼只能由產生它的實作驗證
 
 JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，JS 給 `0.0000492`）。跨工具的備份請**移除 `checksum_sha256` 欄位**再匯入；沒有校驗碼的 payload 會跳過該檢查。不要試圖「修好」跨 runtime 的校驗。
 
@@ -185,6 +207,7 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | 新增任何 transition／animation | 只能用 `--motion-quick/base/slow` 與 `--ease-out/in-out`；環境性的無限迴圈動畫除外 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——九種時間長度混在一起，整個 app 就不像同一個東西在動 |
 | 新增會「進場」的全螢幕介面 | 也要有離場：用 closing flag + 計時器延後 unmount，內容要留到動畫結束 | 開的時候有動畫、關的時候直接消失，比兩者都沒有更糟 |
 | 新增介面文案 | 一件事只講一次，講在它會改變決定的地方；「這是什麼」交給旁邊的術語卡，不要inline 再講一遍 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——同一句話出現在描述、卡槽提示、術語卡三個地方 |
+| 換 embedding 模型的任何路徑（`/models/select`、`PUT /settings`、任務重試） | 走 `planXxx()` → `stageEmbeddings()` → `apply()` → `commitStagedEmbeddings()`，見 §1.7。**不要**先套用再重建 | `tests/model-migration.test.mjs` 會失敗（刻意的）——重建期間整個卡冊搜不到 |
 | 新增一個會跑很久的工作（下載、重建向量） | 後端回 202 + `task_id`，前端用 `watchBackgroundTask` 接手，**不要 await**；設定關掉後靠 `.background-task-dock` 顯示 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——整個 app 會被一個跟閱讀無關的工作鎖住好幾分鐘 |
 | 拖曳卡片放開後的回位 | `card-drag.ts` 的 `clear()` 必須「還原 → flush → 才解開 transition」 | 卡片先飛回原位，接著卡槽再帶著它從最左邊滑一次 |
 | 新增一個下拉選單 | 用 `CardSelect`，不要用原生 `<select>`；面板是 portal 到 body 的 fixed 元素 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——原生選單長得像另一個程式，而且會被容器裁掉 |
@@ -211,7 +234,8 @@ JSON 浮點數序列化在不同 runtime 之間不同（Python 給 `4.92e-05`，
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |
 | `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重 |
 | `category-colour.test.mjs` | 同分類同色、分布平均、既有分類不變色、三方一致 |
-| `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣；術語卡的 glyph／顏色／編號一致 |
+| `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣；封面不隨編輯或換模型而變；術語卡的 glyph／顏色／編號一致 |
+| `model-migration.test.mjs` | 換 embedding 模型期間卡冊仍可搜尋、取消不留痕跡、重建期間寫入的卡不會落在舊模型上 |
 | `update-check.test.mjs` | 版號比較（含 prerelease 不算數）、一天只查一次且跨重啟、離線／限流不會壞、關得掉、送出去的請求不帶識別資訊 |
 | `lan-certificate.test.mjs` | 選對網卡（含 Windows 虛擬網卡）、憑證指紋穩定、mDNS 缺席不會炸、LAN TLS 真的服務 v1 |
 | `rendered-html.test.mjs` | 前端能 render、雙平台打包設定、README 指令存在、CLAUDE.md 引用的檔案存在 |
