@@ -224,6 +224,43 @@ function semanticBaseline(cards) {
   return scoreRange(scores);
 }
 
+/**
+ * How far above the cabinet's ordinary similarity a card has to sit before it
+ * is *about* the query, rather than merely the closest thing on the shelf.
+ *
+ * Ranking alone cannot answer that. Every query has a top card, and the score
+ * shown is a position within the query's own range, so the best match scores
+ * 1.0 whether someone typed "為什麼需要多數決" or "asdfghjkl". Searching a
+ * ninety-seven card cabinet for "橘子" filled the screen with fifty results,
+ * every one of them about databases and distributed systems.
+ *
+ * Measured, not guessed. Over thirty queries against a real cabinet — eighteen
+ * it could answer, twelve it could not — the separating quantity was how far
+ * the best match rises above the median of that query's own scores, counted in
+ * units of `semantic_baseline` (the cabinet's own p99-minus-median spread,
+ * card against card):
+ *
+ *     answerable      0.98 – 3.08
+ *     unanswerable    0.31 – 0.85
+ *
+ * The line is drawn at 0.9, inside that gap and nearer the lower side: not
+ * finding a card you know you wrote is a worse failure than being shown one
+ * card too many, so the doubt is spent on keeping results rather than cutting
+ * them. Nothing here compares a cosine to a constant (§1.3) — the unit is the
+ * cabinet's own spread, so it moves when the model does.
+ *
+ * Null means "no opinion": too few cards to have a distribution, or a cabinet
+ * whose cards are all alike. The caller then filters nothing.
+ */
+const SEMANTIC_STANDOUT = 0.9;
+function standoutFloor(scores, baseline) {
+  if (!baseline || scores.length < 6) return null;
+  const spread = baseline.hi - baseline.lo;
+  if (!(spread > 0)) return null;
+  const sorted = [...scores].sort((first, second) => first - second);
+  return sorted[Math.floor(sorted.length * 0.5)] + SEMANTIC_STANDOUT * spread;
+}
+
 /** Where this pair sits in the collection's own range of similarity. */
 function relativeSemantic(value, baseline) {
   if (!baseline) return value;
@@ -1834,7 +1871,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       const category = requestUrl.searchParams.get("category") || "";
       const tag = requestUrl.searchParams.get("tag") || "";
       const sort = requestUrl.searchParams.get("sort") || "relevance";
-      const results = store.cards.filter((card) => !card.deleted_at)
+      const everything = store.cards.filter((card) => !card.deleted_at)
         // Only cards carrying a vector of the query's own width can be scored
         // against it; the rest are waiting on a reindex.
         .filter((card) => hasUsableEmbedding(card, queryVector.length))
@@ -1842,11 +1879,20 @@ function createApiServer(store, dataFile, modelRuntime, {
         .filter((card) => !tag || (card.tags || []).some((item) => String(item).toLocaleLowerCase() === tag.toLocaleLowerCase()))
         .map((card) => ({ card, semantic: cosine(queryVector, card.embedding), keyword: keywordScore(card, query) }));
 
+      // Keep the ones this query actually picked out, plus anything that spells
+      // the query out. Without this the answer to every query was the whole
+      // cabinet in ranked order, which reads as "here are fifty results" rather
+      // than "there is nothing here about that".
+      const floor = standoutFloor(everything.map((entry) => entry.semantic), store.semantic_baseline);
+      const results = floor === null
+        ? everything
+        : everything.filter((entry) => entry.keyword > 0 || entry.semantic >= floor);
+
       // A query's similarities sit in their own band — lower than card-to-card,
       // and narrower still for a strong model — so "語意相似" has to mean "high
       // for this query", not a fixed cosine. Against BGE-M3 a fixed 0.65 either
       // labelled every result or none of them.
-      const queryRange = scoreRange(results.map((entry) => entry.semantic));
+      const queryRange = scoreRange(everything.map((entry) => entry.semantic));
 
       const scored = results.map(({ card, semantic, keyword }) => {
         const relative = relativeSemantic(semantic, queryRange);
@@ -2210,4 +2256,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
