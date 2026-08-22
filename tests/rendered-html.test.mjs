@@ -654,7 +654,10 @@ test("each explanation is given once, where it changes a decision", async () => 
   const rebuildOnCards = catalogue.match(/description: "[^"]*重建[^"]*"/gu) ?? [];
   assert.deepEqual(rebuildOnCards, [], `the rebuild warning is back on ${rebuildOnCards.length} model cards`);
   assert.match(panels, /若動到 embedding，儲存後會重建所有卡片的向量與關聯/u, "the save bar no longer says what saving costs");
-  assert.match(panels, /換模型會重建所有卡片的向量/u, "the simple picker applies a model immediately and no longer says so");
+  // The picker is behind a door now, so the door is where the cost is stated —
+  // once when closed, with the real number, and again in full when opened.
+  assert.match(panels, /重新計算全部 \{cardCount\} 張卡片的向量/u, "the closed gate no longer says how much work a change is");
+  assert.match(panels, /更改向量模型會重建整個卡片資料庫/u, "the opened gate no longer says what it costs to go through it");
 
   // Background that belongs to the glossary card, and is not also said inline
   // a few lines above it: `kept` is what the card must still explain, `gone` is
@@ -765,6 +768,36 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
   const duplicateRule = region(api, "function findDuplicates", "\n}\n", "duplicate rule");
   assert.match(duplicateRule, /overlap < DUPLICATE_MIN_OVERLAP/u, "wording is not being checked at all");
   assert.doesNotMatch(duplicateRule, /cosine\(/u, "similarity is back in the duplicate rule");
+});
+
+/**
+ * Changing the embedding model is not the same kind of choice as the others.
+ *
+ * The summary model can be swapped freely and never touches a stored card.
+ * Changing the embedding model recomputes every vector in the cabinet, which is
+ * minutes of work for no gain unless something specific is wrong with the model
+ * in use. Side by side and equally reachable, the two read as the same
+ * decision, so the costly one now sits behind a door.
+ *
+ * The slot naming the model in use stays outside it: that is information, and
+ * hiding it would mean nobody could tell what their cabinet was built with.
+ */
+test("changing the embedding model is behind a door, in both views", async () => {
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+
+  const uses = panels.match(/<EmbeddingChangeGate/gu) ?? [];
+  assert.equal(uses.length, 2, `the gate is used ${uses.length} times; it belongs in the simple view and the advanced one`);
+
+  // In the simple view the axes are inside the gate and the slot is not.
+  const simple = region(panels, "function SimpleModelPicker", "\n}\n", "the simple picker");
+  const gateAt = simple.indexOf("<EmbeddingChangeGate");
+  assert.notEqual(gateAt, -1, "the simple view no longer gates the embedding choice");
+  assert.ok(gateAt < simple.indexOf("simple-picker__axes"), "the picker sits outside the gate");
+  assert.ok(simple.indexOf("slotCard={embeddingSlot}") < gateAt, "the active model is hidden behind the gate too");
+
+  // And the deck of every model in the advanced view is gated as well, or the
+  // door is a door in one view and a decoration in the other.
+  assert.match(panels, /gate=\{\(content\) => <EmbeddingChangeGate/u, "the advanced view no longer gates the embedding choice");
 });
 
 /**

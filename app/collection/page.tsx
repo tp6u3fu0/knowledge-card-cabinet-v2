@@ -2073,6 +2073,7 @@ export default function CollectionPage() {
           >
             <ModelSettingsPanel
               catalog={modelCatalog}
+              cardCount={cards.length}
               runtimeSettings={runtimeSettings}
               settingsDraft={settingsDraft}
               settingsTab={settingsTab}
