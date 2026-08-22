@@ -19,7 +19,7 @@ const HASH_EMBEDDING_DIMENSIONS = 384;
 /** Fixed so a paired device can be told one port once, rather than re-paired. */
 const LAN_PORT = 8443;
 const STORE_VERSION = 2;
-const COVER_VERSION = 12;
+const COVER_VERSION = 13;
 const MOTIF_COUNT = 12;
 const MOTIF_MIN_COUNT = 8;
 const MOTIF_SIZE = 13.5;
@@ -31,6 +31,8 @@ const MOTIF_SHAPES = [
   "triple-dot", "constellation", "folder", "stack", "arch", "lines",
   "corners", "diagonal", "pill", "brackets", "bars", "crosshair",
 ];
+/** Rail patterns, drawn by `.collection-card__art--<name>` in app/globals.css. */
+const MOTIF_PATTERNS = ["orbit", "grid", "ladder", "shelf"];
 /** Slots hug the border band; the middle of the cover stays clear for the mark. */
 const MOTIF_LAYOUT = [
   [12, 13], [38, 10], [64, 10],
@@ -362,26 +364,25 @@ function findDuplicates(store) {
   return duplicates.sort((first, second) => second.score - first.score);
 }
 
-function unitValue(digest, offset) {
-  const start = offset % (digest.length - 8);
-  return Number.parseInt(digest.slice(start, start + 8), 16) / 0xffffffff;
-}
-
-function chunkAverage(values, index, count = 8) {
-  const start = Math.floor(index * values.length / count);
-  const end = Math.max(start + 1, Math.floor((index + 1) * values.length / count));
-  const chunk = values.slice(start, end);
-  return chunk.reduce((sum, value) => sum + value, 0) / chunk.length;
-}
-
-function chunkFeatures(values, index, count = MOTIF_LAYOUT.length) {
-  const start = Math.floor(index * values.length / count);
-  const end = Math.max(start + 1, Math.floor((index + 1) * values.length / count));
-  const chunk = values.slice(start, end);
-  const average = chunk.reduce((sum, value) => sum + value, 0) / chunk.length;
-  const energy = Math.sqrt(chunk.reduce((sum, value) => sum + value * value, 0) / chunk.length);
-  const variation = chunk.slice(1).reduce((sum, value, offset) => sum + Math.abs(value - chunk[offset]), 0) / Math.max(1, chunk.length - 1);
-  return { average, energy, variation };
+/**
+ * As many independent values in [0, 1) as a cover needs, from one string.
+ *
+ * Each SHA-256 block yields eight non-overlapping 32-bit words, and blocks are
+ * numbered so the stream can be as long as the drawing needs. The previous
+ * reader took overlapping eight-character windows out of a single digest, which
+ * correlates choices that are supposed to be independent — invisible while the
+ * embedding supplied most of a cover's variation, and not invisible now that it
+ * supplies none.
+ */
+function coverValues(identity, count) {
+  const values = [];
+  for (let block = 0; values.length < count; block += 1) {
+    const digest = crypto.createHash("sha256").update(`${identity}/${block}`, "utf8").digest("hex");
+    for (let offset = 0; offset < digest.length; offset += 8) {
+      values.push(Number.parseInt(digest.slice(offset, offset + 8), 16) / 0x100000000);
+    }
+  }
+  return values;
 }
 
 function categoryName(category) {
@@ -462,54 +463,66 @@ function assignCategoryAccents(store) {
   return changed;
 }
 
-function buildCover(embedding, category, accents = null) {
-  const norm = Math.sqrt(embedding.reduce((sum, value) => sum + value * value, 0)) || 1;
-  const stableValues = embedding.map((value) => value / norm);
-  const fingerprint = stableValues.map((value) => value.toFixed(8)).join(",");
-  const digest = crypto.createHash("sha256").update(fingerprint, "utf8").digest("hex");
-  const chunks = Array.from({ length: 8 }, (_, index) => chunkAverage(stableValues, index));
-  const features = MOTIF_LAYOUT.map((_, index) => chunkFeatures(stableValues, index));
-  const maxAverage = Math.max(...features.map(({ average }) => Math.abs(average))) || 1;
-  const maxEnergy = Math.max(...features.map(({ energy }) => energy)) || 1;
-  const maxVariation = Math.max(...features.map(({ variation }) => variation)) || 1;
-  const patternNames = ["orbit", "grid", "ladder", "shelf"];
-  const pattern = patternNames[Math.floor(unitValue(digest, 0) * patternNames.length) % patternNames.length];
-  // Colour comes from the category, not the vector: cards in one category have
-  // to read as one group. Everything else on the cover still comes from the
-  // embedding, so two cards in the same category are the same colour without
-  // being the same picture.
+/**
+ * A card's cover, drawn from the one thing about the card that never changes.
+ *
+ * It used to be drawn from the card's embedding, so that the art would "keep
+ * tracking meaning". Measured against this cabinet's own model, it never did:
+ * every choice on a cover passes through a SHA-256 of the vector, so two cards
+ * that say the same thing in different words (cosine 0.99) agree on about as
+ * many glyphs as two cards with nothing in common — 7%, against 6% for picking
+ * at random. The art was always a hash. It was simply hashing something that
+ * moves.
+ *
+ * And it moved in the way that costs most. The source hash spans title,
+ * question, summary, analogy, detail, topic, category, tags and source, so
+ * deleting one full stop redrew a card into a picture its owner had never seen
+ * — no glyph in common with the one they had learned to recognise. Finding a
+ * card by eye is what a cover is for, so it now hangs on the card's id: stable
+ * across an edit, across a model change, across a rewrite.
+ *
+ * Colour is the exception and comes from the category, so that cards in one
+ * category read as one group. Two cards in a category are then the same colour
+ * without being the same picture.
+ */
+function buildCover(identity, category, accents = null) {
+  const key = String(identity ?? "");
+  // Four values for the cover itself, one per slot to decide which slots are
+  // kept, then five per slot for the glyph drawn there.
+  const values = coverValues(key, 4 + MOTIF_COUNT * 6);
   const palette = categoryPalette(category, accents);
-  // 8–12 glyphs per cover: sparser cards read as calmer, denser ones as busier.
-  const motifCount = Math.min(MOTIF_COUNT, MOTIF_MIN_COUNT + Math.floor(unitValue(digest, 52) * (MOTIF_COUNT - MOTIF_MIN_COUNT + 1)));
+  // 8-12 glyphs per cover: sparser cards read as calmer, denser ones as busier.
+  const motifCount = MOTIF_MIN_COUNT + Math.floor(values[1] * (MOTIF_COUNT - MOTIF_MIN_COUNT + 1));
   const keptSlots = Array.from({ length: MOTIF_COUNT }, (_, index) => index)
-    .sort((left, right) => unitValue(digest, 60 + left * 3) - unitValue(digest, 60 + right * 3))
+    .sort((left, right) => values[4 + left] - values[4 + right])
     .slice(0, motifCount)
     .sort((left, right) => left - right);
 
   const motifs = keptSlots.map((index) => {
-    const { average, energy, variation } = features[index];
-    const averageRatio = (average / maxAverage + 1) / 2;
-    const energyRatio = energy / maxEnergy;
-    const variationRatio = variation / maxVariation;
     const [x, y] = MOTIF_LAYOUT[index];
-    const shapeIndex = Math.floor((averageRatio * 2.1 + energyRatio * 3.4 + variationRatio * 4.7 + unitValue(digest, 44 + index * 5)) * MOTIF_SHAPES.length) % MOTIF_SHAPES.length;
+    const at = 4 + MOTIF_COUNT + index * 5;
     return {
-      shape: MOTIF_SHAPES[shapeIndex],
-      x: Number((x + (variationRatio - 0.5) * 4).toFixed(2)),
-      y: Number((y + (averageRatio - 0.5) * 4).toFixed(2)),
+      shape: MOTIF_SHAPES[Math.floor(values[at] * MOTIF_SHAPES.length)],
+      x: Number((x + (values[at + 1] - 0.5) * 4).toFixed(2)),
+      y: Number((y + (values[at + 2] - 0.5) * 4).toFixed(2)),
       size: MOTIF_SIZE,
-      opacity: Number((0.42 + energyRatio * 0.38).toFixed(3)),
-      weight: Number(energyRatio.toFixed(3)),
+      opacity: Number((0.42 + values[at + 3] * 0.38).toFixed(3)),
+      weight: Number(values[at + 4].toFixed(3)),
     };
   });
 
   return {
     version: COVER_VERSION,
-    seed: digest.slice(0, 16),
-    pattern,
+    seed: crypto.createHash("sha256").update(key, "utf8").digest("hex").slice(0, 16),
+    pattern: MOTIF_PATTERNS[Math.floor(values[0] * MOTIF_PATTERNS.length)],
     ...palette,
-    density: Number((0.55 + Math.abs(chunks[3]) * 0.45).toFixed(3)),
-    orbit: Number((Math.abs(chunks[5]) * 0.9 + unitValue(digest, 36) * 0.1).toFixed(3)),
+    // These two place the gradient focus in app/card-face.tsx. Drawn from the
+    // vector they were dead: a chunk mean of a *normalised* vector sits at
+    // zero by construction, so density held four distinct values across two
+    // hundred cards and moved the focus by a fifth of a percent. The ranges
+    // here are the ones the consuming formulas were written for.
+    density: Number((0.55 + values[2] * 0.45).toFixed(3)),
+    orbit: Number(values[3].toFixed(3)),
     motifs,
   };
 }
@@ -545,7 +558,7 @@ function normalizeCard(input, previous = {}, canonicalTags = null) {
   // Provisional: the colour here is the hashed fallback, because a lone card
   // has no view of the cabinet's colour assignments. refreshStaleCovers runs
   // after every mutation and settles it.
-  card.cover = card.cover ?? buildCover(coverVector(card), card.category);
+  card.cover = card.cover ?? buildCover(card.id, card.category);
   return card;
 }
 
@@ -553,16 +566,6 @@ function normalizeCard(input, previous = {}, canonicalTags = null) {
 function coverIsCurrent(card, accents) {
   if ((card.cover?.version ?? 0) !== COVER_VERSION) return false;
   return card.cover?.accent === categoryPalette(card.category, accents).accent;
-}
-
-/**
- * Covers are decoration, so they must render even when the card has no usable
- * vector yet; the model embedding is preferred so the art keeps tracking meaning.
- */
-function coverVector(card) {
-  return Array.isArray(card.embedding) && card.embedding.length > 0
-    ? card.embedding
-    : hashEmbedding(embeddingText(card), HASH_EMBEDDING_DIMENSIONS);
 }
 
 function publicCard(card, score = 0) {
@@ -931,53 +934,13 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken 
  * real vectors as though the result meant something. Clearing the model id is
  * what lets reindexStore find the card and try again later.
  */
-/**
- * What a card's cover was drawn from, read *before* the vector is replaced.
- *
- * Two things decide whether the art still describes the card: whether it was
- * drawn from a real model vector at all — a card with no vector yet carries the
- * hashed stand-in — and whether the writing it was drawn from is still the
- * writing on the card.
- */
-function coverState(card) {
-  return {
-    hadModelVector: Array.isArray(card.embedding) && card.embedding.length > 0,
-    textUnchanged: card.embedding_source_hash === embeddingSourceHash(card),
-  };
-}
-
-/**
- * A cover is a picture of what the card said when it was written, not a live
- * view of whatever vector the cabinet happens to hold now.
- *
- * It is redrawn when the writing changed, or when the art is still the hashed
- * stand-in — but **not** merely because the model changed. Redrawing on a model
- * switch repainted every cover in the cabinet at once: categories untouched,
- * colours untouched, and yet nothing looked like itself any more. Recognising a
- * card by its cover is most of what the cover is for, so the art holds still
- * for the same reason category colour does — a cabinet must not rearrange
- * itself while its owner is out.
- *
- * Colour staleness is a separate question with its own rule, in
- * `refreshStaleCovers`.
- */
-function coverNeedsRedraw(card, before) {
-  return !card.cover || !before.hadModelVector || !before.textUnchanged;
-}
-
-async function applyEmbedding(card, modelRuntime, accents = null) {
-  const before = coverState(card);
+async function applyEmbedding(card, modelRuntime) {
   try {
     card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback: false });
     card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
   } catch {
     card.embedding = null;
     card.embedding_model_id = null;
-  }
-  // The accents matter: a redraw without the cabinet's colour assignment
-  // silently reverts the card to the hashed fallback colour.
-  if (coverNeedsRedraw(card, before)) {
-    card.cover = buildCover(coverVector(card), card.category, accents);
   }
   card.embedding_source_hash = embeddingSourceHash(card);
   return card;
@@ -995,7 +958,7 @@ function refreshStaleCovers(store) {
   // category ends here, so a card never keeps a colour it is not entitled to.
   assignCategoryAccents(store);
   const stale = store.cards.filter((card) => !coverIsCurrent(card, store.category_accents));
-  for (const card of stale) card.cover = buildCover(coverVector(card), card.category, store.category_accents);
+  for (const card of stale) card.cover = buildCover(card.id, card.category, store.category_accents);
   return stale.map((card) => card.id);
 }
 
@@ -1006,17 +969,13 @@ async function reindexStore(store, modelRuntime, { allowFallback = false, progre
   let completed = 0;
   for (const card of cardsToUpdate) {
     if (allowFallback) {
-      const before = coverState(card);
       card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
       card.embedding_model_id = currentModel;
-      if (coverNeedsRedraw(card, before)) {
-        card.cover = buildCover(coverVector(card), card.category, store.category_accents);
-      }
       card.embedding_source_hash = embeddingSourceHash(card);
     } else {
       // One card the model chokes on must not abort the whole rebuild; it keeps
       // a null model id and gets picked up by the next pass.
-      await applyEmbedding(card, modelRuntime, store.category_accents);
+      await applyEmbedding(card, modelRuntime);
     }
     // `updated_at` is deliberately not touched. It says when a person last
     // changed the card; a reindex is the machine's work, not theirs. Stamping
@@ -1394,7 +1353,7 @@ function createApiServer(store, dataFile, modelRuntime, {
           const usable = Array.isArray(rawCard.embedding) && rawCard.embedding.length > 0
             && (!width || rawCard.embedding.length === width);
           card.embedding = usable ? rawCard.embedding.map(Number) : null;
-          card.cover = rawCard.cover || rawCard.cover_data || buildCover(coverVector(card), card.category);
+          card.cover = rawCard.cover || rawCard.cover_data || buildCover(card.id, card.category);
           card.embedding_model_id = usable
             ? (rawCard.embedding_model_id || rawCard.embedding_model || modelRuntime.activeEmbeddingModelId())
             : null;
@@ -1725,7 +1684,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = targetName;
-        await applyEmbedding(card, modelRuntime, store.category_accents);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         affected += 1;
       }
@@ -1757,7 +1716,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = target;
-        await applyEmbedding(card, modelRuntime, store.category_accents);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         affected += 1;
       }
@@ -1914,7 +1873,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const existing = store.cards.find((card) => card.id === String(body.id).trim());
       const card = normalizeCard(body, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at)));
-      await applyEmbedding(card, modelRuntime, store.category_accents);
+      await applyEmbedding(card, modelRuntime);
       // Reply with the object the store holds, not the local copy: save() can
       // still change it — repainting a card that introduced a new category —
       // and the caller must be told the colour it actually got.
@@ -1946,7 +1905,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const changes = await readBody(request);
       const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at && item.id !== existing.id)));
-      await applyEmbedding(card, modelRuntime, store.category_accents);
+      await applyEmbedding(card, modelRuntime);
       Object.assign(existing, card);
       rebuildSemanticRelationsFor(store, [existing.id]);
       save([existing.id]);
@@ -2161,4 +2120,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, coverState, coverNeedsRedraw, embeddingSourceHash, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, categoryPalette, assignCategoryAccents, COVER_VERSION };

@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { buildCover, COVER_VERSION, hashEmbedding, coverState, coverNeedsRedraw, embeddingSourceHash } = require("../desktop/local-api.cjs");
+const { buildCover, COVER_VERSION } = require("../desktop/local-api.cjs");
+const { startLocalApi } = await import("../desktop/local-api.cjs");
+
+const projectRoot = new URL("../", import.meta.url);
+const seedPath = join(projectRoot.pathname.slice(1), "desktop", "seed.json");
 
 /**
  * The glyph names the frontend can actually draw. A cover naming anything else
@@ -34,10 +40,10 @@ test("every generated cover uses glyphs the frontend can draw", async () => {
   const glyphs = await drawableGlyphs();
   const seen = new Set();
 
-  // Enough distinct vectors to exercise the shape-selection arithmetic rather
-  // than whichever glyph one embedding happens to land on.
+  // Enough distinct cards to exercise the shape-selection arithmetic rather
+  // than whichever glyph one id happens to land on.
   for (let index = 0; index < 120; index += 1) {
-    const cover = buildCover(hashEmbedding(`卡片內容 ${index} sample text`, 384));
+    const cover = buildCover(`card-${index}`);
     assert.equal(cover.version, COVER_VERSION);
     assert.ok(cover.motifs.length >= 8 && cover.motifs.length <= 12);
     for (const motif of cover.motifs) {
@@ -53,10 +59,29 @@ test("every generated cover uses glyphs the frontend can draw", async () => {
   assert.ok(seen.size >= 8, `only ${seen.size} distinct glyphs were ever produced: ${[...seen].join(", ")}`);
 });
 
-test("covers are stable for a given embedding", async () => {
-  const embedding = hashEmbedding("穩定性測試", 384);
-  assert.deepEqual(buildCover(embedding), buildCover(embedding));
-  assert.notDeepEqual(buildCover(embedding), buildCover(hashEmbedding("另一張卡", 384)));
+test("covers are stable for a given card, and differ between cards", async () => {
+  assert.deepEqual(buildCover("card-1"), buildCover("card-1"));
+  assert.notDeepEqual(buildCover("card-1"), buildCover("card-2"));
+});
+
+/**
+ * The gradient focus in app/card-face.tsx reads these two, and drawing them
+ * from the embedding left them dead: a chunk mean of a normalised vector sits
+ * at zero by construction, so across two hundred cards `density` took four
+ * distinct values and moved the focus by a fifth of a percent. Nothing failed;
+ * the covers simply all shared a highlight.
+ */
+test("density and orbit actually vary between cards", async () => {
+  const covers = Array.from({ length: 200 }, (_, index) => buildCover(`spread-${index}`));
+  for (const field of ["density", "orbit"]) {
+    const values = new Set(covers.map((cover) => cover[field]));
+    assert.ok(values.size > 100, `${field} took only ${values.size} distinct values across 200 cards`);
+  }
+  // The ranges the consuming formulas were written for.
+  for (const cover of covers) {
+    assert.ok(cover.density >= 0.55 && cover.density <= 1);
+    assert.ok(cover.orbit >= 0 && cover.orbit <= 1);
+  }
 });
 
 test("the settings glossary is coherent and draws only real glyphs", async () => {
@@ -105,58 +130,72 @@ test("the settings glossary is coherent and draws only real glyphs", async () =>
 });
 
 /**
- * Covers hold still when the model changes.
+ * A cover holds still.
  *
- * A cabinet's covers are how a person finds a card by eye. Rebuilding them from
- * whatever vector is current means every upgrade repaints the whole shelf: the
- * categories are untouched, the colours are untouched, and yet nothing looks
- * like itself. The rule is that the art describes what the card *said*, so only
- * the writing changing — or the card never having had a real vector — earns a
- * redraw.
+ * The art used to be drawn from the card's embedding, on the theory that it
+ * would then track what the card means. It never did — every value passes
+ * through a SHA-256 of the vector, so two cards that say the same thing in
+ * different words agreed on about as many glyphs as two unrelated ones. What it
+ * did do was move: the source hash spans nine fields, so correcting a typo
+ * repainted the card into something its owner had never seen, and a model
+ * upgrade repainted the whole shelf at once.
+ *
+ * It now hangs on the card's id, which is the one thing that does not change.
+ * These tests drive the real API, because the guarantee is about what happens
+ * to a card that someone edits — not about any one function.
  */
-const cardWithArt = (overrides = {}) => {
-  const card = {
-    id: "card", number: "K-1", title: "標題", question: "問題", summary: "摘要",
-    analogy: "比喻", detail: "細節", topic: "主題", category: "分類", source: "", tags: [],
-    embedding: hashEmbedding("原本的內容", 384),
-    ...overrides,
+async function cabinet(t) {
+  const root = await mkdtemp(join(tmpdir(), "kcc-cover-"));
+  const runtime = await startLocalApi({
+    dataFile: join(root, "cards.json"),
+    modelsDir: join(root, "models"),
+    seedPath,
+    migrateFromUrl: "",
+  });
+  t.after(async () => {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const headers = { Authorization: `Bearer ${runtime.authToken}`, "Content-Type": "application/json" };
+  return {
+    add: async (id, fields) => {
+      const response = await fetch(`${runtime.baseUrl}/cards`, {
+        method: "POST", headers,
+        body: JSON.stringify({ id, number: id.toUpperCase(), topic: "測試", category: "測試", ...fields }),
+      });
+      assert.equal(response.status, 200);
+      return (await response.json()).card;
+    },
+    patch: async (id, changes) => {
+      const response = await fetch(`${runtime.baseUrl}/cards/${id}`, { method: "PATCH", headers, body: JSON.stringify(changes) });
+      assert.equal(response.status, 200);
+      return (await response.json()).card;
+    },
   };
-  card.embedding_source_hash = overrides.embedding_source_hash ?? embeddingSourceHash(card);
-  // Mirrors coverVector(): a card with no model vector is still drawn, from the
-  // hashed stand-in. `in` rather than `??` so an explicit null survives.
-  const source = Array.isArray(card.embedding) && card.embedding.length > 0
-    ? card.embedding
-    : hashEmbedding("原本的內容", 384);
-  card.cover = "cover" in overrides ? overrides.cover : buildCover(source, card.category);
-  return card;
-};
+}
 
-test("switching models does not redraw a cover", () => {
-  const card = cardWithArt();
-  const before = coverState(card);
-  // What a model switch does: the same writing, a brand new vector.
-  card.embedding = hashEmbedding("原本的內容", 512);
-  assert.equal(coverNeedsRedraw(card, before), false);
+test("rewriting a card does not repaint it", async (t) => {
+  const { add, patch } = await cabinet(t);
+  const before = await add("hold-still", { title: "B+ 樹", summary: "所有資料在葉節點且相連，適合範圍查詢。" });
+
+  // A typo fix — the smallest edit there is, and the one that used to cost a
+  // card every glyph it had.
+  const nudged = await patch("hold-still", { summary: "所有資料在葉節點且相連，適合範圍查詢" });
+  assert.deepEqual(nudged.cover, before.cover, "deleting one character redrew the cover");
+
+  // And a rewrite of every field the source hash covers.
+  const rewritten = await patch("hold-still", {
+    title: "完全不同的標題", question: "另一個問題", summary: "另一段摘要",
+    analogy: "另一個比喻", detail: "另一段細節", source: "另一個出處", tags: ["新標籤"],
+  });
+  assert.deepEqual(rewritten.cover, before.cover, "rewriting a card redrew the cover");
 });
 
-test("editing what a card says does redraw its cover", () => {
-  const card = cardWithArt();
-  card.title = "改過的標題";
-  const before = coverState(card);
-  assert.equal(coverNeedsRedraw(card, before), true);
-});
-
-test("a card that never had a real vector gets its cover drawn once it does", () => {
-  // Before a model answers, a card carries art from the hashed stand-in. That
-  // art is a placeholder and must give way to the real thing.
-  const card = cardWithArt({ embedding: null });
-  const before = coverState(card);
-  card.embedding = hashEmbedding("原本的內容", 384);
-  assert.equal(coverNeedsRedraw(card, before), true);
-});
-
-test("a card with no cover at all always gets one", () => {
-  const card = cardWithArt({ cover: null });
-  const before = coverState(card);
-  assert.equal(coverNeedsRedraw(card, before), true);
+test("two cards with identical writing still look different", async (t) => {
+  const { add } = await cabinet(t);
+  const twin = { title: "一模一樣", summary: "一模一樣的內容" };
+  const left = await add("twin-a", twin);
+  const right = await add("twin-b", twin);
+  assert.equal(left.cover.accent, right.cover.accent, "same category, so same colour");
+  assert.notDeepEqual(left.cover.motifs, right.cover.motifs, "two cards were given the same picture");
 });

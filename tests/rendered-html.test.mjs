@@ -16,6 +16,27 @@ const widthOf = (id) => MODEL_CATALOG.find((model) => model.id === id)?.dimensio
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
+/**
+ * The text between two markers, with both ends checked.
+ *
+ * `slice(indexOf(a), indexOf(b))` reads fine and fails silently. A marker that
+ * no longer exists is -1, so the region becomes either one character or the
+ * entire rest of the file, and the assertions on it then pass or fail for a
+ * reason that has nothing to do with what the test is checking. Deleting one
+ * unrelated function did exactly that: a region meant to be forty lines long
+ * swallowed a thousand, and the failure named the wrong culprit.
+ *
+ * Prefer a marker inside the thing being read — its own closing brace — over
+ * the name of whatever happens to sit next to it in the file.
+ */
+function region(source, from, to, label) {
+  const start = source.indexOf(from);
+  assert.notEqual(start, -1, `${label}: cannot find "${from}"`);
+  const end = source.indexOf(to, start + from.length);
+  assert.notEqual(end, -1, `${label}: cannot find "${to}" after it`);
+  return source.slice(start, end);
+}
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const probe = createServer();
@@ -602,7 +623,7 @@ test("the dimension guide states the choice, not an essay per option", async () 
   const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  const guide = panels.slice(panels.indexOf("function DimensionGuide"), panels.indexOf("export function ModelSettingsPanel"));
+  const guide = region(panels, "function DimensionGuide", "export function ModelSettingsPanel", "dimension guide");
   assert.ok(guide.length > 200, "the dimension guide is gone");
   assert.match(guide, /const \[open, setOpen\] = useState<number \| null>\(null\)/u, "every dimension is open at once again");
   assert.match(guide, /aria-expanded=\{isOpen\}/u);
@@ -741,7 +762,7 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
   // a constant (§1.3), and not the collection's own range either: on a small
   // cabinet that range is noise, and it voted against a retyped card while
   // giving two unrelated cards a perfect score.
-  const duplicateRule = api.slice(api.indexOf("function findDuplicates"), api.indexOf("function unitValue"));
+  const duplicateRule = region(api, "function findDuplicates", "\n}\n", "duplicate rule");
   assert.match(duplicateRule, /overlap < DUPLICATE_MIN_OVERLAP/u, "wording is not being checked at all");
   assert.doesNotMatch(duplicateRule, /cosine\(/u, "similarity is back in the duplicate rule");
 });
@@ -845,11 +866,11 @@ test("the package leaves out only what it cannot reach", async () => {
   assert.match(builder, /electronLanguages:[\s\S]*zh-TW/u, "every Chromium locale is shipping again");
 
   // Each platform keeps its own onnxruntime binary and drops the others.
-  const windows = builder.slice(builder.indexOf("\nwin:"), builder.indexOf("\nmac:"));
+  const windows = region(builder, "\nwin:", "\nmac:", "the win: block");
   assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u);
   assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/linux\/\*\*/u);
   assert.doesNotMatch(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u, "the Windows build excludes its own runtime");
-  const mac = builder.slice(builder.indexOf("\nmac:"), builder.indexOf("\nnsis:"));
+  const mac = region(builder, "\nmac:", "\nnsis:", "the mac: block");
   assert.match(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u);
   assert.doesNotMatch(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u, "the macOS build excludes its own runtime");
 
