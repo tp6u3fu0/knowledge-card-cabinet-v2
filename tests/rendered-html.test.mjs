@@ -768,6 +768,37 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
 });
 
 /**
+ * The semantic search has to be able to *add* a card, not only remove one.
+ *
+ * The collection filtered on "the card's text contains what was typed" AND
+ * "the host returned this card", so the vectors could only ever narrow the
+ * literal matches. That makes the whole embedding pipeline decorative, and
+ * invisibly so: the host scores a Chinese query — which has no spaces, and so
+ * is one term — against every card, but the literal test then rejects anything
+ * that does not spell the query out. Measured against the running cabinet,
+ * "為什麼需要多數決" hits "為什麼共識需要過半數？" at 0.750 and showed nothing,
+ * because those two share no character at all.
+ */
+test("a card the host matched is not thrown away for lacking the exact words", async () => {
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  // Bounded by the filter's own end rather than by whatever is declared next.
+  const filter = region(page, "const filteredCards = cards.filter", "}).sort(", "the collection filter");
+
+  assert.match(
+    filter,
+    /searchText\.includes\(query\)\s*\|\|\s*Boolean\(semanticSearchMatches\?\.has\(card\.id\)\)/u,
+    "the literal match and the host's answer are not being unioned",
+  );
+  assert.doesNotMatch(
+    filter,
+    /matchesSemanticSearch/u,
+    "the host's answer is back to being a second gate the literal match has to pass as well",
+  );
+  // An empty query still shows the whole cabinet.
+  assert.match(filter, /!query \|\|/u, "an empty query no longer matches everything");
+});
+
+/**
  * A backend that cannot be reached has to arrive as a sentence.
  *
  * These routes only forward, so the failure they have to handle is the one
