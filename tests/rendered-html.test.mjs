@@ -767,6 +767,44 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
   assert.doesNotMatch(duplicateRule, /cosine\(/u, "similarity is back in the duplicate rule");
 });
 
+/**
+ * A backend that cannot be reached has to arrive as a sentence.
+ *
+ * These routes only forward, so the failure they have to handle is the one
+ * where forwarding itself throws. Without a catch the framework answers with
+ * the plain text "Internal Server Error", and the caller — which quite
+ * reasonably expects JSON — shows the user
+ * `Unexpected token 'I', "Internal S"... is not valid JSON`. That is what the
+ * settings dialog showed, and it was the only place left in the app that could:
+ * thirty-six of thirty-eight routes already caught, settings and network/lan
+ * did not.
+ *
+ * Checked per file rather than per handler, because a file is free to share one
+ * catch between its handlers — network/lan does.
+ */
+test("every API proxy route answers a dead backend in words", async () => {
+  const root = new URL("../app/api/", import.meta.url);
+  const routes = [];
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const child = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dir);
+      if (entry.isDirectory()) await walk(child);
+      else if (entry.name === "route.ts") routes.push(child);
+    }
+  };
+  await walk(root);
+  assert.ok(routes.length >= 30, `only found ${routes.length} proxy routes`);
+
+  for (const route of routes) {
+    const source = await readFile(route, "utf8");
+    const name = route.pathname.slice(route.pathname.indexOf("/app/api/") + 9);
+    // health/ has no handlers to protect.
+    if (!/export async function (GET|POST|PUT|PATCH|DELETE)/u.test(source)) continue;
+    assert.match(source, /catch\s*(\([^)]*\))?\s*\{/u, `${name} forwards to the backend without catching a failure`);
+    assert.match(source, /status: 503/u, `${name} has no "backend unreachable" answer`);
+  }
+});
+
 test("the canvas can be arranged by colour", async () => {
   // A card's colour is its category's colour, so lanes of colour are lanes of
   // category — the arrangement people were doing by hand, dragging one node at
