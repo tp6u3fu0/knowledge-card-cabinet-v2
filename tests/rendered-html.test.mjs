@@ -1342,3 +1342,22 @@ test("search quality has a recorded number to regress against", async () => {
   // Deliberately not part of npm test: it needs the real weights and minutes.
   assert.doesNotMatch(pkg.scripts.test, /benchmark/u, "the benchmark was wired into npm test");
 });
+
+test("the overlay answers faster than the cabinet browses", async () => {
+  // Two surfaces, two jobs. Browsing tolerates a pause; the overlay is supposed
+  // to answer before you have finished deciding you asked, and its budget is
+  // 500ms from keystroke to useful result. Measured at 250ms it took 835ms.
+  const quick = await readFile(new URL("../app/quick/page.tsx", import.meta.url), "utf8");
+  const overlay = Number(/const DEBOUNCE_MS = (\d+);/u.exec(quick)?.[1]);
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  const collection = Number(/window\.setTimeout\([\s\S]{0,2000}?\}, (\d+)\);/u.exec(page)?.[1] ?? 250);
+
+  assert.ok(Number.isFinite(overlay), "the overlay has no debounce to check");
+  assert.ok(overlay < 250, `the overlay debounces at ${overlay}ms, the same as browsing`);
+  assert.ok(overlay >= 100, `${overlay}ms is below the range anything was measured at`);
+  assert.ok(overlay <= collection, "the overlay waits longer than the cabinet it exists to beat");
+
+  // And the number has to carry the measurement that produced it, so the next
+  // person to change it knows what it cost rather than guessing again.
+  assert.match(quick, /835ms/u, "the debounce is a number with no measurement behind it");
+});

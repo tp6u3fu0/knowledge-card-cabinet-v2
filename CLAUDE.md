@@ -356,6 +356,7 @@ Query
 另外兩個容易踩的：
 
 - 焦點永遠留在輸入框，結果列是「用游標選」不是「用 Tab 走」（所以 row 是 `tabIndex={-1}`）。這樣才能邊打字邊選。
+- **疊層的 debounce 是 150ms，收藏頁維持 250ms。** 兩個介面在做不同的事：瀏覽卡冊容得下一個停頓，疊層要在你還沒意識到自己問完之前就回答。實測（IME 每 220ms 送出一段，各跑五次，從最後一個按鍵量到答案出現在畫面上）：250ms 是 835ms（635–1039），150ms 是 293ms（286–299）——五次裡 150 的最差一次還贏 250 的最好一次。其中一部分是那 100ms，另一部分是打字途中一直發請求會讓模型保持熱的，所以真正那一發不是閒置後的第一發。代價量過了：每次查詢多花大約十一次 embedding（abort 一個 fetch 不會讓伺服器停下手邊的工作）。**不要再往下調**：那個節奏下已經是每個按鍵一個請求、十二分之十一被 abort，沒有東西可以再買了。
 - 疊層不自己開卡片。`Cmd/Ctrl + Enter` 走 `quick:open-card`，把 id 交給主視窗。在這裡複製一份 viewer 等於兩份都要維護，而讀者本來就到得了那個畫面。
 - **但交出去的方式不可以是重新載入主視窗。** 原本是 `mainWindow.loadURL(.../collection?card=…)`，那會重建整個 renderer——於是「查一個概念」會把正在寫、還沒存的卡片丟掉。**檢索功能弄壞 capture，比沒有檢索功能還糟。** 現在 renderer 掛好時自己 invoke `collection:ready`，主行程據此送 `collection:open-card` 事件；`loadURL` 只留給「卡冊還沒起來」那條路。
 - **ready 不能用網址判斷。** `webContents.getURL()` 在導航一 commit 就回 `/collection`，那時 React 什麼都還沒掛上。旗標由 renderer 自己說，並在 `did-start-navigation`（非 same-document）與視窗關閉時清掉。

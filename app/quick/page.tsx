@@ -27,8 +27,34 @@ type QuickBridge = {
 
 type Hit = ApiCard & { search_reasons?: string[] };
 
-/** Matches the collection's own debounce, so both surfaces feel the same. */
-const DEBOUNCE_MS = 250;
+/**
+ * Shorter than the collection's 250ms, because the two surfaces are not doing
+ * the same job. Browsing a cabinet tolerates a pause; this is meant to answer
+ * before you have finished deciding you asked.
+ *
+ * Measured in the real overlay, typing a phrase through an IME at 220ms per
+ * commit, five runs each, timing from the last keystroke to the answer being on
+ * screen — not to the request settling, which an aborted one does instantly
+ * while showing nothing:
+ *
+ *   250ms   835ms  (635–1039)   1 request
+ *   150ms   293ms  (286–299)   12 requests, 11 of them aborted
+ *
+ * Every run at 150 beat every run at 250. Part of that is the 100ms; the rest
+ * is that firing while someone types keeps the model warm, so the request that
+ * matters is not the first one after an idle gap. The spec's budget for
+ * shortcut-to-useful-result is 500ms, which 250 does not meet and 150 does.
+ *
+ * The cost is real and was measured too: about eleven extra embeddings per
+ * lookup, since aborting a fetch does not stop the server finishing the work.
+ * A lookup happens a few times an hour, so that is a second of CPU against
+ * half a second of someone's attention.
+ *
+ * Below 150 was not adopted. At a fast enough cadence every keystroke becomes
+ * a request and the abort rate is already 11 in 12; there is nothing left to
+ * buy (CLAUDE.md §3.16).
+ */
+const DEBOUNCE_MS = 150;
 
 function bridge(): QuickBridge | null {
   return (globalThis as unknown as { quickSearch?: QuickBridge }).quickSearch ?? null;
