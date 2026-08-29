@@ -1562,6 +1562,9 @@ export function CreateCardForm({
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  // Opens by itself when editing: whoever came back to a saved card came back
+  // to change something, and half of what a card holds lives down here.
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(isEditing);
   return (
     <form className="create-card-panel" onSubmit={onSubmit}>
       <div className="create-card-header">
@@ -1602,47 +1605,15 @@ export function CreateCardForm({
         </div>
       </div>
 
+      {/*
+        Four fields, and only four. Everything the reader needs to recognise
+        this card later — what it is called, what it answers, the one line that
+        rebuilds the understanding, and where it lives — and nothing else
+        (CLAUDE.md §1 P-04). The rest is real, still editable, and one click
+        away; it just no longer stands between someone and a card they were
+        willing to spend twenty seconds on.
+      */}
       <div className="create-card-grid">
-        <label className="create-card-field">
-          <span>卡片 ID</span>
-          <input
-            required
-            disabled={isEditing}
-            value={draft.id}
-            onChange={(event) => onChange("id", event.target.value)}
-            placeholder="attention-v2"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>編號</span>
-          <input
-            required
-            value={draft.number}
-            onChange={(event) => onChange("number", event.target.value)}
-            placeholder="AI-005"
-          />
-        </label>
-        <CardSelect
-          className="create-card-field"
-          label="分類"
-          placeholder="選擇分類"
-          required
-          value={draft.category}
-          onChange={(next) => onChange("category", next)}
-          options={[
-            ...(draft.category && !categoryOptions.includes(draft.category) ? [{ value: draft.category, label: draft.category }] : []),
-            ...categoryOptions.map((category) => ({ value: category, label: category })),
-          ]}
-        />
-        <label className="create-card-field">
-          <span>主題</span>
-          <input
-            required
-            value={draft.topic}
-            onChange={(event) => onChange("topic", event.target.value)}
-            placeholder="人工智慧"
-          />
-        </label>
         <label className="create-card-field create-card-field--wide">
           <span>標題</span>
           <input
@@ -1671,40 +1642,95 @@ export function CreateCardForm({
             placeholder="先用一句話說清楚這張卡的核心。"
           />
         </label>
-        <label className="create-card-field">
-          <span>生活比喻</span>
-          <textarea
-            rows={4}
-            value={draft.analogy}
-            onChange={(event) => onChange("analogy", event.target.value)}
-            placeholder="它像生活中的什麼？"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>再往裡面看</span>
-          <textarea
-            rows={4}
-            value={draft.detail}
-            onChange={(event) => onChange("detail", event.target.value)}
-            placeholder="補充機制、細節或限制。"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>來源</span>
-          <input
-            value={draft.source}
-            onChange={(event) => onChange("source", event.target.value)}
-            placeholder="論文、書籍或研究筆記"
-          />
-        </label>
-        <label className="create-card-field">
-          <span>標籤</span>
-          <input
-            value={draft.tags}
-            onChange={(event) => onChange("tags", event.target.value)}
-            placeholder="入門, 核心概念"
-          />
-        </label>
+        <CardSelect
+          className="create-card-field create-card-field--wide"
+          label="分類"
+          placeholder="選擇分類"
+          required
+          value={draft.category}
+          onChange={(next) => onChange("category", next)}
+          options={[
+            ...(draft.category && !categoryOptions.includes(draft.category) ? [{ value: draft.category, label: draft.category }] : []),
+            ...categoryOptions.map((category) => ({ value: category, label: category })),
+          ]}
+        />
+      </div>
+
+      <div className="create-card-advanced">
+        <button
+          className="create-card-advanced__toggle"
+          type="button"
+          aria-expanded={isAdvancedOpen}
+          onClick={() => setIsAdvancedOpen((current) => !current)}
+        >
+          <span>{isAdvancedOpen ? "收起進階欄位" : "展開進階欄位"}</span>
+          <span className="create-card-advanced__hint">比喻、細節、來源、標籤{isEditing ? "、識別資料" : "、編號"}</span>
+        </button>
+        {isAdvancedOpen ? (
+          <div className="create-card-grid">
+            <label className="create-card-field">
+              <span>生活比喻</span>
+              <textarea
+                rows={4}
+                value={draft.analogy}
+                onChange={(event) => onChange("analogy", event.target.value)}
+                placeholder="它像生活中的什麼？"
+              />
+            </label>
+            <label className="create-card-field">
+              <span>再往裡面看</span>
+              <textarea
+                rows={4}
+                value={draft.detail}
+                onChange={(event) => onChange("detail", event.target.value)}
+                placeholder="補充機制、細節或限制。"
+              />
+            </label>
+            <label className="create-card-field">
+              <span>來源</span>
+              <input
+                value={draft.source}
+                onChange={(event) => onChange("source", event.target.value)}
+                placeholder="論文、書籍或研究筆記"
+              />
+            </label>
+            <label className="create-card-field">
+              <span>標籤</span>
+              <input
+                value={draft.tags}
+                onChange={(event) => onChange("tags", event.target.value)}
+                placeholder="入門, 核心概念"
+              />
+            </label>
+            <label className="create-card-field">
+              <span>主題</span>
+              <input
+                value={draft.topic}
+                onChange={(event) => onChange("topic", event.target.value)}
+                placeholder={draft.category || "留空時沿用分類"}
+              />
+            </label>
+            <label className="create-card-field">
+              <span>編號</span>
+              <input
+                value={draft.number}
+                onChange={(event) => onChange("number", event.target.value)}
+                placeholder="留空自動編為 KC-000123"
+              />
+            </label>
+            {/*
+              Only ever shown for a card that already has one. Before the first
+              save there is no id to show — the runtime mints it — and a box
+              inviting someone to name one would put the friction straight back.
+            */}
+            {isEditing ? (
+              <label className="create-card-field create-card-field--wide">
+                <span>卡片 ID</span>
+                <input readOnly value={draft.id} />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {error ? <p className="create-card-error" role="alert">{error}</p> : null}

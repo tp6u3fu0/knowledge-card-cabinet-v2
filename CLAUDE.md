@@ -121,7 +121,7 @@ Notion / 文件 / 論文 / 網頁 / 筆記
 | --- | --- | --- | --- |
 | 1 | 讓檢索**正確** | 前端不再用字面比對否決主機答案；字面搜尋與 embedding 解耦；混合排名；語意檢索測試；模型失敗的退路 | **已完成**（§3.14、§3.15、`tests/retrieval.test.mjs`） |
 | 2 | 讓檢索**快** | 有查詢時換成結果列（標題／問題／一句話／分類／命中理由）；桌面全域快速搜尋疊層；鍵盤優先操作 | **已完成**（§3.16、`app/quick/page.tsx`） |
-| 3 | 讓建立**便宜** | Card ID 與編號自動產生；Quick Capture：貼上 → AI 草稿 → 只確認標題／問題／摘要／分類，其餘收在進階編輯 | 未開始 |
+| 3 | 讓建立**便宜** | Card ID 與編號自動產生；Quick Capture：貼上 → AI 草稿 → 只確認標題／問題／摘要／分類，其餘收在進階編輯 | **已完成**（§3.17、`tests/capture.test.mjs`） |
 | 4 | 把 **Storage 和 Cache 接起來** | 結構化來源（`source_type` / `source_url` / `source_external_id` / `source_updated_at` / `source_content_hash` / `source_checked_at`，全部 nullable，原本的 `source` 字串保留給顯示用）；首頁定位改寫 | 未開始 |
 | 5 | 重新發現**忘掉的** | 偶爾把久未查看、或與最近閱讀／搜尋相關的卡浮出來；來源過期提示 | 未開始 |
 
@@ -129,7 +129,7 @@ Notion / 文件 / 論文 / 網頁 / 筆記
 
 ### 幾個階段裡容易做歪的地方
 
-- **Card ID 是實作細節。** 一般使用者沒有理由思考該叫 `attention-v2` 還是 `attention-mechanism`。ID 由 runtime 自動產生，只在進階／除錯介面看得到；編號也自動產生（`KC-000123`，或依分類前綴給 `AI-001`）。**編號不該擋住 capture。**
+- **Card ID 是實作細節。** 一般使用者沒有理由思考該叫 `attention-v2` 還是 `attention-mechanism`。ID 由 runtime 自動產生，只在進階／除錯介面看得到；編號也自動產生。**編號不該擋住 capture。** 實作與守門的測試見 §3.17。
 - **快速搜尋不要另開一條 API。** 沿用 `GET /search` 就好，Global Quick Search 只是另一個 client。開新的 `/quick-search` 會讓主視窗與快速搜尋長出兩套搜尋邏輯，然後其中一套會先壞掉。
 - **來源過期只給草稿，永遠不自動覆寫。** 卡片記的是使用者**當時的理解**，不一定等同來源的最新文字。可以說「原始資料已更新，這張卡可能需要重新整理」，不可以自己改掉。
 - **手機端預設畫面是搜尋，不是整面收藏牆。** 手機的情境是「我現在突然要查一件事」，不是欣賞收藏。
@@ -345,6 +345,20 @@ Query
 - 焦點永遠留在輸入框，結果列是「用游標選」不是「用 Tab 走」（所以 row 是 `tabIndex={-1}`）。這樣才能邊打字邊選。
 - 疊層不自己開卡片。`Cmd/Ctrl + Enter` 走 `quick:open-card`，把 id 交給主視窗的 `?card=`。在這裡複製一份 viewer 等於兩份都要維護，而讀者本來就到得了那個畫面。
 
+### 3.17 卡片的 id 與編號由 runtime 決定，而且只決定一次
+
+`POST /cards` 以前要求 `id`、`number`、`topic`、`title` 四個欄位。前三個是記帳，最後一個才是卡片。要人先想好該叫 `attention-v2` 還是 `attention-mechanism`，是把「留下這個理解」換成「之後有時間再整理」的標準做法（P-04）。
+
+現在**只要求 `title`**——沒有標題的卡在任何清單裡都認不出來，那是唯一真的必要的欄位。其餘照這幾條走：
+
+- **`generateCardId()` 產生 ULID 形狀的 id**（10 碼時間 + 16 碼亂數，Crockford base32 沒有 I/L/O/U）。可以照建立時間排序，dump 出來讀得下去。它是封面的種子（§3.6），所以必須唯一、穩定，而且**永遠不能從內容算出來**——否則改一個錯字就重畫卡片。
+- **`nextCardNumber()` 給 `KC-000123`**，整櫃一套編號，不做分類前綴。分類已經用文字和顏色在卡片上出現兩次了，前綴是同一件事講第三遍；而且大部分分類是中文，沒有誠實的方法把「人工智慧」變成三個拉丁字母。計數**含垃圾桶裡的卡**，否則復原一張卡會撞到後來發出去的號碼。不符合這個格式的編號不列入計數，也不改寫。
+- **caller 帶來的 id 與編號一律照用。** 匯入、備份、MCP、iOS 都可能自己管識別碼。
+- **編號指派一次就不再重算**，理由跟顏色一樣（§3.5）：它是辨識的一部分。換分類、改標題都不會換號。
+- `topic` 空的時候沿用 `category`。Quick capture 只問一次「這張卡放哪」，沒有這條的話垃圾桶列表會顯示「KC-000004 ·」，點後面什麼都沒有。
+
+介面那半在 `CreateCardForm`：上面固定四個欄位（標題／問題／一句話／分類），其餘收在「展開進階欄位」裡——**是收起來不是拿掉**，比喻、細節、來源、標籤、主題、編號全部還在，編輯既有卡片時預設展開。卡片 ID 只在編輯既有卡片時以唯讀顯示；新卡還沒有 id，開一個框請人取名字等於把 friction 原封不動放回去。
+
 ---
 
 ## 4. 連動地圖：改這裡，就一定要改那裡
@@ -358,6 +372,9 @@ Query
 | `/search` 的候選集或過濾條件 | 想清楚它擋掉的是哪一條管線；字面那條**永遠**要看到全部的卡（§3.14） | `tests/retrieval.test.mjs` 會失敗（刻意的）——模型一壞，整個搜尋跟著壞 |
 | `LEXICAL_MIN_COVERAGE` / `LEXICAL_FIELDS` / `LEXICAL_WEIGHT` | 先跑 `tests/retrieval.test.mjs`，特別是「搜不到的東西要回 0 筆」那題 | 放寬字面門檻＝「每個查詢都回整個卡冊」換一種形式回來 |
 | `/search` 回應欄位 | `app/collection/types.ts` 的 `ApiCard`；只增不改（手機端已發布，§8） | 舊版 App 讀不到新欄位，或型別對不上 |
+| `POST /cards` 的必要欄位 | 想清楚它擋掉的是誰；只有 `title` 是必要的（§3.17）。`desktop/mcp-server.cjs` 的 `create_card` 也要跟著鬆綁 | `tests/capture.test.mjs` 會失敗（刻意的）——記帳欄位又站回卡片前面 |
+| `generateCardId()` / `nextCardNumber()` | 兩者都不可以從卡片內容算出來；編號指派一次就不重算（§3.17、§3.5） | 改一個錯字就重畫封面；或復原一張卡撞到別人的號碼 |
+| `CreateCardForm` 的欄位 | 上面固定四個（標題／問題／一句話／分類），其餘進 `.create-card-advanced`——是收起來不是拿掉 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——建卡又變成填表單，或某個欄位被悄悄刪掉 |
 | 前端決定「哪些卡符合查詢」的邏輯 | 不要加。有 query 時主機的答案就是結果集，本地只保留「主機還沒回答」的墊檔（§3.14） | `tests/rendered-html.test.mjs` 會失敗（刻意的）——本地 includes() 會把主機刻意丟掉的卡放回來 |
 | `MOTIF_SHAPES`（local-api.cjs） | `app/cover-art.tsx` 的 `CoverGlyph` union + `glyphLibrary` | 封面靜默退回單一圖案 |
 | `PALETTES`（local-api.cjs） | `globals.css` 的 `--accent-*` 與 `.collection-card--*` 規則、`types.ts` 的 `visualAccents` | 卡片沒有顏色樣式 |
@@ -416,6 +433,7 @@ Query
 | --- | --- |
 | `api-contract.test.mjs` | 認證、卡片生命週期、搜尋、關聯上限與去重、備份完整性 |
 | `retrieval.test.mjs` | 換句話說也搜得到；沒有向量的卡用標題搜得到；模型壞掉時文字搜尋照常；搜不到的東西要回 0 筆 |
+| `capture.test.mjs` | 只給標題也能建卡；沒有標題要擋下；編號連號、不重用垃圾桶裡的號；自帶的 id／編號照用；改卡不換號；id 可排序、不重複、沒有會看錯的字母 |
 | `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
 | `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |

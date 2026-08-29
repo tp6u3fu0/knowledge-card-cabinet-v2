@@ -1107,3 +1107,37 @@ test("the quick search shortcut is claimed honestly or not claimed at all", asyn
   assert.match(page, /bridge\.shortcut\(\)/u, "the hint does not ask which accelerator is live");
   assert.doesNotMatch(page, /"(Ctrl|⌘)\+Shift\+K"/u, "the accelerator is hardcoded into the interface");
 });
+
+test("keeping an understanding asks for the understanding and nothing else", async () => {
+  // The form used to open on a box wanting a card id — a string nobody who
+  // reads the card later has any use for — followed by a number, a topic and a
+  // category before the first word of the actual card. Four decisions in front
+  // of the one thing the product is for. That is the shape that turns "keep
+  // this" into "I'll organise it later" (CLAUDE.md §1 P-04).
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+  const form = region(panels, "export function CreateCardForm(", "\n}\n", "the card form");
+  const quick = region(form, `<div className="create-card-grid">`, `<div className="create-card-advanced">`, "the fields asked for up front");
+
+  for (const field of ["title", "question", "summary", "category"]) {
+    assert.match(quick, new RegExp(`"${field}"`, "u"), `quick capture does not ask for the ${field}`);
+  }
+  for (const field of ["id", "number", "topic", "analogy", "detail", "source", "tags"]) {
+    assert.doesNotMatch(quick, new RegExp(`onChange\\("${field}"`, "u"), `${field} is still in the way of capture`);
+  }
+
+  // Still reachable, still editable — moved, not deleted.
+  const advanced = region(form, `<div className="create-card-advanced">`, "{error ?", "the advanced fields");
+  for (const field of ["analogy", "detail", "source", "tags", "topic", "number"]) {
+    assert.match(advanced, new RegExp(`onChange\\("${field}"`, "u"), `${field} was dropped rather than moved`);
+  }
+  // The id is the one thing that is never typed: before the first save there is
+  // nothing to show, and afterwards it is the runtime's, not the writer's.
+  assert.doesNotMatch(form, /onChange\("id"/u, "the form still invites someone to name a card id");
+  assert.match(advanced, /isEditing \?[\s\S]*readOnly/u, "an existing card cannot be traced back to its id");
+
+  // And the runtime has to accept what the form now sends.
+  const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
+  assert.doesNotMatch(api, /!body\.id \|\| !body\.number/u, "the runtime still demands an id and a number");
+  assert.match(api, /generateCardId\(\)/u, "the runtime does not mint an id of its own");
+  assert.match(api, /nextCardNumber\(store\.cards\)/u, "the runtime does not number a card of its own");
+});

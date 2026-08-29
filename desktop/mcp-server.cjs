@@ -148,17 +148,21 @@ function registerTools(server) {
   server.registerTool("create_card", {
     title: "新增知識卡",
     description: "建立一張知識卡；建立後會由桌面 runtime 產生 embedding、封面與語意關聯。",
+    // Only the title is required, matching POST /cards. An id and a number are
+    // bookkeeping the runtime can do itself, and a tool that demands them makes
+    // the model invent identifiers nobody asked it to choose.
     inputSchema: {
-      id: z.string().min(1).describe("穩定且唯一的卡片 ID"),
-      number: z.string().min(1).describe("卡片編號"),
-      topic: z.string().min(1).describe("分類名稱"),
       title: z.string().min(1).describe("卡片標題"),
-      question: z.string().min(1).describe("引導理解的問題"),
-      summary: z.string().min(1).describe("一句話摘要"),
-      analogy: z.string().min(1).describe("生活化類比"),
-      detail: z.string().min(1).describe("詳細說明"),
+      category: z.string().min(1).optional().describe("分類名稱，留空為「待分類」"),
+      question: z.string().min(1).optional().describe("引導理解的問題"),
+      summary: z.string().min(1).optional().describe("一句話摘要"),
+      analogy: z.string().min(1).optional().describe("生活化類比"),
+      detail: z.string().min(1).optional().describe("詳細說明"),
       source: z.string().default("").describe("來源，可留空"),
       tags: z.array(z.string()).default([]).describe("標籤列表"),
+      id: z.string().min(1).optional().describe("自有的卡片 ID；留空由 runtime 產生"),
+      number: z.string().min(1).optional().describe("自有的卡片編號；留空由 runtime 產生 KC-000123"),
+      topic: z.string().min(1).optional().describe("主題；留空時沿用分類"),
     },
   }, async (card) => {
     try {

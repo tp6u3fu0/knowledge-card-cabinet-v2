@@ -2802,6 +2802,55 @@ a:focus-visible {
   min-width: 0;
 }
 
+/*
+ * Everything the quick capture surface does not ask for. It is a divider with
+ * a handle rather than a panel: the four fields above are the card, and this
+ * has to read as the rest of the same form, not as a second form to fill in.
+ */
+.create-card-advanced {
+  border-top: 1px solid rgba(33, 31, 39, 0.1);
+  margin-top: 24px;
+  padding-top: 6px;
+}
+
+.create-card-advanced__toggle {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 10px;
+  letter-spacing: 0.06em;
+  padding: 12px 0;
+  text-align: left;
+  transition: color var(--motion-base) var(--ease-out);
+  width: 100%;
+}
+
+.create-card-advanced__toggle:hover {
+  color: var(--mint-deep);
+}
+
+.create-card-advanced__hint {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.create-card-advanced .create-card-grid {
+  margin-top: 2px;
+}
+
+.create-card-advanced .create-card-field input[readonly] {
+  color: var(--muted);
+  cursor: default;
+}
+
 .create-card-field--wide {
   grid-column: 1 / -1;
 }

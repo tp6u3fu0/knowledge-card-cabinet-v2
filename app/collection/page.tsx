@@ -1861,8 +1861,10 @@ export default function CollectionPage() {
     event.preventDefault();
     setCreateError("");
 
+    // Only checked when the writer supplied one from the advanced fields. A
+    // card captured the quick way has no id yet — the runtime makes it.
     const normalizedId = cardDraft.id.trim();
-    if (!editingId && cards.some((card) => card.id === normalizedId)) {
+    if (!editingId && normalizedId && cards.some((card) => card.id === normalizedId)) {
       setCreateError("這個卡片 ID 已經存在，請換一個 ID。");
       return;
     }
@@ -1887,7 +1889,7 @@ export default function CollectionPage() {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(editingId ? cardFields : { id: normalizedId, ...cardFields }),
+          ...(editingId ? cardFields : { ...(normalizedId ? { id: normalizedId } : {}), ...cardFields }),
         }),
         },
       );
@@ -2147,6 +2149,10 @@ export default function CollectionPage() {
         ) : null}
         {isCreateCardOpen ? (
           <CreateCardForm
+            // Remounted when the panel changes what it is for, so the advanced
+            // fields open by themselves on the way into an existing card and
+            // close again on the way into a new one.
+            key={editingId || "new-card"}
             draft={cardDraft}
             categoryOptions={categories.filter((category) => category !== "全部")}
             sourceText={sourceText}

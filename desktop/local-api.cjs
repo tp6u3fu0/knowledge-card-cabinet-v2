@@ -638,9 +638,71 @@ function buildCover(identity, category, accents = null) {
   };
 }
 
+/**
+ * Crockford base32, for card ids that survive being read aloud or copied out
+ * of a log: no I, L, O or U, so nothing can be confused with 1, 0 or a swear.
+ */
+const CARD_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/**
+ * The id for a card the runtime is creating on someone's behalf.
+ *
+ * A card id is an implementation detail (CLAUDE.md §2). Nobody who wants to
+ * keep an understanding has a reason to first decide between `attention-v2`
+ * and `attention-mechanism`, and being asked to is exactly the friction that
+ * turns "keep this" into "I will organise it later" — which is how a cabinet
+ * dies. Callers that own their own identifiers (imports, backups, MCP clients
+ * carrying data in from elsewhere) still pass one and are still obeyed.
+ *
+ * ULID-shaped rather than a UUID so ids sort by creation time and a raw dump
+ * of the table reads in order. It seeds the cover (§3.6), so it has to be
+ * unique and stable — and, just as importantly, never derived from what the
+ * card says, or editing a typo would redraw the card.
+ */
+function generateCardId(at = Date.now()) {
+  let time = "";
+  let value = at;
+  for (let index = 0; index < 10; index += 1) {
+    time = CARD_ID_ALPHABET[value % 32] + time;
+    value = Math.floor(value / 32);
+  }
+  // 256 is a whole number of alphabets, so the modulo here is not biased.
+  const random = Array.from(crypto.randomBytes(16), (byte) => CARD_ID_ALPHABET[byte % 32]).join("");
+  return `${time}${random}`;
+}
+
+const CARD_NUMBER_PATTERN = /^KC-(\d+)$/i;
+
+/**
+ * The next unused `KC-000123`.
+ *
+ * One scheme for the whole cabinet rather than a per-category prefix. The
+ * category is already on the card twice — in words and in colour — so a prefix
+ * would be the same fact spelled a third way, and it could not be derived
+ * honestly anyway: most categories here are Chinese, and there is no
+ * defensible way to turn 人工智慧 into three Latin letters.
+ *
+ * Trashed cards are counted too, so restoring one never collides with a number
+ * handed out since. Numbers that do not follow the scheme are left out of the
+ * count and left alone on their cards: a number is assigned once and never
+ * recomputed, for the same reason a colour is (§3.5).
+ */
+function nextCardNumber(cards) {
+  const highest = cards.reduce((best, card) => {
+    const match = CARD_NUMBER_PATTERN.exec(String(card.number ?? "").trim());
+    return match ? Math.max(best, Number(match[1])) : best;
+  }, 0);
+  return `KC-${String(highest + 1).padStart(6, "0")}`;
+}
+
 function normalizeCard(input, previous = {}, canonicalTags = null) {
-  const topic = String(input.topic ?? previous.topic ?? "").trim();
-  const category = String(input.category ?? previous.category ?? topic).trim() || topic || "待分類";
+  const requestedTopic = String(input.topic ?? previous.topic ?? "").trim();
+  const category = String(input.category ?? previous.category ?? requestedTopic).trim() || requestedTopic || "待分類";
+  // Topic used to be the field category fell back to. It now falls back the
+  // other way as well, because quick capture asks where a card lives exactly
+  // once. Without this a card captured in twenty seconds reads as "KC-000004 ·"
+  // everywhere the topic is shown, with nothing after the dot.
+  const topic = requestedTopic || category;
   const card = {
     id: String(input.id ?? previous.id ?? "").trim(),
     number: String(input.number ?? previous.number ?? "").trim(),
@@ -1392,7 +1454,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "cards.auto_identity", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
       return;
     }
 
@@ -2153,12 +2215,22 @@ function createApiServer(store, dataFile, modelRuntime, {
 
     if (request.method === "POST" && segments[0] === "cards" && segments.length === 1) {
       const body = await readBody(request);
-      if (!body.id || !body.number || !body.topic || !body.title) {
-        sendJson(response, 422, { detail: "id、number、topic、title 為必要欄位" });
+      // The title is the only thing asked for. An untitled card cannot be
+      // recognised in any list, so it is the one field the cabinet genuinely
+      // needs; the id and the number are bookkeeping, and bookkeeping must not
+      // stand between someone and a card they are willing to spend twenty
+      // seconds on (CLAUDE.md §1 P-04). Anything the caller does supply wins.
+      if (!String(body.title ?? "").trim()) {
+        sendJson(response, 422, { detail: "title 為必要欄位" });
         return;
       }
-      const existing = store.cards.find((card) => card.id === String(body.id).trim());
-      const card = normalizeCard(body, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at)));
+      const requestedId = String(body.id ?? "").trim();
+      const existing = requestedId ? store.cards.find((card) => card.id === requestedId) : undefined;
+      const identity = existing ? {} : {
+        id: requestedId || generateCardId(),
+        number: String(body.number ?? "").trim() || nextCardNumber(store.cards),
+      };
+      const card = normalizeCard({ ...body, ...identity }, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at)));
       await applyEmbedding(card, modelRuntime);
       // Reply with the object the store holds, not the local copy: save() can
       // still change it — repainting a card that introduced a new category —
@@ -2406,4 +2478,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
