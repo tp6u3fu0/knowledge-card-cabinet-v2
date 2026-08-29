@@ -436,7 +436,7 @@ Query
 | `CreateCardForm` 的欄位 | 上面固定四個（標題／問題／一句話／分類），其餘進 `.create-card-advanced`——是收起來不是拿掉 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——建卡又變成填表單，或某個欄位被悄悄刪掉 |
 | `normalizeSourceUrl()` 允許的 scheme | `main.cjs` 的 `setWindowOpenHandler` 要一致；兩邊都只放行 http(s)（§3.18） | 來源欄位變成可執行的連結；`tests/source.test.mjs` 與 `tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | 任何 `source_*` 欄位 | `store.cjs` 的 `SOURCE_COLUMNS`（含 `ALTER TABLE` 補欄位）、`publicCard`、`types.ts` 的 `SourceMetadata`；**不要**加進 `embeddingText()` | 舊資料庫開不起來；或第一個人填來源時整櫃卡片重算向量 |
-| 首頁的定位文案 | 不要寫「在任何裝置上存取」（§1 P-05）；`site/index.html` 的 title 與 og:description 一起改 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——分享出去的連結講的是另一個產品 |
+| 首頁的定位文案 | 不要寫「在任何裝置上存取」（§1 P-05）；`site/index.html` 的 title 與 og:description、以及 `app/layout.tsx` 的視窗標題一起改——**三個地方**，第三個曾經整整晚一個階段才跟上 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——分享出去的連結講的是另一個產品 |
 | `RECALL_COLUMNS` 或任何跟「讀過沒」有關的欄位 | 想清楚它會不會被拿去算間隔、分數或連續天數；會的話不要加（§3.20） | 產品變成 Anki；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | `RESURFACE_QUIET_DAYS` / `RESURFACE_OFFER_GAP_HOURS` | 間隔記在 `meta`，不是記在某一個視窗裡（§3.20） | 每開一個視窗就被推薦一次，建議變成嘮叨 |
 | 任何新的對外請求 | 先讀 §3.19：要按鍵觸發、關得掉、不帶識別資訊、失敗算「不知道」、裝置權杖不可用 | 一個號稱資料留在本機的工具開始自己連網；`tests/rendered-html.test.mjs` 會失敗（刻意的） |

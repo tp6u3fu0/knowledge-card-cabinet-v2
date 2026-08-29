@@ -1183,6 +1183,12 @@ test("the front page sells recall, not a shelf", async () => {
   // The front page still lives in exactly one place.
   const home = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(home, /慢慢理解/u, "the landing copy leaked back into the desktop bundle");
+
+  // The app's own window title is the third place this has to be true, and the
+  // one that went on saying 研究中的收藏 for a whole phase after the rest moved.
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(layout, /title: "[^"]*研究中的收藏/u, "the window title still sells a collection in progress");
+  assert.match(layout, /title: "[^"]*快速想起/u, "the window title does not say what the product is for");
 });
 
 test("the cabinet brings something back without turning into a review app", async () => {
