@@ -346,7 +346,7 @@ function semanticBaseline(cards) {
  * Null means "no opinion": too few cards to have a distribution, or a cabinet
  * whose cards are all alike. The caller then filters nothing.
  */
-const SEMANTIC_STANDOUT = 0.9;
+const SEMANTIC_STANDOUT = 0.6;
 function standoutFloor(scores, baseline) {
   if (!baseline || scores.length < 6) return null;
   const spread = baseline.hi - baseline.lo;
@@ -1168,11 +1168,37 @@ function relationKey(sourceId, targetId, type) {
   return `${sourceId}|${targetId}|${type}`;
 }
 
+/**
+ * The cabinet's own scale of similarity, remeasured when the cabinet has
+ * changed enough to have a different one.
+ *
+ * It has to be *stored*. That was the bug: rebuildSemanticRelationsFor computed
+ * a baseline, used it for the pair it was scoring, and dropped it — so a
+ * cabinet built up one card at a time never had one, standoutFloor took the
+ * `!baseline` exit for every query, and nothing was ever filtered. Measured on
+ * a 58-card cabinet: no-result accuracy 0%, every query about something the
+ * cabinet does not contain answering with a full page of confident results.
+ *
+ * It also has to be *remeasured*. Storing the first one would pin a five-
+ * hundred card cabinet to the scale of the first six cards in it. Growth or
+ * loss of a fifth is the trigger — often enough to follow a cabinet being
+ * filled, rare enough not to run on every save. The floor of four keeps a brand
+ * new cabinet from remeasuring on every single card.
+ */
+function refreshSemanticBaseline(store, { force = false } = {}) {
+  const usable = store.cards.filter((card) => !card.deleted_at && hasUsableEmbedding(card));
+  const measuredAt = store.semantic_baseline_cards ?? 0;
+  const drifted = measuredAt === 0 || Math.abs(usable.length - measuredAt) >= Math.max(4, measuredAt * 0.2);
+  if (!force && store.semantic_baseline && !drifted) return store.semantic_baseline;
+  store.semantic_baseline = semanticBaseline(usable);
+  store.semantic_baseline_cards = usable.length;
+  return store.semantic_baseline;
+}
+
 function rebuildSemanticRelations(store) {
   store.relations = store.relations.filter((relation) => relation.relation_type !== "semantic");
   const activeCards = store.cards.filter((card) => !card.deleted_at);
-  const baseline = semanticBaseline(activeCards);
-  store.semantic_baseline = baseline;
+  const baseline = refreshSemanticBaseline(store, { force: true });
   for (let firstIndex = 0; firstIndex < activeCards.length; firstIndex += 1) {
     for (let secondIndex = firstIndex + 1; secondIndex < activeCards.length; secondIndex += 1) {
       const first = activeCards[firstIndex];
@@ -1220,9 +1246,10 @@ function pruneSemanticRelations(store) {
 
 function rebuildSemanticRelationsFor(store, cardIds) {
   const changed = new Set(cardIds);
-  // Reuse the collection's measured range so a single edited card is scored on
-  // the same scale as everything already in the graph.
-  const baseline = store.semantic_baseline ?? semanticBaseline(store.cards.filter((card) => !card.deleted_at));
+  // The collection's measured range, so a single edited card is scored on the
+  // same scale as everything already in the graph — and kept on the store,
+  // because the search floor reads it and there is nowhere else it comes from.
+  const baseline = refreshSemanticBaseline(store);
   store.relations = store.relations.filter((relation) => relation.relation_type !== "semantic" || (!changed.has(relation.source_id) && !changed.has(relation.target_id)));
   const activeCards = store.cards.filter((card) => !card.deleted_at);
   // When both ends of a pair are in the changed set — which is every pair once
@@ -2841,4 +2868,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, refreshSemanticBaseline, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };

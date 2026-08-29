@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, standoutFloor } = require("../desktop/local-api.cjs");
+const { cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, standoutFloor, refreshSemanticBaseline } = require("../desktop/local-api.cjs");
 
 const card = (embedding, overrides = {}) => ({
   id: "card", title: "標題", topic: "主題", category: "分類", tags: [], embedding, ...overrides,
@@ -186,4 +186,42 @@ test("the floor declines to have an opinion when it cannot have one", () => {
   assert.equal(standoutFloor(scores, null), null, "no baseline is still an opinion");
   assert.equal(standoutFloor(scores.slice(0, 5), spread(0.68, 0.79)), null, "five scores are not a distribution");
   assert.equal(standoutFloor(scores, spread(0.7, 0.7)), null, "a cabinet with no spread has no unit to measure in");
+});
+
+test("the cabinet's own similarity scale is kept, and remeasured as it grows", () => {
+  // The scale is what standoutFloor measures against, and there is nowhere else
+  // it comes from. It used to be computed inside the incremental relation
+  // rebuild, used for the pair being scored, and dropped — so a cabinet built
+  // one card at a time never had one, the floor took its `!baseline` exit for
+  // every query, and search answered "橘子的種植與採收季節" with a full page of
+  // cards about databases. Measured on 58 real cards: no-result accuracy 0%.
+  const spread = (index) => {
+    // Vectors far enough apart to give the collection an actual distribution;
+    // a cabinet whose cards are all alike has no scale and is allowed none.
+    const angle = (index % 12) * 0.22;
+    return [Math.cos(angle), Math.sin(angle), (index % 5) * 0.03];
+  };
+  const card = (index) => ({ id: `c${index}`, embedding: spread(index), deleted_at: null });
+
+  const store = { cards: Array.from({ length: 12 }, (_, index) => card(index)) };
+  const first = refreshSemanticBaseline(store);
+  assert.ok(first, "a cabinet with a real spread produced no scale at all");
+  assert.equal(store.semantic_baseline, first, "the scale was computed and then thrown away");
+  assert.equal(store.semantic_baseline_cards, 12);
+
+  // Called again with nothing changed, it does not recompute.
+  const sameObject = store.semantic_baseline;
+  refreshSemanticBaseline(store);
+  assert.equal(store.semantic_baseline, sameObject, "the scale is remeasured on every single save");
+
+  // Grown by a fifth, it does.
+  store.cards.push(...Array.from({ length: 4 }, (_, index) => card(100 + index)));
+  refreshSemanticBaseline(store);
+  assert.equal(store.semantic_baseline_cards, 16, "a growing cabinet is still measured against its first few cards");
+
+  // And a forced rebuild always remeasures, whatever the counts say.
+  store.semantic_baseline_cards = 16;
+  store.cards.push(card(200));
+  refreshSemanticBaseline(store, { force: true });
+  assert.equal(store.semantic_baseline_cards, 17);
 });
