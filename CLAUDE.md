@@ -603,7 +603,7 @@ warm p50           194ms       4ms
 | `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
 | `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |
-| `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重 |
+| `model-catalogue.test.mjs` | 自訂模型驗證、供應商預設、簡易模式解析、內建權重；硬體建議只指向量過的模型，而且不推薦跑不動的 |
 | `category-colour.test.mjs` | 同分類同色、分布平均、既有分類不變色、三方一致 |
 | `cover-art.test.mjs` | 封面圖案名稱前端畫得出來、且夠多樣；封面不隨編輯或換模型而變；術語卡的 glyph／顏色／編號一致 |
 | `model-migration.test.mjs` | 換 embedding 模型期間卡冊仍可搜尋、取消不留痕跡、重建期間寫入的卡不會落在舊模型上 |

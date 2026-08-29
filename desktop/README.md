@@ -21,7 +21,7 @@ npm run desktop:dev
 獨立桌面模式預設使用內建的輕量本機向量與欄位整理 runtime，優先確保安裝後可以離線開啟、保存、搜尋、關聯、編輯與管理卡片。收藏頁的「模型設定」可以依硬體下載並啟用更完整的本機模型：
 
 - 摘要：內建規則整理、LaMini-Flan-T5 248M、FLAN-T5 Small，以及較適合中文但較大的 mT5 Small。
-- Embedding：內建 Hash 384、all-MiniLM-L6-v2，以及中文／英文較適合的 Multilingual MiniLM。
+- Embedding：安裝包內建 EmbeddingGemma（768 維），另有 Hash 384 離線 fallback、all-MiniLM-L6-v2、Multilingual MiniLM、BGE-Small-ZH、BGE-Large-ZH／EN 與 BGE-M3 可下載。
 
 模型使用 Transformers.js／ONNX runtime 在本機 CPU 執行，不會把卡片內容送到外部 API。模型檔案會放在 Electron `userData/models`，卡片向量會依目前啟用的 embedding 模型重建。
 

@@ -102,7 +102,7 @@ npm run desktop:dev
 npm run desktop:dist
 ```
 
-安裝包會輸出到 `release/`：Windows 產生 NSIS 安裝程式，macOS 產生目前 CPU 架構的 `.dmg` 與 `.zip`。`desktop:dist` 會先跑 `models:bundle` 把內建的 embedding 權重抓下來（約 130 MB，已存在就略過）。桌面版使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型，加入 Hugging Face 上的其他模型，或改用自訂 API。
+安裝包會輸出到 `release/`：Windows 產生 NSIS 安裝程式，macOS 產生目前 CPU 架構的 `.dmg` 與 `.zip`。`desktop:dist` 會先跑 `models:bundle` 把內建的 embedding 權重抓下來（約 320 MB，已存在就略過）。桌面版使用 Transformers.js／ONNX 在本機 CPU 執行模型，收藏頁的「模型設定」可下載與切換摘要模型、embedding 模型，加入 Hugging Face 上的其他模型，或改用自訂 API。
 
 ### 裝置配對與區網分享
 
@@ -155,24 +155,26 @@ Alpine 映像檔不適用：embedding 模型依賴的 `onnxruntime-node` 只提�
 
 收藏頁偶爾會浮出一張很久沒打開的卡（預設 90 天，一天最多一次），可以換一張或永久關掉那張。這不是間隔重複：沒有分數、沒有排程、沒有連續天數。手機寬度下第一個畫面是搜尋加上最近整理的卡，不是整面收藏牆。也可以貼上筆記，讓摘要模型產生標題、問題、摘要與標籤草稿，確認後再寫入資料庫。embedding 會在新增或編輯卡片後重新建立，並更新語意關聯；封面綁定卡片 id，編輯不會改變它。
 
-**桌面安裝包內建 Multilingual MiniLM（384 維）的權重**，所以裝好就有真正的語意搜尋與關聯，不需要先下載任何東西，也不需要連網。內建的 Hash 384 仍然保留作為最後的離線 fallback，但它不是語意模型——只能處理詞彙重疊。（`npm run build` 這類沒跑過 `npm run models:bundle` 的建置會退回 Hash 384，行為與以前相同。）
+**桌面安裝包內建 EmbeddingGemma（768 維、約 320 MB）的權重**，所以裝好就有真正的語意搜尋與關聯，不需要先下載任何東西，也不需要連網。這個模型是量出來的，不是挑出來的：`npm run benchmark:retrieval` 拿 58 張卡、126 個查詢比過四個候選，它在「想不起來叫什麼」與「用自己的話問」這兩種查詢上分別是 93.8% 與 92.9% 的前三筆命中率，其餘三個最高只有 85.7%。完整對照表在 CLAUDE.md §3.23。內建的 Hash 384 仍然保留作為最後的離線 fallback，但它不是語意模型——只能處理詞彙重疊。（`npm run build` 這類沒跑過 `npm run models:bundle` 的建置會退回 Hash 384，行為與以前相同。）
 
-模型設定頁預設是**簡易模式**：整理筆記只要選「不下載／小／中／大」，語意向量只要選「中文為主／英文為主／中英皆可」與 384／1024 維，應用程式會決定實際用哪個模型並顯示它是什麼。沒有完全對應的組合會直接說明——例如 384 維目前沒有純中文模型，會退到多語言模型並標示出來。
+模型設定頁預設是**簡易模式**：整理筆記只要選「不下載／小／中／大」，語意向量只要選「中文為主／英文為主／中英皆可」與「輕量／高精度」，應用程式會決定實際用哪個模型並顯示它的維度是多少。分級刻意不寫成維度數字：384 維那一檔沒有專為中文訓練的模型，寫成數字就只能靠偷偷回傳別種語言的模型來兌現。沒有完全對應的組合會直接說明並標示出來。
 
-切到**進階模式**才會看到完整清單、384 vs 1024 的詳細對照，以及自訂模型。模型清單不是固定的：可以填入任何 Hugging Face 模型 id 加入，加入前會檢查該 repo 是否有 ONNX 權重、並自動讀出向量維度。內建可選項包含 all-MiniLM-L6-v2（384 維、英文）、Multilingual MiniLM（384 維、中英）、**BGE-M3（1024 維、約 570 MB）**。
+切到**進階模式**才會看到完整清單、各維度的詳細對照，以及自訂模型。模型清單不是固定的：可以填入任何 Hugging Face 模型 id 加入，加入前會檢查該 repo 是否有 ONNX 權重、並自動讀出向量維度。內建可選項包含 all-MiniLM-L6-v2（384 維、英文）、Multilingual MiniLM（384 維、中英）、BGE-Small-ZH（512 維、約 23 MB）、BGE-Large-ZH／EN（1024 維）與 BGE-M3（1024 維、約 570 MB、長文）。
 
-### 384 維還是 1024 維？
+### 換一個模型划不划算？
 
-不是越大越好，是取捨，設定頁會把兩邊都列出來：
+**不是越大越好。** 同一批卡片、同一批查詢、同一台機器連續量完：
 
-| | 384 維 | 1024 維（BGE-M3） |
-| --- | --- | --- |
-| 下載 | 90–140 MB | 約 570 MB |
-| 每張卡片 | 1.5 KB | 4 KB |
-| 中文語意 | 尚可，長句與跨領域較弱 | 明顯較好，支援長文 |
-| CPU 負擔 | 最低，樹莓派可行 | 較高，建議 8 GB 以上記憶體 |
+| | BGE-Small-ZH<br>512 維 | Multilingual MiniLM<br>384 維 | **EmbeddingGemma<br>768 維（內建）** | BGE-M3<br>1024 維 |
+| --- | --- | --- | --- | --- |
+| 前三筆命中率 | 89.5% | 78.1% | **98.2%** | 93.0% |
+| 每次搜尋 | 8 ms | 10 ms | 194 ms | 39 ms |
+| 下載 | 23 MB | 129 MB | 316 MB | 560 MB |
+| 記憶體 | 164 MB | 545 MB | 1.2 GB | 559 MB |
 
-維度必須全庫一致；切換模型會在背景重建所有向量與關聯，不會刪除卡片文字。自訂 embedding API 的維度由第一次成功的回應決定，之後必須維持一致——維度不符會被拒絕，不會混進資料庫。API key 只保存在本機，設定讀取時只回傳是否已設定。
+最大的那個不是最準的那個：BGE-M3 比內建的大 244 MB，命中率卻低 5 個百分點。設定頁會把取捨兩邊都列出來，而記憶體不到 8 GB 的機器會被建議用 23 MB 的 BGE-Small-ZH，不是被推去下載更大的東西。
+
+維度必須全庫一致，所以換模型是有成本的：切換會在背景重建所有向量與關聯（58 張卡用內建模型約 43 秒），期間搜尋照常可用，卡片文字也不會被刪除。自訂 embedding API 的維度由第一次成功的回應決定，之後必須維持一致——維度不符會被拒絕，不會混進資料庫。API key 只保存在本機，設定讀取時只回傳是否已設定。
 
 ### 雲端與本機 API
 
@@ -260,7 +262,7 @@ npm run dev:api          # 本機 API，供開發用
 npm run build            # 建立前端 standalone build
 npm run build:site       # 建立公開首頁（輸出到 dist-site/）
 npm run dev:site         # 首頁開發伺服器
-npm run models:bundle    # 下載安裝包內建的 embedding 權重（約 130 MB）
+npm run models:bundle    # 下載安裝包內建的 embedding 權重（約 320 MB）
 npm test                 # 建置並執行全部測試
 npm run test:api         # 只跑 API 行為契約（較快）
 npm run lint             # ESLint
@@ -270,6 +272,7 @@ npm run desktop:mcp      # 啟動桌面 MCP Bridge
 npm run release:check    # 檢查根目錄與桌面版版本是否一致
 npm run serve            # 以 headless 模式啟動（常駐主機用）
 npm run verify:runtime   # 驗證 runtime capability 契約
+npm run benchmark:retrieval  # 量搜尋準不準（真模型，約兩分鐘，不在 npm test 裡）
 ```
 
 GitHub Actions 會在 push／Pull Request 執行 lint、build、測試與 runtime contract；推送符合
