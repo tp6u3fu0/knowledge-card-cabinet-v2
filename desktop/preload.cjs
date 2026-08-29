@@ -42,4 +42,20 @@ contextBridge.exposeInMainWorld("quickSearch", {
   shortcut() {
     return ipcRenderer.invoke("quick:shortcut");
   },
+  /**
+   * The cabinet saying it is mounted and can be handed a card.
+   *
+   * Without this the main process has to guess from the url, which says
+   * /collection long before React has mounted anything — and a guess that is
+   * wrong falls back to reloading the window, which is the thing being avoided.
+   */
+  collectionReady() {
+    return ipcRenderer.invoke("collection:ready");
+  },
+  /** A card handed over by the overlay, for the cabinet already on screen. */
+  onOpenCard(callback) {
+    const listener = (_event, id) => callback(String(id));
+    ipcRenderer.on("collection:open-card", listener);
+    return () => ipcRenderer.removeListener("collection:open-card", listener);
+  },
 });

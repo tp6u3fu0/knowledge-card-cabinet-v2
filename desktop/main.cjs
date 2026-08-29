@@ -363,10 +363,31 @@ function createWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.loadFile(path.join(__dirname, "splash.html"));
+  mainWindow.webContents.on("did-start-navigation", (event) => {
+    // Only a top-level navigation replaces the renderer; an in-page URL change
+    // (history.replaceState after ?card= is consumed) leaves it mounted.
+    if (event.isSameDocument) return;
+    collectionReady = false;
+  });
   mainWindow.on("closed", () => {
+    collectionReady = false;
     mainWindow = undefined;
   });
 }
+
+/**
+ * Whether the collection renderer is mounted and listening.
+ *
+ * Not inferred from the url: `mainWindow.webContents.getURL()` says
+ * /collection from the moment navigation commits, which is well before React
+ * has mounted anything that could receive an event. The renderer says so
+ * itself, once, when it is ready, and the flag is dropped the moment it starts
+ * navigating away.
+ */
+let collectionReady = false;
+ipcMain.handle("collection:ready", (event) => {
+  collectionReady = mainWindow ? event.sender.id === mainWindow.webContents.id : false;
+});
 
 ipcMain.handle("quick:close", () => quickWindow?.hide());
 ipcMain.handle("quick:shortcut", () => quickAccelerator);
@@ -376,12 +397,27 @@ ipcMain.handle("quick:shortcut", () => quickAccelerator);
  * The overlay deliberately cannot open a card by itself: one window that reads
  * and one that edits is the split, and duplicating the viewer here would mean
  * two of everything for the sake of a case the reader can already reach.
+ *
+ * It also must not *reload* the cabinet to get there. This used to be a
+ * loadURL to /collection?card=…, which rebuilds the renderer from scratch —
+ * so looking something up while halfway through writing a card threw the
+ * half-written card away. A retrieval feature that destroys capture is worse
+ * than no retrieval feature. When the renderer is up, it is told; only a
+ * cabinet that is not running yet gets navigated.
  */
 ipcMain.handle("quick:open-card", async (_event, id) => {
   quickWindow?.hide();
   if (!webBaseUrl) return;
-  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
-  await mainWindow.loadURL(`${webBaseUrl}/collection?card=${encodeURIComponent(id)}`);
+  const cardId = String(id);
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    collectionReady = false;
+    createWindow();
+  }
+  if (collectionReady) {
+    mainWindow.webContents.send("collection:open-card", cardId);
+  } else {
+    await mainWindow.loadURL(`${webBaseUrl}/collection?card=${encodeURIComponent(cardId)}`);
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();

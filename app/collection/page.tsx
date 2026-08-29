@@ -955,9 +955,30 @@ export default function CollectionPage() {
   }, [cardsRefreshKey, loadResurfaced]);
 
   useEffect(() => {
-    const bridge = (globalThis as unknown as { quickSearch?: { shortcut: () => Promise<string | null> } }).quickSearch;
+    const bridge = (globalThis as unknown as {
+      quickSearch?: {
+        shortcut: () => Promise<string | null>;
+        collectionReady?: () => Promise<void>;
+        onOpenCard?: (callback: (id: string) => void) => () => void;
+      };
+    }).quickSearch;
     if (!bridge) return;
     void bridge.shortcut().then(setQuickShortcut).catch(() => setQuickShortcut(null));
+
+    /*
+     * A card handed over by the overlay opens here, in the cabinet that is
+     * already running.
+     *
+     * The overlay used to get there by navigating this window to
+     * /collection?card=…, which rebuilds everything — so looking a concept up
+     * halfway through writing a card silently threw the half-written card
+     * away. Retrieval must not cost capture. Saying "ready" is what lets the
+     * main process send an event instead of a navigation; without the signal
+     * it cannot tell a mounted renderer from a url that merely says so.
+     */
+    const stop = bridge.onOpenCard?.((id) => setViewerCardId(id));
+    void bridge.collectionReady?.().catch(() => {});
+    return stop;
   }, []);
 
   useEffect(() => {

@@ -1263,3 +1263,35 @@ test("a phone opens on a search, not on a wall of everything", async () => {
   assert.match(narrow, /\.database-search \{[^}]*grid-column: 1 \/ -1/u, "search does not lead on a phone");
   assert.match(narrow, /font-size: 16px/u, "iOS will zoom the page when the search field is focused");
 });
+
+test("looking something up does not throw away what was being written", async () => {
+  // The overlay used to reach a card by navigating the main window to
+  // /collection?card=…, which rebuilds the renderer — so a half-written card
+  // in the create form vanished because someone looked a concept up. A
+  // retrieval feature that destroys capture is worse than no retrieval feature.
+  const main = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  const handler = region(main, `ipcMain.handle("quick:open-card"`, "\n});", "the open-card handler");
+  assert.match(handler, /collection:open-card/u, "the overlay still cannot hand a card over without a navigation");
+  assert.match(handler, /if \(collectionReady\)/u, "nothing distinguishes a mounted cabinet from one that is not running");
+  // loadURL survives, but only as the branch for a cabinet that is not up yet.
+  assert.match(handler, /\} else \{\s*await mainWindow\.loadURL/u, "the cold-start fallback was removed with the bug");
+
+  // Readiness is claimed by the renderer, not guessed from the url — which
+  // reads /collection from the moment navigation commits, long before React
+  // has mounted a listener.
+  assert.match(main, /ipcMain\.handle\("collection:ready"/u, "the renderer has no way to say it is listening");
+  assert.match(main, /did-start-navigation[\s\S]{0,320}collectionReady = false/u, "the ready flag survives a navigation away");
+
+  const preload = await readFile(new URL("../desktop/preload.cjs", import.meta.url), "utf8");
+  assert.match(preload, /onOpenCard\(callback\)/u, "the bridge cannot deliver a card to the page");
+  assert.match(preload, /collectionReady\(\)/u, "the bridge cannot report readiness");
+
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /bridge\.onOpenCard\?\.\(\(id\) => setViewerCardId\(id\)\)/u, "the cabinet does not listen for a handed-over card");
+  assert.match(page, /bridge\.collectionReady\?\.\(\)/u, "the cabinet never says it is ready");
+
+  // And the overlay still must not grow a viewer of its own (spec §8): two
+  // viewers is two sets of behaviour to keep in step.
+  const quick = await readFile(new URL("../app/quick/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(quick, /card-viewer|CollectionCardViewer|FlipCard/u, "the overlay grew a second card viewer");
+});

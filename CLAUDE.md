@@ -343,7 +343,9 @@ Query
 另外兩個容易踩的：
 
 - 焦點永遠留在輸入框，結果列是「用游標選」不是「用 Tab 走」（所以 row 是 `tabIndex={-1}`）。這樣才能邊打字邊選。
-- 疊層不自己開卡片。`Cmd/Ctrl + Enter` 走 `quick:open-card`，把 id 交給主視窗的 `?card=`。在這裡複製一份 viewer 等於兩份都要維護，而讀者本來就到得了那個畫面。
+- 疊層不自己開卡片。`Cmd/Ctrl + Enter` 走 `quick:open-card`，把 id 交給主視窗。在這裡複製一份 viewer 等於兩份都要維護，而讀者本來就到得了那個畫面。
+- **但交出去的方式不可以是重新載入主視窗。** 原本是 `mainWindow.loadURL(.../collection?card=…)`，那會重建整個 renderer——於是「查一個概念」會把正在寫、還沒存的卡片丟掉。**檢索功能弄壞 capture，比沒有檢索功能還糟。** 現在 renderer 掛好時自己 invoke `collection:ready`，主行程據此送 `collection:open-card` 事件；`loadURL` 只留給「卡冊還沒起來」那條路。
+- **ready 不能用網址判斷。** `webContents.getURL()` 在導航一 commit 就回 `/collection`，那時 React 什麼都還沒掛上。旗標由 renderer 自己說，並在 `did-start-navigation`（非 same-document）與視窗關閉時清掉。
 
 ### 3.17 卡片的 id 與編號由 runtime 決定，而且只決定一次
 
@@ -427,7 +429,7 @@ Query
 | 你改了 | 就必須同時改 | 不改的後果 |
 | --- | --- | --- |
 | 新增一個 accent 色帶（`.search-hit--<色>` 之類） | 八組 `--domain-*` 選擇器每一組都要加；`--domain-*` 只設在列出來的選擇器上 | 色帶整條變透明，等於沒有分類顏色 |
-| 快速搜尋疊層的視窗生命週期或快捷鍵 | 見 §3.16：藏不是關、搶不到要說、不開第二條 API | `tests/rendered-html.test.mjs` 會失敗（刻意的）——招牌功能靜靜地不動作 |
+| 快速搜尋疊層的視窗生命週期或快捷鍵 | 見 §3.16：藏不是關、搶不到要說、不開第二條 API、交卡片用 IPC 不用 `loadURL` | `tests/rendered-html.test.mjs` 會失敗（刻意的）——招牌功能靜靜地不動作 |
 | `preload.cjs` 新增 bridge | 對應的 `ipcMain.handle` 要有，而且想清楚每個視窗都拿得到它 | 前端呼叫一個不存在的 handler，錯誤只會出現在 console |
 | 有查詢時的收藏頁畫面 | 走 `SearchResults`，不要退回分類牆；一句話摘要必須在列上（P-03） | 讀者又得點開卡片才知道自己以前寫了什麼 |
 | `/search` 的候選集或過濾條件 | 想清楚它擋掉的是哪一條管線；字面那條**永遠**要看到全部的卡（§3.14） | `tests/retrieval.test.mjs` 會失敗（刻意的）——模型一壞，整個搜尋跟著壞 |
