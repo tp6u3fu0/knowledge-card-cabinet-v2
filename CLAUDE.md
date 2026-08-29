@@ -384,7 +384,9 @@ Query
 
 - **只在有人按下那張卡上的按鈕時發生。** 沒有排程、沒有開啟時檢查、沒有批次。使用者自己貼上的那一個網址，一次一張卡。
 - **`KCC_SOURCE_CHECK=off` 整個關掉**，跟更新檢查一樣。
-- **不帶任何識別資訊**：`credentials: "omit"`、固定的 User-Agent、8 秒逾時、2MB 上限。
+- **不帶任何識別資訊**：`credentials: "omit"`、固定的 User-Agent、8 秒逾時。
+- **2MB 上限是「最多下載」，不是「最多雜湊」。** 讀的是 `response.body` 的 reader，滿了就 `cancel()`。原本寫成 `await response.arrayBuffer()` 再 `subarray(0, 2MB)`——那只限制了雜湊多少，來源回 500MB 就有 500MB 進到這個行程裡，然後用掉兩個。**不要為了「簡單一點」改回去**，`tests/source.test.mjs` 的 `source stream stops at configured cap` 用一台想送 20MB 的伺服器擋著（改回舊寫法：它會送完整整 20,971,520 bytes）。
+- **不看 `Content-Length`。** chunked 沒有、壓縮過的是錯的，而一條只有乖伺服器會走到的分支會爛掉。真正的限制在 reader 裡。
 - **裝置權杖一律 403。** `/sources` 在 `deviceMayReach()` 裡是第一條就擋掉的——一支被撿走的手機不可以叫主機去連只有主機連得到的位址。所以這兩條路由**不放在 `/cards` 底下**：`cards` 對裝置是全開的，掛在那裡就等於開了。
 - **連不到就是「不知道」，不是「變了」。** 回 `unreachable`，不寫 `source_stale_at`。跟更新檢查同一條紀律。
 

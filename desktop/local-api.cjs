@@ -838,8 +838,40 @@ async function fetchSourceDigest(url, fetchImpl = fetch) {
     signal: AbortSignal.timeout(SOURCE_CHECK_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`來源回應 ${response.status}`);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  return crypto.createHash("sha256").update(buffer.subarray(0, SOURCE_CHECK_MAX_BYTES)).digest("hex");
+  const digest = crypto.createHash("sha256");
+  // A fetch stand-in may hand back a response with no stream. Those are small
+  // by construction — they exist in tests — so the whole body is safe there.
+  if (!response.body) {
+    digest.update(Buffer.from(await response.arrayBuffer()).subarray(0, SOURCE_CHECK_MAX_BYTES));
+    return digest.digest("hex");
+  }
+
+  // Read as it arrives and stop at the cap.
+  //
+  // This used to be `await response.arrayBuffer()` followed by a subarray,
+  // which capped what was *hashed* and nothing at all about what was
+  // downloaded: a source answering with 500 MB put 500 MB through this process
+  // before two of them were used. The limit has to live in the reader.
+  //
+  // Content-Length is deliberately not consulted. It is absent on chunked
+  // responses, wrong on compressed ones, and a second code path that is only
+  // exercised by well-behaved servers is a second code path that rots.
+  const reader = response.body.getReader();
+  let read = 0;
+  try {
+    while (read < SOURCE_CHECK_MAX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const take = Math.min(value.byteLength, SOURCE_CHECK_MAX_BYTES - read);
+      digest.update(take === value.byteLength ? value : value.subarray(0, take));
+      read += take;
+    }
+  } finally {
+    // Cancel rather than drain: the point is that the transfer stops, not that
+    // the rest of it is thrown away after arriving.
+    await reader.cancel().catch(() => {});
+  }
+  return digest.digest("hex");
 }
 
 function normalizeCard(input, previous = {}, canonicalTags = null) {
@@ -2809,4 +2841,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };

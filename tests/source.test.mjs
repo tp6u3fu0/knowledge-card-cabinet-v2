@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 const require = createRequire(import.meta.url);
-const { startLocalApi, normalizeSourceMetadata, SOURCE_TYPES } = require("../desktop/local-api.cjs");
+const { startLocalApi, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES } = require("../desktop/local-api.cjs");
 const { openStore, STORE_VERSION } = require("../desktop/store.cjs");
 
 let runtime;
@@ -244,6 +244,93 @@ describe("going to look at whether a source moved on", () => {
     const created = await ok("POST", "/cards", { title: "沒有來源連結的卡" });
     const refused = await call("POST", "/sources/check", { card_id: created.card.id });
     assert.equal(refused.status, 422);
+  });
+
+  it("source stream stops at configured cap", async () => {
+    // The cap has to be on what is downloaded, not on what is hashed. Proving
+    // that from inside the client is awkward — heap measurements are noise —
+    // so the proof is taken from the other end of the socket: a server that
+    // wants to send 20 MB and is told to stop cannot have sent 20 MB.
+    const { createHash } = await import("node:crypto");
+    const { createServer } = await import("node:http");
+
+    const CHUNK = 256 * 1024;
+    const TOTAL = 20 * 1024 * 1024;
+    const filler = Buffer.alloc(CHUNK, 0x61);
+    let written = 0;
+    let stoppedEarly = false;
+    let handlerDone;
+    const finished = new Promise((resolve) => { handlerDone = resolve; });
+
+    const big = createServer(async (request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      for (let sent = 0; sent < TOTAL; sent += CHUNK) {
+        if (response.writableEnded || response.destroyed || request.destroyed) {
+          stoppedEarly = true;
+          handlerDone();
+          return;
+        }
+        // Honour backpressure, or the whole 20 MB lands in the socket buffer
+        // and the test proves nothing about what the client asked for.
+        if (!response.write(filler)) {
+          const drained = await new Promise((resolve) => {
+            const onDrain = () => { response.off("close", onClose); resolve(true); };
+            const onClose = () => { response.off("drain", onDrain); resolve(false); };
+            response.once("drain", onDrain);
+            response.once("close", onClose);
+          });
+          if (!drained) {
+            stoppedEarly = true;
+            handlerDone();
+            return;
+          }
+        }
+        written += CHUNK;
+      }
+      response.end();
+      handlerDone();
+    });
+    await new Promise((resolve) => big.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const url = `http://127.0.0.1:${big.address().port}/huge`;
+      const digest = await fetchSourceDigest(url);
+
+      // Correct: the hash is the hash of the first cap-many bytes.
+      const expected = createHash("sha256").update(Buffer.alloc(SOURCE_CHECK_MAX_BYTES, 0x61)).digest("hex");
+      assert.equal(digest, expected, "the digest is not the hash of the first MAX_BYTES");
+
+      // The reader cancelling and the server noticing are two ends of a socket,
+      // so wait for the sending side to settle before reading its counters.
+      await finished;
+
+      // Bounded: the transfer was stopped. Some slack for the socket buffers
+      // that were already in flight when the reader cancelled — the claim
+      // being tested is "not the whole document", not an exact byte count.
+      assert.ok(written < TOTAL / 2, `the server sent ${written} of ${TOTAL} bytes before being stopped`);
+      assert.equal(stoppedEarly, true, "the server ran to completion; nothing cancelled the stream");
+    } finally {
+      big.close();
+    }
+  });
+
+  it("still gives up on a source that never answers", async () => {
+    // The cap must not have quietly replaced the timeout: a server that holds
+    // the connection open and sends nothing is the other way this can hang.
+    const { createServer } = await import("node:http");
+    const silent = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      // Deliberately never written to and never ended.
+    });
+    await new Promise((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    try {
+      const started = Date.now();
+      await assert.rejects(() => fetchSourceDigest(`http://127.0.0.1:${silent.address().port}/hang`));
+      assert.ok(Date.now() - started < 20000, "the timeout did not fire");
+    } finally {
+      silent.close();
+      silent.closeAllConnections?.();
+    }
   });
 
   it("can be switched off entirely, like the update check", async () => {

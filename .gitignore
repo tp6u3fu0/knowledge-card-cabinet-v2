@@ -36,5 +36,7 @@ yarn-debug.log*
 release-dir/
 
 # 產品規格書：外部交付的文件，不是這個 repo 的產物。
-# 內容已經吸收進 CLAUDE.md 第 1–2 節。
-/retrieve-first-spec.rtf
+# 內容吸收進 CLAUDE.md（定位與路線在第 1–2 節，工程約束在第 3 節）。
+# 用樣式而不是列檔名——第二份規格進來的時候，寫死的檔名擋不住它。
+/retrieve-*.rtf
+/retrieve-*.md
