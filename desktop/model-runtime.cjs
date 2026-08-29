@@ -290,7 +290,7 @@ const MODEL_CATALOG = [
     kind: "embedding",
     language: "multi",
     label: "BGE-M3",
-    short_label: "中英最佳",
+    short_label: "中英長文",
     provider: "transformers.js",
     model_id: "Xenova/bge-m3",
     task: "feature-extraction",
@@ -303,7 +303,11 @@ const MODEL_CATALOG = [
     min_memory_gb: 8,
     tier: "平衡硬體",
     languages: "中文、英文與多語言長文",
-    description: "1024 維、支援長文的多語言模型，中文語意關聯品質明顯優於 384 維。下載較大。",
+    // "中英最佳" is what this used to say, and the retrieval benchmark says
+    // otherwise: against the bundled EmbeddingGemma it loses Recall@3 93.0 to
+    // 98.2 while costing 244 MB more (CLAUDE.md §3.23). Its own strength is
+    // long inputs, so that is what it is now offered for.
+    description: "1024 維、支援長文的多語言模型，適合來源是長篇文件的收藏。下載較大；在本專案的檢索 benchmark 上整體命中率略低於內建模型。",
     builtin: false,
   },
 ];
@@ -590,8 +594,36 @@ async function lookupHuggingFace(modelId, { timeoutMs = 8000 } = {}) {
   };
 }
 
-function hardwareProfile() {
-  const memoryGb = os.totalmem() / 1024 ** 3;
+/**
+ * The only embedding models a hardware tier is allowed to point at.
+ *
+ * Not a quality ranking — a rule about where a recommendation may come from.
+ * Every id here has a measured row in CLAUDE.md §3.23; the built-in hash is
+ * allowed as the no-download floor. Recommending anything else means the app
+ * is telling someone to spend a few hundred megabytes on a model nobody
+ * scored, which is the thing this project stopped doing. Add an id here only
+ * after it has a row in that table — tests/model-catalogue.test.mjs holds it.
+ */
+const RECOMMENDABLE_EMBEDDINGS = [
+  BUILTIN_EMBEDDING_MODEL,
+  "embedding-bge-small-zh-512",
+  BUNDLED_EMBEDDING_MODEL,
+];
+
+/**
+ * What to suggest for the machine this is running on.
+ *
+ * The embedding half of this used to send a 16 GB machine to BGE-M3 and an
+ * 8 GB machine to Multilingual MiniLM. Both are now measured (§3.23) and both
+ * lose to the model already sitting in the installer — MiniLM by twenty points
+ * of Recall@3, BGE-M3 while also being 244 MB larger. So the recommendation was
+ * asking people to download something worse than what they already had. More
+ * memory now means "you can run the good one", not "here is a bigger file".
+ */
+// Memory is a parameter so every tier can be asked about, not just the one
+// this machine happens to be in. A recommendation that is only reachable on
+// somebody else's hardware is exactly the kind that goes wrong unnoticed.
+function hardwareProfile(memoryGb = os.totalmem() / 1024 ** 3) {
   const roundedMemoryGb = Number(memoryGb.toFixed(1));
   if (memoryGb >= 16) {
     return {
@@ -600,8 +632,8 @@ function hardwareProfile() {
       memory_gb: roundedMemoryGb,
       cpu_cores: os.cpus().length,
       recommended_summary: "summary-mt5-small",
-      recommended_embedding: "embedding-bge-m3-1024",
-      note: "可以嘗試較完整的摘要模型與 1024 維的 BGE-M3。首次下載與重建索引會需要較久時間。",
+      recommended_embedding: BUNDLED_EMBEDDING_MODEL,
+      note: "可以嘗試較完整的摘要模型。搜尋維持內建的 768 維模型——在本專案的檢索 benchmark 上它比更大的 1024 維模型更準。",
     };
   }
   if (memoryGb >= 8) {
@@ -611,8 +643,24 @@ function hardwareProfile() {
       memory_gb: roundedMemoryGb,
       cpu_cores: os.cpus().length,
       recommended_summary: "summary-lamini-248m",
-      recommended_embedding: "embedding-multilingual-384",
-      note: "建議使用輕量摘要模型與多語言 embedding，兼顧中文關聯與本機負載。",
+      recommended_embedding: BUNDLED_EMBEDDING_MODEL,
+      note: "建議使用輕量摘要模型，搜尋維持內建的 768 維模型，兼顧中文關聯與本機負載。",
+    };
+  }
+  // Below 8 GB the bundled model is genuinely too heavy (about 1.2 GB resident
+  // in this runtime), so this is the one tier that points somewhere else — at
+  // the cheapest thing in the table that is still a language model: 23 MB on
+  // disk, 164 MB resident, Recall@3 89.5%. The built-in hash is word overlap,
+  // not semantics, so it is the floor rather than a recommendation.
+  if (memoryGb >= 4) {
+    return {
+      tier: "light",
+      label: "輕量硬體",
+      memory_gb: roundedMemoryGb,
+      cpu_cores: os.cpus().length,
+      recommended_summary: BUILTIN_SUMMARY_MODEL,
+      recommended_embedding: "embedding-bge-small-zh-512",
+      note: "建議摘要用內建模式；搜尋用 23 MB 的中文輕量模型，比內建的字詞比對準得多，記憶體佔用也小。",
     };
   }
   return {
@@ -1515,6 +1563,8 @@ module.exports = {
   API_PROVIDERS,
   EMBEDDING_LANGUAGES,
   EMBEDDING_TIERS,
+  RECOMMENDABLE_EMBEDDINGS,
+  hardwareProfile,
   SUMMARY_TIERS,
   embeddingChoices,
   BUILTIN_EMBEDDING_MODEL,

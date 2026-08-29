@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { API_PROVIDERS, BUNDLED_EMBEDDING_MODEL, BUNDLED_MODEL_REPOSITORY, DIMENSION_GUIDE, MODEL_CATALOG, lookupHuggingFace } = require("../desktop/model-runtime.cjs");
+const { API_PROVIDERS, BUNDLED_EMBEDDING_MODEL, BUNDLED_MODEL_REPOSITORY, DIMENSION_GUIDE, MODEL_CATALOG, RECOMMENDABLE_EMBEDDINGS, hardwareProfile, lookupHuggingFace } = require("../desktop/model-runtime.cjs");
 
 const { startLocalApi } = await import("../desktop/local-api.cjs");
 const projectRoot = new URL("../", import.meta.url);
@@ -426,4 +426,38 @@ test("every language and size combination resolves to a purpose-trained model", 
     const precise = choices.filter((choice) => choice.tier === "precise").map((choice) => choice.dimensions);
     assert.ok(Math.max(...light) < Math.min(...precise), "a light model is as wide as a precise one");
   });
+});
+
+test("no hardware tier recommends an embedding model nobody measured", () => {
+  // The app used to tell a 16 GB machine to download BGE-M3 and an 8 GB machine
+  // to download Multilingual MiniLM. Both were then measured against the model
+  // already in the installer and both lost — MiniLM by twenty points of
+  // Recall@3 (CLAUDE.md §3.23). Nothing failed; the suggestion was simply
+  // wrong, in the direction of "bigger", for as long as nobody checked.
+  //
+  // So the rule is about provenance rather than about which model wins today:
+  // a tier may only point at something with a measured row. Every memory size
+  // is asked, not just this machine's.
+  for (const memoryGb of [2, 4, 6, 8, 12, 16, 32, 64]) {
+    const profile = hardwareProfile(memoryGb);
+    assert.ok(
+      RECOMMENDABLE_EMBEDDINGS.includes(profile.recommended_embedding),
+      `${memoryGb} GB is told to use ${profile.recommended_embedding}, which has no row in the retrieval benchmark table`,
+    );
+    assert.ok(
+      MODEL_CATALOG.some((model) => model.id === profile.recommended_embedding && model.kind === "embedding"),
+      `${memoryGb} GB is told to use ${profile.recommended_embedding}, which is not in the catalogue at all`,
+    );
+  }
+
+  // A tier must never suggest a model its own memory figure rules out, which
+  // is how "recommended" and "will not run here" ended up on the same card.
+  for (const memoryGb of [2, 4, 6, 8, 12, 16, 32, 64]) {
+    const profile = hardwareProfile(memoryGb);
+    const model = MODEL_CATALOG.find((candidate) => candidate.id === profile.recommended_embedding);
+    assert.ok(
+      (model.min_memory_gb ?? 0) <= memoryGb,
+      `${memoryGb} GB is told to use ${model.id}, which asks for ${model.min_memory_gb} GB`,
+    );
+  }
 });

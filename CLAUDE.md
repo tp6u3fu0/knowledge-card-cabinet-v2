@@ -464,9 +464,52 @@ Query
 Recall@1          92.1%     66.7%
 Recall@3          98.2%     67.5%
 MRR               0.951     0.670
-no-result acc.     0.0%    100.0%
-warm p50            77ms       4ms
+no-result acc.    58.3%    100.0%
+warm p50           194ms       4ms
 ```
+
+（這兩欄同一次量。**延遲要成對量**：同一個模型在同一台機器上量到過 77ms 也量到過 194ms，機器忙不忙的差別比模型之間的差別還大，所以跨天的數字不能拿來比。）
+
+
+### 3.23 內建哪個模型是量出來的，不是挑出來的
+
+內建的 embedding 模型決定搜尋品質的一半，所以它必須用跟其他搜尋決定同一套數字來回答。**不准用這些理由選它**：比較新、比較大、參數比較多、leaderboard 比較高、比較多人用。只有 §3.22 那個 benchmark 算數。
+
+`npm run benchmark:retrieval -- --model <catalog-id> --models-dir <快取目錄>` 可以量目錄裡的任何一個模型。`--models-dir` 是給人用的：不指定的話權重會下載進當次的暫存目錄，下一次再下載一遍。
+
+四個模型，58 張卡、126 個查詢、同一台機器、同一段時間內連續量完（延遲不成對量就沒有意義，見上一節）：
+
+| | Multilingual MiniLM 384d<br>（前一代內建） | BGE-Small-ZH 512d | **EmbeddingGemma 768d**<br>**（現在內建）** | BGE-M3 1024d |
+| --- | --- | --- | --- | --- |
+| Recall@1 | 71.1% | 79.8% | **92.1%** | 91.2% |
+| Recall@3 | 78.1% | 89.5% | **98.2%** | 93.0% |
+| Recall@5 | 81.6% | 91.2% | **99.1%** | 93.9% |
+| MRR | 0.753 | 0.845 | **0.951** | 0.923 |
+| no-result accuracy | 33.3% | 16.7% | **58.3%** | 16.7% |
+| warm p50 | 10ms | **8ms** | 194ms | 39ms |
+| warm p95 | 16ms | **10ms** | 284ms | 59ms |
+| 建 58 張卡的向量 | 3.3s | **1.8s** | 43.0s | 16.1s |
+| 權重大小 | 129 MB | **23 MB** | 316 MB | 560 MB |
+| 常駐記憶體 | 545 MB | **164 MB** | 1222 MB | 559 MB |
+
+**結論：維持 EmbeddingGemma。** 理由不是它比較新，是這兩行：
+
+| Recall@3 | MiniLM | BGE-Small-ZH | EmbeddingGemma | BGE-M3 |
+| --- | --- | --- | --- | --- |
+| forgotten-name（想不起來叫什麼） | 50.0% | 81.3% | **93.8%** | 81.3% |
+| natural-recall（用自己的話問） | 35.7% | 85.7% | **92.9%** | 71.4% |
+
+這兩種意圖就是這個產品存在的理由。查得出精確標題的模型有的是——四個模型的 exact 意圖都是 Recall@3 100%。分得出高下的地方在使用者只剩模糊印象的時候。
+
+幾個量出來才知道的事：
+
+- **BGE-M3 比 EmbeddingGemma 大 244 MB、慢 5 倍**（以 warm p50 算），而且**每一項品質指標都輸**。它是前一份文件裡「中英最佳」的那個，那個標籤是從外面抄來的。
+- **BGE-Small-ZH 是真的便宜**：23 MB、8ms、164 MB 記憶體，Recall@3 89.5%。但少掉的 8.7 個百分點裡有一半以上是 forgotten-name 和 natural-recall。
+- **no-result accuracy 不能直接橫著比**，因為 `SEMANTIC_STANDOUT = 0.6` 是對著 EmbeddingGemma 量的（§3.3，門檻跟著模型走）。所以另外量了把門檻壓到 0.30（等於關掉過濾）時的 Recall@3 上限：BGE-Small-ZH 86.8%、BGE-M3 94.7%。**兩個都還是低於 EmbeddingGemma 有開過濾時的 98.2%**，所以再怎麼調門檻也追不上——這個結論不靠門檻設定成立。
+- **1222 MB 常駐是量到的，不是需求。** 那是 ONNX runtime 的 arena，配了不還而不是一直用著。它仍然是四個裡最貴的，記在這裡是因為 8 GB 機器上這件事會被感覺到。
+- **194ms 的 warm p50 剛好在 §1 的 ≤300ms 預算裡，p95 284ms 也是。** 這是唯一一個「維持現狀」有代價的地方，而且沒有多少餘裕。哪天卡冊大到讓它掉出預算，第一個該重量的就是這張表。
+
+要換掉內建模型，先把新的量進這張表，前後數字寫進 commit 訊息。`scripts/fetch-bundled-model.mjs` 的 `MODEL_ID` 與 `model-runtime.cjs` 的 `BUNDLED_EMBEDDING_MODEL` 是同一個決定的兩半，兩邊都要改。
 
 ---
 
@@ -480,6 +523,7 @@ warm p50            77ms       4ms
 | 有查詢時的收藏頁畫面 | 走 `SearchResults`，不要退回分類牆；一句話摘要必須在列上（P-03） | 讀者又得點開卡片才知道自己以前寫了什麼 |
 | `/search` 的候選集或過濾條件 | 想清楚它擋掉的是哪一條管線；字面那條**永遠**要看到全部的卡（§3.14） | `tests/retrieval.test.mjs` 會失敗（刻意的）——模型一壞，整個搜尋跟著壞 |
 | `LEXICAL_MIN_COVERAGE` / `LEXICAL_FIELDS` / `LEXICAL_WEIGHT` | 先跑 `tests/retrieval.test.mjs`，特別是「搜不到的東西要回 0 筆」那題；再跑 `npm run benchmark:retrieval -- --gate`（§3.22） | 放寬字面門檻＝「每個查詢都回整個卡冊」換一種形式回來 |
+| 內建 embedding 模型（`BUNDLED_EMBEDDING_MODEL` 與 `fetch-bundled-model.mjs` 的 `MODEL_ID`） | 用 `--model` 把新舊模型都量進 §3.23 那張表；兩個檔案是同一個決定的兩半 | 內建模型又變成憑名氣選的；或安裝包裡的權重跟 runtime 要找的不是同一個，打包版開起來沒有語意搜尋 |
 | `SEMANTIC_STANDOUT` / `EXACT_TITLE_BONUS` / `embeddingText()` / 內建 embedding 模型 | `npm run benchmark:retrieval` 前後各一次，數字寫進 commit 訊息（§3.22） | 搜尋品質變成主觀感覺，沒有人知道哪次改動讓它變差 |
 | `tests/fixtures/retrieval-benchmark/` 的 ground truth | 只增不改；要改既有的 `expected` 必須有人工理由，不可以為了讓分數回升而改（§3.22） | benchmark 開始測量自己，不再測量搜尋 |
 | `/search` 回應欄位 | `app/collection/types.ts` 的 `ApiCard`；只增不改（手機端已發布，§8） | 舊版 App 讀不到新欄位，或型別對不上 |

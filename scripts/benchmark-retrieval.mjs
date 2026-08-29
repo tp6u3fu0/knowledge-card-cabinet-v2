@@ -17,6 +17,7 @@
  *   npm run benchmark:retrieval -- --failures   # print every miss
  *   npm run benchmark:retrieval -- --gate       # fail on a regression
  *   npm run benchmark:retrieval -- --update-baseline
+ *   npm run benchmark:retrieval -- --model embedding-bge-m3-1024 --models-dir ~/kcc-weights
  *
  * A run against a cabinet of 58 cards costs one embedding pass over all of
  * them plus one per query, so it takes minutes rather than seconds. That is the
@@ -54,9 +55,32 @@ const RECALL_AT_3_TOLERANCE = 0.02;
 /** No-result accuracy is allowed less slack: it only moves when something real changed. */
 const NO_RESULT_TOLERANCE = 0.05;
 
+const flag = (name, fallback = "") => {
+  const at = argv.indexOf(name);
+  return at >= 0 ? (argv[at + 1] || fallback) : fallback;
+};
+
 const jsonAt = argv.includes("--json")
-  ? (argv[argv.indexOf("--json") + 1] || join(here, "..", "artifacts", "retrieval-benchmark.json"))
+  ? (flag("--json") || join(here, "..", "artifacts", "retrieval-benchmark.json"))
   : "";
+
+/**
+ * Score a catalogue model other than the bundled one.
+ *
+ * Which model ships is a search-quality decision, so it has to be answerable
+ * with the same numbers as every other search-quality decision (CLAUDE.md
+ * §3.22, spec §24: not "newer", not "bigger", not "higher on a leaderboard").
+ * Without this flag the only way to compare two models was to edit the bundle
+ * script and rebuild, which is why the current one was never compared to
+ * anything.
+ */
+const modelChoice = flag("--model");
+/**
+ * Keep the weights out of the run's temp directory so a second run does not
+ * re-download half a gigabyte. Anything downloaded here is the caller's to
+ * delete — the benchmark never removes a directory it was handed.
+ */
+const modelsDirOverride = flag("--models-dir");
 
 /** A "model" that refuses everything, which is what a broken one looks like. */
 async function refusingEmbeddingService() {
@@ -77,6 +101,10 @@ function percentile(sorted, fraction) {
   return sorted[index];
 }
 
+function megabytes(bytes) {
+  return `${(Math.max(0, bytes) / 1024 / 1024).toFixed(0)} MB`;
+}
+
 function pad(text, width) {
   const cells = [...String(text)];
   // Chinese renders double-width in a terminal, so count columns not characters
@@ -93,12 +121,18 @@ async function main() {
   process.env.KCC_UPDATE_CHECK = "off";
   const service = lexicalOnly ? await refusingEmbeddingService() : null;
 
+  const modelsDir = modelsDirOverride || join(root, "models");
   const runtime = await startLocalApi({
     dataFile: join(root, "data", "cards.json"),
-    modelsDir: join(root, "models"),
+    modelsDir,
     seedPath: "",
     migrateFromUrl: "",
   });
+  // Before anything embeds. transformers.js runs the weights inside this
+  // process, so the growth from here to the end of the run is what the model
+  // costs a user's machine — the one figure the catalogue cannot state,
+  // because it depends on the runtime rather than on the download.
+  const idleRss = process.memoryUsage().rss;
   const headers = { Authorization: `Bearer ${runtime.authToken}`, "Content-Type": "application/json" };
   const call = async (method, path, body) => {
     const response = await fetch(`${runtime.baseUrl}/api/v1${path}`, {
@@ -118,8 +152,43 @@ async function main() {
       }
     }
 
+    if (modelChoice) {
+      // Download then select, in that order and each to completion: the switch
+      // is a background task on purpose (CLAUDE.md §3.7) and reading the
+      // catalogue before it settles reports the model that is on its way out.
+      const settle = async (taskId, what) => {
+        let said = "";
+        for (;;) {
+          const task = await call("GET", `/tasks/${taskId}`);
+          const status = task.body?.status;
+          if (status === "succeeded") return;
+          if (status === "failed" || status === "cancelled") {
+            throw new Error(`${what} ${status}: ${task.body?.error || task.body?.message || "?"}`);
+          }
+          // Only when it changes: a carriage return redraws a line on a
+          // terminal and appends a line to a log file, and these runs are
+          // long enough that the log is where anyone reads them.
+          const now = `${what}… ${task.body?.progress ?? 0}% ${task.body?.message ?? ""}`;
+          if (now !== said) process.stderr.write(`${now}\n`);
+          said = now;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      };
+      const download = await call("POST", `/models/${modelChoice}`);
+      if (download.status !== 202) throw new Error(`could not download ${modelChoice}: ${JSON.stringify(download.body)}`);
+      await settle(download.body.task_id, `下載 ${modelChoice}`);
+      const select = await call("POST", "/models/select", { kind: "embedding", model_id: modelChoice });
+      if (select.status === 202) await settle(select.body.task_id, `切換 ${modelChoice}`);
+      else if (select.status !== 200) throw new Error(`could not select ${modelChoice}: ${JSON.stringify(select.body)}`);
+      process.stderr.write("\n");
+    }
+
     const models = await call("GET", "/models");
     const active = (models.body?.models ?? []).find((model) => model.kind === "embedding" && model.active);
+    // What the model costs on disk, asked of the runtime rather than guessed
+    // from the catalogue's size_label — the bundled one lives somewhere else
+    // entirely, and inspect() is the code that already knows where.
+    const weightsBytes = active ? (await call("GET", `/models/${active.id}/inspect`)).body?.bytes ?? 0 : 0;
     const modelLabel = lexicalOnly ? "(refused — lexical only)" : `${active?.label ?? "unknown"} · ${active?.dimensions ?? "?"}d`;
 
     process.stderr.write(`載入 ${cards.length} 張卡（模型：${modelLabel}）…\n`);
@@ -143,6 +212,7 @@ async function main() {
       const rank = returned.findIndex((id) => entry.expected.includes(id)) + 1;
       rows.push({ ...entry, returned, rank, ms });
     }
+    const loadedRss = process.memoryUsage().rss;
 
     const answerable = rows.filter((row) => row.expected.length > 0);
     const absent = rows.filter((row) => row.expected.length === 0);
@@ -191,6 +261,10 @@ async function main() {
       `  warm max  ${warm[warm.length - 1] ?? 0} ms`,
       `  indexing  ${(indexMs / 1000).toFixed(1)} s for ${cards.length} cards`,
       "",
+      "Cost",
+      `  weights   ${megabytes(weightsBytes)} on disk`,
+      `  resident  +${megabytes(loadedRss - idleRss)} over an idle runtime (${megabytes(loadedRss)} total)`,
+      "",
     ];
     process.stdout.write(`${report.join("\n")}\n`);
 
@@ -219,7 +293,16 @@ async function main() {
       recall_at_5: recallAt(5),
       mrr,
       no_result_accuracy: noResult,
+      weights_bytes: weightsBytes,
+      resident_bytes: loadedRss - idleRss,
     };
+
+    // The baseline describes what ships. Recording a run of some other model
+    // into it would make every later --gate compare the product against a
+    // model no user has.
+    if (updatingBaseline && modelChoice) {
+      throw new Error("--update-baseline 記錄的是出貨設定，不能和 --model 一起用");
+    }
 
     if (updatingBaseline) {
       await writeFile(baselineAt, `${JSON.stringify({

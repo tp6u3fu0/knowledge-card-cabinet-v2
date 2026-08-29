@@ -18,14 +18,19 @@ import { fileURLToPath } from "node:url";
 /**
  * 768 dimensions and ~320 MB: EmbeddingGemma at q8.
  *
- * It costs the installer about 180 MB more than the 384-dim MiniLM that used to
- * ship here, and it is worth it — the whole point of a bundled model is that a
- * fresh cabinet has real semantics on day one, and MiniLM's day-one semantics
- * were the weakest of anything in the catalogue. Measured on this project's own
- * runtime: "汽車" and "轎車" score 0.96 despite sharing no character, which is
- * the case that separates a language model from word overlap.
+ * Chosen by the retrieval benchmark, not by reputation — the full table is in
+ * CLAUDE.md §3.23, measured against the MiniLM that used to ship here, a much
+ * cheaper Chinese model, and the much larger BGE-M3:
  *
- * 570 MB BGE-M3 remains behind a deliberate download; 320 MB is the line.
+ *   Recall@3          MiniLM 78.1   BGE-Small-ZH 89.5   Gemma 98.2   BGE-M3 93.0
+ *   forgotten-name    MiniLM 50.0   BGE-Small-ZH 81.3   Gemma 93.8   BGE-M3 81.3
+ *   natural-recall    MiniLM 35.7   BGE-Small-ZH 85.7   Gemma 92.9   BGE-M3 71.4
+ *
+ * All four find an exactly-typed title. They separate on the two intents this
+ * product exists for, which is where the extra megabytes go. Note that BGE-M3
+ * is 244 MB larger and loses on every quality metric: bigger is not the same
+ * question. Re-run `npm run benchmark:retrieval -- --model <id>` before
+ * changing this line, and put the before/after numbers in the commit.
  *
  * Note the paired files. This export keeps its weights in a `.onnx_data`
  * sidecar, so fetching only the `.onnx` produces a directory that looks
