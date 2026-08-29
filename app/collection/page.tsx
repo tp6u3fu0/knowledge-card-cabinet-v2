@@ -152,6 +152,7 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
     source: card.source ?? "",
     source_url: card.source_url ?? null,
     source_type: card.source_type ?? "manual",
+    source_stale_at: card.source_stale_at ?? null,
     accent: cover?.accent ?? visualAccents[index % visualAccents.length],
     pattern: cover?.pattern ?? visualPatterns[index % visualPatterns.length],
     cover,
@@ -358,12 +359,15 @@ function SearchResults({
   selectedId,
   onSelect,
   onOpen,
+  heading = "",
 }: {
   cards: KnowledgeCard[];
   reasons: Map<string, string[]>;
   selectedId: string;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
+  /** Set when the list is not an answer to a query, so it can say what it is. */
+  heading?: string;
 }) {
   // Nothing on the page can say why it is here.
   //
@@ -375,8 +379,9 @@ function SearchResults({
   const silent = cards.length > 0 && cards.every((card) => !reasons.get(card.id)?.length);
 
   return (
-    <ol className="search-hits" aria-label={`搜尋結果，${cards.length} 張`}>
-      {silent ? (
+    <ol className="search-hits" aria-label={heading || `搜尋結果，${cards.length} 張`}>
+      {heading ? <li className="search-hits__heading">{heading}</li> : null}
+      {silent && !heading ? (
         <li className="search-hits__unsure">
           卡片還太少，只能照語意接近的順序排出來，還無法判斷哪一張真的答得上。
         </li>
@@ -417,6 +422,9 @@ function CollectionCardViewer({
   relatedCards,
   onOpenRelated,
   onClose,
+  sourceState,
+  onCheckSource,
+  onAcceptSource,
 }: {
   card: KnowledgeCard;
   /** True while the panel is on its way out and must stay mounted. */
@@ -424,6 +432,9 @@ function CollectionCardViewer({
   relatedCards: KnowledgeCard[];
   onOpenRelated: (id: string) => void;
   onClose: () => void;
+  sourceState?: { busy: boolean; note: string; stale: boolean };
+  onCheckSource?: () => Promise<void>;
+  onAcceptSource?: () => Promise<void>;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -527,6 +538,12 @@ function CollectionCardViewer({
               was made from. It only becomes a link when there is one to follow;
               the rest of the time it stays the sentence someone wrote.
             */}
+            {sourceState?.stale ? (
+              <p className="reading-source-stale" role="status">
+                原始資料已經和你整理這張卡時不一樣了，這張卡可能需要重新整理。
+                <button type="button" onClick={() => void onAcceptSource?.()}>我看過了，以現在的版本為準</button>
+              </p>
+            ) : null}
             <div className="reading-footer">
               <span>來源</span>
               {card.source_url ? (
@@ -537,7 +554,23 @@ function CollectionCardViewer({
               ) : (
                 <span>{card.source}</span>
               )}
+              {/*
+                Only ever on a press, and only this one card's link. The app
+                does not go and look at the web on its own, and this is the one
+                place a reader can ask it to (CLAUDE.md §3.19).
+              */}
+              {card.source_url && onCheckSource ? (
+                <button
+                  className="reading-source-check"
+                  type="button"
+                  disabled={sourceState?.busy}
+                  onClick={() => void onCheckSource()}
+                >
+                  {sourceState?.busy ? "查看中…" : "看看來源有沒有變"}
+                </button>
+              ) : null}
             </div>
+            {sourceState?.note ? <p className="reading-source-note" role="status">{sourceState.note}</p> : null}
           </article>
         </div>
       </div>
@@ -612,6 +645,14 @@ function TableView({
 export default function CollectionPage() {
   const [selectedId, setSelectedId] = useState("attention");
   const [viewerCardId, setViewerCardId] = useState("");
+  const [resurfaced, setResurfaced] = useState<{ card: ApiCard; reason: string } | null>(null);
+  const [resurfaceSkipped, setResurfaceSkipped] = useState<string[]>([]);
+  // A ref, not state: nothing renders from it. It is a note of what was just
+  // being read, so that a resurfaced card can be one related to it.
+  const lastOpenedId = useRef("");
+  const [isNarrow, setIsNarrow] = useState(false);
+  const [isSourceChecking, setIsSourceChecking] = useState(false);
+  const [sourceNote, setSourceNote] = useState("");
   const [collectionView, setCollectionView] = useState<"cards" | "relations" | "table">("cards");
   const [collectionQuery, setCollectionQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("全部");
@@ -688,6 +729,85 @@ export default function CollectionPage() {
    * view already draws — so what is left is the one thing that needs a person
    * to look, and it comes to them.
    */
+  /**
+   * Ask whether the cabinet has anything to bring back.
+   *
+   * The runtime decides both whether it is time and which card; the interface
+   * only asks, and takes "nothing" for an answer without filling the gap.
+   */
+  const loadResurfaced = useCallback(async (options: { force?: boolean; skip?: string[] } = {}) => {
+    const params = new URLSearchParams();
+    if (options.force) params.set("force", "1");
+    if (lastOpenedId.current) params.set("related_to", lastOpenedId.current);
+    // Passed in rather than read from state, so this stays the same function
+    // from one render to the next and the load effect can depend on it.
+    for (const id of options.skip ?? []) params.append("exclude", id);
+    try {
+      const response = await fetch(`/api/resurface?${params.toString()}`, { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { card?: ApiCard | null; reason?: string | null };
+      setResurfaced(result.card && result.reason ? { card: result.card, reason: result.reason } : null);
+    } catch {
+      setResurfaced(null);
+    }
+  }, []);
+
+  /**
+   * Go and look at one card's source.
+   *
+   * Never on a timer and never for more than the card in front of the reader —
+   * this is the only outbound request the app makes besides the update check,
+   * and it happens because someone pressed a button (CLAUDE.md §3.19).
+   */
+  const runSourceAction = async (action: "check" | "accept", cardId: string) => {
+    setIsSourceChecking(true);
+    setSourceNote("");
+    try {
+      const response = await fetch(`/api/sources/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ card_id: cardId }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { status?: string; detail?: string; card?: ApiCard };
+      if (result.card) {
+        const updated = result.card;
+        setCards((current) => current.map((card) => (card.id === updated.id
+          ? { ...card, source_stale_at: updated.source_stale_at ?? null }
+          : card)));
+      }
+      setSourceNote({
+        recorded: "已經記下來源目前的樣子。下次再查就能看出它有沒有變。",
+        unchanged: "來源和上次查的時候一樣。",
+        changed: "來源已經變了。",
+        accepted: "好，之後以現在這個版本為準。卡片的內容沒有被改動。",
+        unreachable: "現在連不到這個來源，所以看不出來有沒有變。",
+      }[result.status ?? ""] ?? result.detail ?? "查不到結果。");
+    } catch {
+      setSourceNote("現在連不到這個來源，所以看不出來有沒有變。");
+    } finally {
+      setIsSourceChecking(false);
+    }
+  };
+
+  const handleSkipResurfaced = () => {
+    if (!resurfaced) return;
+    const skip = [...resurfaceSkipped, resurfaced.card.id];
+    setResurfaceSkipped(skip);
+    setResurfaced(null);
+    void loadResurfaced({ force: true, skip });
+  };
+
+  const handleMuteResurfaced = async () => {
+    if (!resurfaced) return;
+    const muted = resurfaced.card.id;
+    setResurfaced(null);
+    try {
+      await fetch(`/api/cards/${encodeURIComponent(muted)}/mute-resurface`, { method: "POST" });
+    } catch {
+      // Nothing to say: the card is already gone from the strip, and the worst
+      // case is that it comes back another day.
+    }
+  };
+
   const loadDuplicates = async () => {
     try {
       const response = await fetch("/api/cards/duplicates", { cache: "no-store" });
@@ -820,6 +940,7 @@ export default function CollectionPage() {
           window.history.replaceState(null, "", window.location.pathname);
         }
         void loadDuplicates();
+        void loadResurfaced();
       } catch {
         if (!cancelled) setLoadError("目前無法載入本機資料，先顯示示範卡片。請重新啟動本機 API。");
       } finally {
@@ -831,7 +952,7 @@ export default function CollectionPage() {
     return () => {
       cancelled = true;
     };
-  }, [cardsRefreshKey]);
+  }, [cardsRefreshKey, loadResurfaced]);
 
   useEffect(() => {
     const bridge = (globalThis as unknown as { quickSearch?: { shortcut: () => Promise<string | null> } }).quickSearch;
@@ -944,6 +1065,34 @@ export default function CollectionPage() {
       setIsModelsOpen(false);
     }, PANEL_EXIT_MS);
   }, [isSettingsClosing]);
+
+  /*
+   * On a phone the reason for opening this is "I need to look one thing up",
+   * not "show me everything I own". The whole collection wall is the wrong
+   * first screen for that, so a narrow viewport gets the search and a short
+   * list of what was worked on most recently instead (CLAUDE.md §3.21).
+   *
+   * Read in an effect rather than during render because it is a browser fact,
+   * and the desktop build hydrates before it is knowable.
+   */
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 640px)");
+    const apply = () => setIsNarrow(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+
+  /*
+   * Reading a card is recorded so the cabinet can tell a card someone comes
+   * back to from one they have not looked at in a year. That is the whole of
+   * it — no score, no schedule, nothing that asks anyone to come back.
+   */
+  useEffect(() => {
+    if (!viewerCardId) return;
+    lastOpenedId.current = viewerCardId;
+    void fetch(`/api/cards/${encodeURIComponent(viewerCardId)}/opened`, { method: "POST" }).catch(() => {});
+  }, [viewerCardId]);
 
   useEffect(() => {
     if (!viewerCardId) return;
@@ -2131,6 +2280,30 @@ export default function CollectionPage() {
 
         {loadError ? <p className="database-notice" role="status">{loadError}</p> : null}
         {createSuccess ? <p className="database-notice database-notice--success" role="status">{createSuccess}</p> : null}
+        {/*
+          The one thing search structurally cannot do. A search needs you to
+          know you are looking for something; this is for the knowledge you have
+          forgotten you ever had. One card, occasionally, and two ways to make
+          it go away — including for good (CLAUDE.md §3.20).
+        */}
+        {resurfaced && !collectionQuery.trim() ? (
+          <section className="resurface-notice" aria-label="以前整理過的卡片">
+            <p className="resurface-notice__reason">{resurfaced.reason}</p>
+            <button
+              className="resurface-notice__card"
+              type="button"
+              onClick={() => setViewerCardId(resurfaced.card.id)}
+            >
+              <span className="resurface-notice__number">{resurfaced.card.number}</span>
+              <strong>{resurfaced.card.title}</strong>
+              {resurfaced.card.summary ? <small>{resurfaced.card.summary}</small> : null}
+            </button>
+            <div className="resurface-notice__actions">
+              <button type="button" onClick={handleSkipResurfaced}>換一張</button>
+              <button type="button" onClick={() => void handleMuteResurfaced()}>不要再推薦這張</button>
+            </div>
+          </section>
+        ) : null}
         {duplicatePairs.length ? (
           <section className="duplicate-notice" aria-label="疑似重複的卡片">
             <button
@@ -2311,6 +2484,18 @@ export default function CollectionPage() {
             onSelect={setSelectedId}
             onOpen={setViewerCardId}
           />
+        ) : collectionView === "cards" && isNarrow ? (
+          // Search, then what was last worked on. No reasons on these rows —
+          // nothing here was matched against anything, and labelling them would
+          // be inventing an answer to a question nobody asked.
+          <SearchResults
+            cards={[...filteredCards].sort((first, second) => String(second.updated_at ?? "").localeCompare(String(first.updated_at ?? ""))).slice(0, 12)}
+            reasons={new Map()}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onOpen={setViewerCardId}
+            heading="最近整理的"
+          />
         ) : collectionView === "cards" ? (
           <div className="collection-categories">
             {cardGroups.map((group, order) => (
@@ -2359,6 +2544,9 @@ export default function CollectionPage() {
           relatedCards={viewerRelatedCards}
           onOpenRelated={setViewerCardId}
           onClose={closeViewer}
+          sourceState={{ busy: isSourceChecking, note: sourceNote, stale: Boolean(viewerCard.source_stale_at) }}
+          onCheckSource={() => runSourceAction("check", viewerCard.id)}
+          onAcceptSource={() => runSourceAction("accept", viewerCard.id)}
         />
       ) : null}
     </main>

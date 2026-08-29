@@ -2808,6 +2808,153 @@ a:focus-visible {
  * has to read as the rest of the same form, not as a second form to fill in.
  */
 /*
+ * The one thing search cannot do: bring back knowledge nobody remembered to
+ * look for. Quiet on purpose — it sits above the collection, states its reason,
+ * and offers two ways to disappear. It is a suggestion, not a task.
+ */
+.resurface-notice {
+  background: color-mix(in srgb, var(--mint-soft, #e6f2ee) 45%, var(--paper));
+  border: 1px solid rgba(33, 31, 39, 0.1);
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 22px;
+  padding: 16px 18px;
+}
+
+.resurface-notice__reason {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.resurface-notice__card {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 6px;
+  padding: 0;
+  text-align: left;
+}
+
+.resurface-notice__card strong {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.resurface-notice__card small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.resurface-notice__number {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.resurface-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.resurface-notice__actions button {
+  background: none;
+  border: 1px solid rgba(33, 31, 39, 0.16);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 6px 12px;
+  transition: border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out);
+}
+
+.resurface-notice__actions button:hover {
+  border-color: rgba(33, 31, 39, 0.34);
+  color: var(--ink);
+}
+
+/* The one button in the app that reaches the network on purpose. */
+.reading-source-check {
+  background: none;
+  border: 1px solid rgba(33, 31, 39, 0.16);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: auto;
+  padding: 5px 11px;
+  transition: border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out);
+}
+
+.reading-source-check:hover:not(:disabled) {
+  border-color: rgba(33, 31, 39, 0.34);
+  color: var(--ink);
+}
+
+.reading-source-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.reading-source-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 10px 0 0;
+}
+
+/*
+ * The card is what the reader understood at the time, so this never rewrites
+ * it — it says the source moved on and leaves the judgement where it belongs.
+ */
+.reading-source-stale {
+  align-items: baseline;
+  background: color-mix(in srgb, var(--accent-amber, #b8863b) 12%, var(--paper));
+  border-radius: 12px;
+  color: var(--ink);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  line-height: 1.7;
+  margin: 22px 0 0;
+  padding: 12px 14px;
+}
+
+.reading-source-stale button {
+  background: none;
+  border: 1px solid rgba(33, 31, 39, 0.22);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 5px 11px;
+}
+
+.search-hits__heading {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  list-style: none;
+  padding: 0 0 4px;
+}
+
+/*
  * The source line on the back of a card, when there is somewhere to go. It has
  * to read as part of the card rather than as a button — following it is a
  * choice the reader makes after the card has already done its job.
@@ -6489,4 +6636,55 @@ a:focus-visible {
   font-size: 0.78rem;
   line-height: 1.5;
   padding: 0 0.15rem 0.15rem;
+}
+
+/*
+ * A phone is not a display case.
+ *
+ * The reason to open this on a phone is "I need to look one thing up", so the
+ * search field takes the whole first row and everything that narrows a
+ * collection — filters, sort, category management — moves below it. The card
+ * wall itself is swapped out in the page for a short recent list; the rest is
+ * here (CLAUDE.md §3.21).
+ */
+@media (max-width: 640px) {
+  .database-toolbar {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .database-search {
+    grid-column: 1 / -1;
+  }
+
+  .database-search input {
+    font-size: 16px; /* Anything smaller and iOS zooms the page on focus. */
+  }
+
+  /* A keyboard shortcut is not a thing a phone has. */
+  .database-search__shortcut {
+    display: none;
+  }
+
+  .database-filter-select,
+  .database-category-button,
+  .database-add-button,
+  .database-trash-button,
+  .database-settings-button {
+    min-width: 0;
+  }
+
+  .section-heading--collection {
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .search-hit {
+    padding: 12px 14px;
+  }
+
+  .resurface-notice {
+    padding: 14px;
+  }
 }

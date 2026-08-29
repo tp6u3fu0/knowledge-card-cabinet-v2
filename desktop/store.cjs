@@ -18,7 +18,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const MAX_BACKUPS = 10;
 
 /**
@@ -32,13 +32,32 @@ const MAX_BACKUPS = 10;
 const SOURCE_COLUMNS = [
   "source_type", "source_title", "source_url", "source_external_id",
   "source_updated_at", "source_content_hash", "source_checked_at",
+  // Set by an explicit source check that found the document had changed since
+  // the card was made from it. Cleared by accepting the new version. Nothing
+  // ever rewrites the card itself — see CLAUDE.md §3.19.
+  "source_stale_at",
 ];
+
+/**
+ * When the reader last opened a card, and whether they asked never to be shown
+ * it again.
+ *
+ * These are not a memory score. Nothing computes an interval from them, nothing
+ * schedules a review, nothing counts days in a row — that is the product this
+ * one is deliberately not (CLAUDE.md §9). `last_opened_at` answers one
+ * question, "have you looked at this lately", and it exists because search
+ * cannot answer "I forgot I ever knew this".
+ */
+const RECALL_COLUMNS = ["last_opened_at", "resurface_muted_at"];
+
+/** Every column added after the original schema, in one list for the migration. */
+const ADDED_COLUMNS = [...SOURCE_COLUMNS, ...RECALL_COLUMNS];
 
 const CARD_COLUMNS = [
   "id", "number", "topic", "category", "title", "question", "summary",
   "analogy", "detail", "source", "tags", "cover", "embedding", "embedding_dims",
   "embedding_model_id", "embedding_source_hash", "created_at", "updated_at", "deleted_at",
-  ...SOURCE_COLUMNS,
+  ...ADDED_COLUMNS,
 ];
 
 const SCHEMA = [
@@ -69,7 +88,10 @@ const SCHEMA = [
      source_external_id TEXT,
      source_updated_at TEXT,
      source_content_hash TEXT,
-     source_checked_at TEXT
+     source_checked_at TEXT,
+     source_stale_at TEXT,
+     last_opened_at TEXT,
+     resurface_muted_at TEXT
    )`,
   "CREATE INDEX IF NOT EXISTS cards_deleted_at_idx ON cards (deleted_at)",
   "CREATE INDEX IF NOT EXISTS cards_category_idx ON cards (category)",
@@ -141,7 +163,7 @@ function rowToCard(row) {
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
     deleted_at: row.deleted_at ?? null,
-    ...Object.fromEntries(SOURCE_COLUMNS.map((column) => [column, row[column] ?? null])),
+    ...Object.fromEntries(ADDED_COLUMNS.map((column) => [column, row[column] ?? null])),
   };
 }
 
@@ -167,7 +189,7 @@ function cardToRow(card) {
     card.created_at ?? null,
     card.updated_at ?? null,
     card.deleted_at ?? null,
-    ...SOURCE_COLUMNS.map((column) => card[column] ?? null),
+    ...ADDED_COLUMNS.map((column) => card[column] ?? null),
   ];
 }
 
@@ -196,7 +218,7 @@ function openStore(dataFile) {
   // one would not. Adding a nullable column is the whole migration: SQLite
   // rewrites no rows and every card that predates it reads back as null.
   const present = new Set(database.prepare("PRAGMA table_info(cards)").all().map((row) => row.name));
-  for (const column of SOURCE_COLUMNS) {
+  for (const column of ADDED_COLUMNS) {
     if (!present.has(column)) database.exec(`ALTER TABLE cards ADD COLUMN ${column} TEXT`);
   }
 
@@ -250,6 +272,10 @@ function openStore(dataFile) {
       // it is recognised, so it cannot be recomputed from the current category
       // list and shift every time a category is added or deleted.
       category_accents: readJsonMeta(meta.category_accents),
+      // When the cabinet last offered a card of its own accord. In meta rather
+      // than in the interface because there is one cabinet and several windows
+      // onto it, and "occasionally" has to mean occasionally across all of them.
+      resurface_offered_at: meta.resurface_offered_at ?? null,
       embedding_model_id: meta.embedding_model_id ?? "embedding-hash-384",
       summary_model_id: meta.summary_model_id ?? "summary-template",
     };
@@ -260,6 +286,7 @@ function openStore(dataFile) {
     insertMeta.run("embedding_model_id", String(store.embedding_model_id ?? ""));
     insertMeta.run("summary_model_id", String(store.summary_model_id ?? ""));
     insertMeta.run("category_accents", JSON.stringify(store.category_accents ?? {}));
+    insertMeta.run("resurface_offered_at", String(store.resurface_offered_at ?? ""));
   };
 
   const writeCards = (store, ids) => {

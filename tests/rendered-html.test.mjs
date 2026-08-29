@@ -1184,3 +1184,76 @@ test("the front page sells recall, not a shelf", async () => {
   const home = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(home, /慢慢理解/u, "the landing copy leaked back into the desktop bundle");
 });
+
+test("the cabinet brings something back without turning into a review app", async () => {
+  // Search needs you to know you are looking for something. This is the only
+  // part of the product aimed at knowledge you forgot you had — and the only
+  // part at risk of quietly becoming Anki (CLAUDE.md §9).
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  const strip = region(page, `<section className="resurface-notice"`, "</section>", "the resurface strip");
+  assert.match(strip, /resurfaced\.reason/u, "the strip does not say why this card is here");
+  assert.match(strip, /handleSkipResurfaced/u, "there is no way to move past it");
+  assert.match(strip, /handleMuteResurfaced/u, "there is no way to stop it for good");
+  for (const forbidden of ["streak", "連續", "複習", "到期", "score"]) {
+    assert.doesNotMatch(strip, new RegExp(forbidden, "iu"), `the strip talks about ${forbidden}; this is not a review app`);
+  }
+
+  // It stays out of the way of the thing the product is actually for.
+  assert.match(page, /resurfaced && !collectionQuery\.trim\(\)/u, "a suggestion sits on top of search results");
+
+  const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
+  assert.match(api, /RESURFACE_OFFER_GAP_HOURS/u, "nothing stops a suggestion appearing on every single load");
+
+  // The data model is where a review app would actually show up, so that is
+  // where the line is drawn: two columns, both plain facts about reading. An
+  // ease factor or a due date would have to be added here first.
+  const store = await readFile(new URL("../desktop/store.cjs", import.meta.url), "utf8");
+  const recall = region(store, "const RECALL_COLUMNS", ";", "the reading-history columns");
+  assert.match(recall, /"last_opened_at", "resurface_muted_at"/u, "the reading-history columns changed shape");
+  for (const forbidden of ["interval", "ease", "due", "streak", "review", "score"]) {
+    assert.doesNotMatch(recall, new RegExp(forbidden, "iu"), `a column for ${forbidden}; this is not a review app`);
+  }
+});
+
+test("looking at a source happens because someone pressed a button", async () => {
+  // The update check was the app's only outbound request, and the reason to
+  // trust it is that it is bounded and switchable. A second one has to earn the
+  // same description (CLAUDE.md §3.19).
+  const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
+  const digest = region(api, "async function fetchSourceDigest", "\n}\n", "the source fetch");
+  assert.match(digest, /AbortSignal\.timeout/u, "a source that never answers holds the runtime open");
+  assert.match(digest, /credentials: "omit"/u, "the check carries whatever credentials happen to be around");
+  assert.match(api, /KCC_SOURCE_CHECK/u, "the second outbound request cannot be switched off");
+
+  // Never scheduled, and never for more than the card in front of the reader.
+  assert.doesNotMatch(api, /setInterval\([^)]*fetchSourceDigest/u, "source checks run on a timer");
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /onClick=\{\(\) => void onCheckSource\(\)\}/u, "the check is not driven by a press");
+
+  // And a paired phone cannot make the host fetch anything.
+  assert.match(api, /segments\[0\] === "sources"\) return false/u, "a device token can reach the source check");
+
+  // The card itself is never rewritten by what the source now says.
+  assert.match(api, /status = accepting \? "accepted" : "recorded"/u, "the accept path does more than record a hash");
+  for (const field of ["card.title =", "card.summary =", "card.detail ="]) {
+    assert.doesNotMatch(region(api, `segments[0] === "sources"`, "sendJson(response, 200, { status, card", "the source check route"),
+      new RegExp(field.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+      `the source check writes over ${field}`);
+  }
+});
+
+test("a phone opens on a search, not on a wall of everything", async () => {
+  // The reason to open this on a phone is "I need to look one thing up".
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /matchMedia\("\(max-width: 640px\)"\)/u, "nothing knows it is on a phone");
+  const branch = region(page, `collectionView === "cards" && isNarrow ?`, "collection-categories", "the narrow branch");
+  assert.match(branch, /<SearchResults/u, "a phone still gets the whole collection wall");
+  assert.match(branch, /heading=/u, "the recent list does not say what it is");
+  assert.match(branch, /reasons=\{new Map\(\)\}/u, "rows that matched nothing are labelled as if they had");
+
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const narrow = css.slice(css.indexOf("@media (max-width: 640px)"));
+  assert.notEqual(narrow, "", "there is no phone layout at all");
+  assert.match(narrow, /\.database-search \{[^}]*grid-column: 1 \/ -1/u, "search does not lead on a phone");
+  assert.match(narrow, /font-size: 16px/u, "iOS will zoom the page when the search field is focused");
+});

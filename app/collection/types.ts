@@ -13,6 +13,8 @@ export type SourceMetadata = {
   source_updated_at?: string | null;
   source_content_hash?: string | null;
   source_checked_at?: string | null;
+  /** Set by a source check that found the document had changed since. */
+  source_stale_at?: string | null;
 };
 
 export type SourceType = "manual" | "url" | "notion" | "markdown" | "document" | "other";
@@ -30,6 +32,7 @@ export type KnowledgeCard = {
   source: string;
   source_url?: string | null;
   source_type?: SourceType;
+  source_stale_at?: string | null;
   accent: string;
   pattern: string;
   cover?: CoverSpec;

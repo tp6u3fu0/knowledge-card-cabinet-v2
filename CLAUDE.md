@@ -123,7 +123,7 @@ Notion / 文件 / 論文 / 網頁 / 筆記
 | 2 | 讓檢索**快** | 有查詢時換成結果列（標題／問題／一句話／分類／命中理由）；桌面全域快速搜尋疊層；鍵盤優先操作 | **已完成**（§3.16、`app/quick/page.tsx`） |
 | 3 | 讓建立**便宜** | Card ID 與編號自動產生；Quick Capture：貼上 → AI 草稿 → 只確認標題／問題／摘要／分類，其餘收在進階編輯 | **已完成**（§3.17、`tests/capture.test.mjs`） |
 | 4 | 把 **Storage 和 Cache 接起來** | 結構化來源（`source_type` / `source_url` / `source_external_id` / `source_updated_at` / `source_content_hash` / `source_checked_at`，全部 nullable，原本的 `source` 字串保留給顯示用）；首頁定位改寫 | **已完成**（§3.18、`tests/source.test.mjs`） |
-| 5 | 重新發現**忘掉的** | 偶爾把久未查看、或與最近閱讀／搜尋相關的卡浮出來；來源過期提示 | 未開始 |
+| 5 | 重新發現**忘掉的** | 偶爾把久未查看、或與最近閱讀相關的卡浮出來；來源過期提示；手機端搜尋優先 | **已完成**（§3.19、§3.20、§3.21，`tests/resurface.test.mjs`） |
 
 **第 1 階段先做完才做後面的。** 搜尋不可信的話，後面每一個功能都只是把人更快地送到一個錯的答案。
 
@@ -374,7 +374,49 @@ Query
 
 `source_content_hash` 與 `source_checked_at` **目前沒有任何東西會寫**，它們屬於過期偵測（第 5 階段）。現在就加是為了不要再做一次 schema migration，不是因為有人在填。接上任何東西之前先回來讀這一節。
 
-**schema 遷移**：`STORE_VERSION` 是 3。`CREATE TABLE IF NOT EXISTS` 對已存在的表什麼都不做，所以 `openStore()` 另外用 `PRAGMA table_info(cards)` 補 `ALTER TABLE ... ADD COLUMN`。漏掉這步的結果是全新安裝正常、所有既有使用者的資料庫一直回 "no such column"。加 nullable 欄位就是整個遷移：SQLite 不改寫任何 row，比它早的卡片讀回來就是 null。
+**schema 遷移**：`STORE_VERSION` 是 4。`CREATE TABLE IF NOT EXISTS` 對已存在的表什麼都不做，所以 `openStore()` 另外用 `PRAGMA table_info(cards)` 補 `ALTER TABLE ... ADD COLUMN`。漏掉這步的結果是全新安裝正常、所有既有使用者的資料庫一直回 "no such column"。加 nullable 欄位就是整個遷移：SQLite 不改寫任何 row，比它早的卡片讀回來就是 null。
+
+### 3.19 去看來源有沒有變：只在有人按下去的時候
+
+第 4 階段留了 `source_content_hash` 與 `source_checked_at` 兩個沒人寫的欄位。現在有人寫了，而寫的方式就是這條的全部重點。
+
+**這是整個 app 第二個對外請求。** 第一個是更新檢查，而它可以被信任的理由是它有邊界、而且關得掉（見第 4 節那條）。第二個必須賺到同一句描述：
+
+- **只在有人按下那張卡上的按鈕時發生。** 沒有排程、沒有開啟時檢查、沒有批次。使用者自己貼上的那一個網址，一次一張卡。
+- **`KCC_SOURCE_CHECK=off` 整個關掉**，跟更新檢查一樣。
+- **不帶任何識別資訊**：`credentials: "omit"`、固定的 User-Agent、8 秒逾時、2MB 上限。
+- **裝置權杖一律 403。** `/sources` 在 `deviceMayReach()` 裡是第一條就擋掉的——一支被撿走的手機不可以叫主機去連只有主機連得到的位址。所以這兩條路由**不放在 `/cards` 底下**：`cards` 對裝置是全開的，掛在那裡就等於開了。
+- **連不到就是「不知道」，不是「變了」。** 回 `unreachable`，不寫 `source_stale_at`。跟更新檢查同一條紀律。
+
+**卡片本身永遠不會被覆寫。** 卡片記的是使用者當時的理解，那跟來源現在的文字是兩件事。`check` 只寫 hash 與時間戳；`accept` 也只寫 hash，意思是「我看過了，之後以現在這版為準」，不動標題、摘要或任何一個字。第一次檢查是記錄基準線（`recorded`），不是宣告有變。
+
+### 3.20 重新浮現：一張卡、偶爾、而且關得掉
+
+搜尋回答的是「我知道我寫過這個」。它結構上答不了「我根本忘了我學過這個」，而後者才是比較貴的那種遺忘。這是整個產品裡唯一針對它的功能，也是唯一有風險悄悄變成 Anki 的地方（第 9 節）。
+
+界線畫在**資料模型**上，因為那是 Anki 真的會長出來的地方。`store.cjs` 的 `RECALL_COLUMNS` 只有兩欄：
+
+- `last_opened_at` — 上次打開這張卡的時間。**沒有任何東西從它算出間隔**、排出複習、或數連續天數。
+- `resurface_muted_at` — 使用者說「不要再推薦這張」。
+
+要加 ease factor、due date、review count，得先加到這裡；`tests/rendered-html.test.mjs` 盯著這份清單。
+
+其餘的規則：
+
+- **一次一張，`RESURFACE_QUIET_DAYS = 90` 天沒打開才算候選**（從沒打開過的，用建立時間算——一年前整理、之後沒再看，正是這功能存在的理由）。
+- **`RESURFACE_OFFER_GAP_HOURS = 20`，而且記在 `meta` 不是記在前端。** 一個卡冊有好幾個視窗看它，「偶爾」必須是跨視窗的偶爾。每次載入都出現的建議不是建議，是嘮叨。
+- **`?force=1` 是「我自己再問一次」**，跟「頁面重新載入」是兩件事。換一張走這條。
+- **讀一張卡不會動 `updated_at`。** 讀不是改；混在一起「最近更新」就沒有意義了。
+- **沒有東西可以說的時候就不說。** 空卡冊、新卡冊、或每張都最近讀過的卡冊，回 `card: null`。不要拿最新的卡去填那個位置。
+
+### 3.21 手機的第一個畫面是搜尋
+
+手機上打開這個 app 的理由是「我現在要查一件事」，不是「給我看我擁有的全部東西」。所以 `max-width: 640px` 時：
+
+- 搜尋框吃掉整個第一列，其餘篩選排到下面。輸入框 `font-size: 16px`——比這小 iOS 會在 focus 時自己放大整頁。
+- 快捷鍵提示 `display: none`。手機沒有那個東西。
+- **沒有查詢時不給整面收藏牆**，改成 `SearchResults` 列出最近整理的 12 張。這條在 `page.tsx` 用 `matchMedia` 判斷（在 effect 裡讀，桌面版 hydrate 前不可能知道）。
+- 那份列表**不帶命中理由**（`reasons={new Map()}`）。它沒有跟任何東西比對過，貼一個理由上去就是在回答沒人問的問題。
 
 ---
 
@@ -395,6 +437,11 @@ Query
 | `normalizeSourceUrl()` 允許的 scheme | `main.cjs` 的 `setWindowOpenHandler` 要一致；兩邊都只放行 http(s)（§3.18） | 來源欄位變成可執行的連結；`tests/source.test.mjs` 與 `tests/rendered-html.test.mjs` 會失敗（刻意的） |
 | 任何 `source_*` 欄位 | `store.cjs` 的 `SOURCE_COLUMNS`（含 `ALTER TABLE` 補欄位）、`publicCard`、`types.ts` 的 `SourceMetadata`；**不要**加進 `embeddingText()` | 舊資料庫開不起來；或第一個人填來源時整櫃卡片重算向量 |
 | 首頁的定位文案 | 不要寫「在任何裝置上存取」（§1 P-05）；`site/index.html` 的 title 與 og:description 一起改 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——分享出去的連結講的是另一個產品 |
+| `RECALL_COLUMNS` 或任何跟「讀過沒」有關的欄位 | 想清楚它會不會被拿去算間隔、分數或連續天數；會的話不要加（§3.20） | 產品變成 Anki；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
+| `RESURFACE_QUIET_DAYS` / `RESURFACE_OFFER_GAP_HOURS` | 間隔記在 `meta`，不是記在某一個視窗裡（§3.20） | 每開一個視窗就被推薦一次，建議變成嘮叨 |
+| 任何新的對外請求 | 先讀 §3.19：要按鍵觸發、關得掉、不帶識別資訊、失敗算「不知道」、裝置權杖不可用 | 一個號稱資料留在本機的工具開始自己連網；`tests/rendered-html.test.mjs` 會失敗（刻意的） |
+| `/sources` 底下的路由 | **不要**搬到 `/cards` 底下——`cards` 對配對裝置是全開的（§3.9、§3.19） | 一支被撿走的手機可以叫主機去連內網位址 |
+| 手機版面（`max-width: 640px`） | 沒有查詢時給最近整理的列表，不是收藏牆；那份列表不帶命中理由（§3.21） | `tests/rendered-html.test.mjs` 會失敗（刻意的）——手機第一個畫面又變成展示櫃 |
 | 前端決定「哪些卡符合查詢」的邏輯 | 不要加。有 query 時主機的答案就是結果集，本地只保留「主機還沒回答」的墊檔（§3.14） | `tests/rendered-html.test.mjs` 會失敗（刻意的）——本地 includes() 會把主機刻意丟掉的卡放回來 |
 | `MOTIF_SHAPES`（local-api.cjs） | `app/cover-art.tsx` 的 `CoverGlyph` union + `glyphLibrary` | 封面靜默退回單一圖案 |
 | `PALETTES`（local-api.cjs） | `globals.css` 的 `--accent-*` 與 `.collection-card--*` 規則、`types.ts` 的 `visualAccents` | 卡片沒有顏色樣式 |
@@ -455,6 +502,7 @@ Query
 | `retrieval.test.mjs` | 換句話說也搜得到；沒有向量的卡用標題搜得到；模型壞掉時文字搜尋照常；搜不到的東西要回 0 筆 |
 | `capture.test.mjs` | 只給標題也能建卡；沒有標題要擋下；編號連號、不重用垃圾桶裡的號；自帶的 id／編號照用；改卡不換號；id 可排序、不重複、沒有會看錯的字母 |
 | `source.test.mjs` | 來源連結只收 http(s)、壞連結不會弄丟卡片；種類從連結讀出來；連結一改描述舊文件的欄位全部清掉；舊卡的 source 讀得回來；缺欄位的舊資料庫會補上 |
+| `resurface.test.mjs` | 全新卡冊不亂推薦；推最久沒看的那張；讀過就不再推；一天一次而 force 例外；靜音永久有效；略過不等於靜音；payload 裡沒有分數與排程；手機拿得到推薦但碰不到 `/sources` |
 | `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
 | `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |

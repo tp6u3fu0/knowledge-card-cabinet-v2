@@ -89,6 +89,26 @@ const LEXICAL_MIN_COVERAGE = 0.5;
 // rather than folded into it, so it cannot be averaged away.
 const EXACT_TITLE_BONUS = 0.5;
 
+/**
+ * How long a card has to go unopened before the cabinet is willing to bring it
+ * back on its own.
+ *
+ * Search answers "I know I wrote this down". It cannot answer "I forgot I ever
+ * knew this", and that second one is the more expensive kind of forgetting.
+ *
+ * Ninety days, and nothing finer. This is deliberately not a review schedule:
+ * there is no interval that grows, no score, no streak, nothing that asks the
+ * reader to come back. One card, occasionally, with a way to say never again
+ * (CLAUDE.md §9, §3.20).
+ */
+const RESURFACE_QUIET_DAYS = 90;
+/**
+ * And at most one offer roughly per day. A suggestion that appears on every
+ * load is not a suggestion, it is a nag — and the fastest way to make someone
+ * stop reading a strip is to put it there every single time.
+ */
+const RESURFACE_OFFER_GAP_HOURS = 20;
+
 function now() {
   return new Date().toISOString();
 }
@@ -789,7 +809,37 @@ function normalizeSourceMetadata(input, previous = {}) {
     source_updated_at: field("source_updated_at"),
     source_content_hash: field("source_content_hash"),
     source_checked_at: field("source_checked_at"),
+    source_stale_at: field("source_stale_at"),
   };
+}
+
+/**
+ * Whether the app may go and look at a source.
+ *
+ * This is the second outbound request the app can make, and it only ever
+ * happens because a person pressed a button on one card, against a url that
+ * person pasted. Never on a timer, never on load, never in bulk, and never for
+ * a paired phone — a device token cannot reach /sources at all, or a stolen
+ * phone could aim the host at addresses only the host can see.
+ *
+ * `KCC_SOURCE_CHECK=off` removes it entirely, like the update check.
+ */
+const SOURCE_CHECK_TIMEOUT_MS = 8000;
+/** Enough of a document to tell one version from another; a cap, not a download. */
+const SOURCE_CHECK_MAX_BYTES = 2 * 1024 * 1024;
+
+async function fetchSourceDigest(url, fetchImpl = fetch) {
+  const response = await fetchImpl(url, {
+    redirect: "follow",
+    // Nothing that identifies this reader or this cabinet, and no ambient
+    // credentials: the point is to look at a public document, not to log in.
+    credentials: "omit",
+    headers: { Accept: "text/html, text/plain, */*", "User-Agent": "knowledge-card-cabinet" },
+    signal: AbortSignal.timeout(SOURCE_CHECK_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`來源回應 ${response.status}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return crypto.createHash("sha256").update(buffer.subarray(0, SOURCE_CHECK_MAX_BYTES)).digest("hex");
 }
 
 function normalizeCard(input, previous = {}, canonicalTags = null) {
@@ -816,6 +866,9 @@ function normalizeCard(input, previous = {}, canonicalTags = null) {
     // source hash would re-embed the whole cabinet the first time someone
     // filled these in.
     ...normalizeSourceMetadata(input, previous),
+    // Reading history, and only that. Never derived, never scheduled from.
+    last_opened_at: input.last_opened_at ?? previous.last_opened_at ?? null,
+    resurface_muted_at: input.resurface_muted_at ?? previous.resurface_muted_at ?? null,
     // Deduplicated case-insensitively, and spelled the way this cabinet
     // already spells them when the caller knows what that is.
     tags: normalizedTags(Array.isArray(input.tags) ? input.tags : (previous.tags || []))
@@ -870,6 +923,9 @@ function publicCard(card, ranking = null) {
     source_updated_at: card.source_updated_at ?? null,
     source_content_hash: card.source_content_hash ?? null,
     source_checked_at: card.source_checked_at ?? null,
+    source_stale_at: card.source_stale_at ?? null,
+    last_opened_at: card.last_opened_at ?? null,
+    resurface_muted_at: card.resurface_muted_at ?? null,
     tags: card.tags,
     score: ranking?.score ?? 0,
     lexical_score: ranking?.lexical_score ?? 0,
@@ -1410,9 +1466,13 @@ function draftFromContent(content, source) {
  * by prefix — `/app/version` is readable, a future `/app/anything` is not
  * until someone decides it is.
  */
-const DEVICE_ROUTES = ["cards", "categories", "search", "trash"];
+const DEVICE_ROUTES = ["cards", "categories", "search", "trash", "resurface"];
 
 function deviceMayReach(method, segments) {
+  // `/sources` is refused before anything else. It is the one route that makes
+  // the host fetch a url, and a phone that has been picked up off a table must
+  // not be able to aim the host at an address only the host can reach.
+  if (segments[0] === "sources") return false;
   if (DEVICE_ROUTES.includes(segments[0])) return true;
   if (method !== "GET") return false;
   if (segments[0] === "settings" && segments.length === 1) return true;
@@ -1429,6 +1489,7 @@ function createApiServer(store, dataFile, modelRuntime, {
   deviceAuth,
   networkController,
   updateCheck,
+  sourceCheckEnabled = true,
   serverFactory = (handler) => http.createServer(handler),
   db,
 } = {}) {
@@ -1455,6 +1516,56 @@ function createApiServer(store, dataFile, modelRuntime, {
     .filter((candidate) => candidate.score !== null && candidate.score >= RELATION_MIN_SCORE)
     .sort((first, second) => second.score - first.score)
     .slice(0, RELATION_LIMIT);
+
+  /**
+   * One card the reader has not looked at in a long time, and a reason.
+   *
+   * Two ways in. If they have just been reading something, a card related to it
+   * is the better offer — that is the "you already wrote about this" moment,
+   * and it is the only one search cannot produce, because nobody searches for
+   * what they have forgotten. Otherwise, the card that has waited longest.
+   *
+   * Returns null freely: an empty cabinet, a young one, or one whose cards have
+   * all been read recently has nothing to say, and saying nothing is the
+   * correct behaviour rather than a gap to fill.
+   */
+  const resurfaceCandidate = ({ relatedTo = "", exclude = [] } = {}) => {
+    const quietBefore = Date.now() - RESURFACE_QUIET_DAYS * 24 * 60 * 60 * 1000;
+    const skip = new Set(exclude.filter(Boolean));
+    const restedSince = (card) => {
+      // Never opened falls back to when it was written: a card made a year ago
+      // and never reread is exactly the case this exists for.
+      const stamp = Date.parse(card.last_opened_at || card.created_at || "");
+      return Number.isFinite(stamp) ? stamp : null;
+    };
+    const candidates = store.cards.filter((card) => {
+      if (card.deleted_at || card.resurface_muted_at || skip.has(card.id) || card.id === relatedTo) return false;
+      const rested = restedSince(card);
+      return rested !== null && rested < quietBefore;
+    });
+    if (candidates.length === 0) return null;
+
+    const anchorCard = relatedTo ? getCard(relatedTo) : null;
+    if (anchorCard) {
+      const neighbours = new Map(store.relations
+        .filter((relation) => (relation.source_id === anchorCard.id || relation.target_id === anchorCard.id)
+          && (relation.relation_type === "manual" || relation.score >= RELATION_MIN_SCORE))
+        .map((relation) => [relation.source_id === anchorCard.id ? relation.target_id : relation.source_id, relation]));
+      const related = candidates
+        .filter((card) => neighbours.has(card.id))
+        .sort((first, second) => (neighbours.get(second.id).score - neighbours.get(first.id).score));
+      if (related.length > 0) {
+        return { card: related[0], reason: `最近你在看《${anchorCard.title}》，你以前也整理過這張` };
+      }
+    }
+
+    const oldest = candidates.sort((first, second) => restedSince(first) - restedSince(second))[0];
+    const months = Math.max(1, Math.round((Date.now() - restedSince(oldest)) / (30 * 24 * 60 * 60 * 1000)));
+    return {
+      card: oldest,
+      reason: oldest.last_opened_at ? `${months} 個月沒有打開過這張卡` : `${months} 個月前你整理過這張卡`,
+    };
+  };
 
   const startDownloadTask = (modelId) => {
     const model = modelRuntime.catalog().models.find((candidate) => candidate.id === modelId);
@@ -1563,7 +1674,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "cards.auto_identity", "cards.source_metadata", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "cards.auto_identity", "cards.source_metadata", "cards.resurface", "sources.check", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
       return;
     }
 
@@ -1979,6 +2090,11 @@ function createApiServer(store, dataFile, modelRuntime, {
           "/cards/{id}/relations/{target_id}/confirm": { post: {} },
           "/cards/{id}/relations/{target_id}": { delete: {} },
           "/cards/duplicates": { get: {} },
+          "/cards/{id}/opened": { post: {} },
+          "/cards/{id}/mute-resurface": { post: {} },
+          "/resurface": { get: {} },
+          "/sources/check": { post: {} },
+          "/sources/accept": { post: {} },
           "/categories": { get: {}, post: {} },
           "/categories/{name}": { patch: {} },
           "/categories/merge": { post: {} },
@@ -2230,6 +2346,106 @@ function createApiServer(store, dataFile, modelRuntime, {
       return;
     }
 
+    if (request.method === "POST" && segments[0] === "sources" && ["check", "accept"].includes(segments[1]) && segments.length === 2) {
+      if (!sourceCheckEnabled) {
+        sendJson(response, 409, { detail: "來源檢查已由 KCC_SOURCE_CHECK=off 關閉。" });
+        return;
+      }
+      const body = await readBody(request);
+      const card = getCard(String(body.card_id || "").trim());
+      if (!card) {
+        sendJson(response, 404, { detail: "Active card not found" });
+        return;
+      }
+      if (!card.source_url) {
+        sendJson(response, 422, { detail: "這張卡沒有來源連結，沒有東西可以檢查。" });
+        return;
+      }
+      let digest;
+      try {
+        digest = await fetchSourceDigest(card.source_url);
+      } catch (error) {
+        // A failed check is "we do not know", never "it changed". Same
+        // discipline as the update check: the network is allowed to be absent.
+        sendJson(response, 200, { status: "unreachable", detail: String(error.message || error), card: publicCard(card) });
+        return;
+      }
+      const accepting = segments[1] === "accept";
+      const baseline = card.source_content_hash || "";
+      card.source_checked_at = now();
+      let status;
+      if (accepting || !baseline) {
+        // Recording what is there now. The card's own words are never touched —
+        // it holds the reader's understanding at the time, which is not the
+        // same thing as the latest wording of the source (CLAUDE.md §3.19).
+        card.source_content_hash = digest;
+        card.source_stale_at = null;
+        status = accepting ? "accepted" : "recorded";
+      } else if (digest === baseline) {
+        card.source_stale_at = null;
+        status = "unchanged";
+      } else {
+        card.source_stale_at = card.source_stale_at || now();
+        status = "changed";
+      }
+      save([card.id]);
+      sendJson(response, 200, { status, card: publicCard(card) });
+      return;
+    }
+
+    if (request.method === "GET" && segments[0] === "resurface" && segments.length === 1) {
+      const params = requestUrl.searchParams;
+      // The gap is enforced here rather than in the interface because there is
+      // one cabinet and several ways to look at it, and "occasionally" has to
+      // mean occasionally across all of them. `force` is for the reader asking
+      // again on purpose, which is a different thing from the page reloading.
+      const lastOffer = Date.parse(store.resurface_offered_at || "");
+      const withinGap = Number.isFinite(lastOffer)
+        && Date.now() - lastOffer < RESURFACE_OFFER_GAP_HOURS * 60 * 60 * 1000;
+      if (withinGap && params.get("force") !== "1") {
+        sendJson(response, 200, { card: null, reason: null, quiet_until_hours: RESURFACE_OFFER_GAP_HOURS });
+        return;
+      }
+      const found = resurfaceCandidate({
+        relatedTo: String(params.get("related_to") || "").trim(),
+        exclude: params.getAll("exclude"),
+      });
+      if (!found) {
+        sendJson(response, 200, { card: null, reason: null });
+        return;
+      }
+      store.resurface_offered_at = now();
+      save([]);
+      sendJson(response, 200, { card: publicCard(found.card), reason: found.reason });
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "cards" && segments[1] && segments[2] === "opened" && segments.length === 3) {
+      const card = getCard(segments[1]);
+      if (!card) {
+        sendJson(response, 404, { detail: "Active card not found" });
+        return;
+      }
+      // Deliberately not touching updated_at: reading a card is not editing it,
+      // and folding the two together would make "recently changed" useless.
+      card.last_opened_at = now();
+      db.save(store, { cards: [card.id], relations: false, categories: false, meta: false });
+      sendJson(response, 200, { status: "recorded", last_opened_at: card.last_opened_at });
+      return;
+    }
+
+    if (request.method === "POST" && segments[0] === "cards" && segments[1] && segments[2] === "mute-resurface" && segments.length === 3) {
+      const card = getCard(segments[1]);
+      if (!card) {
+        sendJson(response, 404, { detail: "Active card not found" });
+        return;
+      }
+      card.resurface_muted_at = now();
+      save([card.id]);
+      sendJson(response, 200, { status: "muted", card: publicCard(card) });
+      return;
+    }
+
     if (request.method === "POST" && segments[0] === "cards" && segments[1] === "draft") {
       const body = await readBody(request);
       if (String(body.content || "").trim().length < 20) {
@@ -2432,7 +2648,11 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
   // Both default to what the desktop package declares, so nothing has a
   // second copy of the version to keep in step (scripts/release-check.mjs
   // fails the build on any version literal that could drift).
-  appVersion = desktopPackage.version, repository = desktopPackage.repository } = {}) {
+  appVersion = desktopPackage.version, repository = desktopPackage.repository,
+  // Off by env for the same reason the update check is: this is the only other
+  // thing in the app that reaches the network, and a local-first tool has to
+  // let someone turn all of it off.
+  sourceCheckEnabled = String(process.env.KCC_SOURCE_CHECK || "").toLowerCase() !== "off" } = {}) {
   // The store is opened first so the model runtime can start out knowing the
   // width the existing cards already use. Without that, a custom embedding API
   // returning a different width after a restart would be adopted as the new
@@ -2514,6 +2734,7 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
     deviceAuth,
     networkController,
     updateCheck,
+    sourceCheckEnabled,
     db,
   });
   await new Promise((resolve, reject) => {
@@ -2533,6 +2754,7 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
       deviceAuth,
       networkController,
       updateCheck,
+      sourceCheckEnabled,
       serverFactory: (handler) => https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath), minVersion: "TLSv1.2" }, handler),
       db,
     });
@@ -2587,4 +2809,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, normalizeSourceMetadata, SOURCE_TYPES, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };

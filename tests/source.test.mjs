@@ -162,6 +162,116 @@ describe("what described the old document does not follow the card to a new one"
   });
 });
 
+describe("going to look at whether a source moved on", () => {
+  let origin;
+  let body = "第一版的文件內容，長度足夠當成一份文件。";
+
+  before(async () => {
+    // A local stand-in for the web. The suite must never reach the network, and
+    // this is the feature that would.
+    const { createServer } = await import("node:http");
+    origin = createServer((request, response) => {
+      if (request.url === "/gone") {
+        response.writeHead(404).end("nope");
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(body);
+    });
+    await new Promise((resolve) => origin.listen(0, "127.0.0.1", resolve));
+  });
+
+  after(() => origin?.close());
+
+  const sourced = async (title) => {
+    const created = await ok("POST", "/cards", {
+      title,
+      summary: "一張有來源連結的卡。",
+      source: "本地測試文件",
+      source_url: `http://127.0.0.1:${origin.address().port}/doc`,
+    });
+    return created.card;
+  };
+
+  it("records what is there the first time, then notices when it changes", async () => {
+    const card = await sourced("會被改掉的來源");
+    const first = await ok("POST", "/sources/check", { card_id: card.id });
+    assert.equal(first.status, "recorded");
+    assert.ok(first.card.source_content_hash, "the first check recorded nothing to compare against");
+    assert.ok(first.card.source_checked_at);
+    assert.equal(first.card.source_stale_at, null);
+
+    const again = await ok("POST", "/sources/check", { card_id: card.id });
+    assert.equal(again.status, "unchanged");
+
+    body = "第二版的文件內容，已經被人改過了。";
+    const changed = await ok("POST", "/sources/check", { card_id: card.id });
+    assert.equal(changed.status, "changed");
+    assert.ok(changed.card.source_stale_at, "a changed source left no mark on the card");
+  });
+
+  it("never rewrites the card, whatever the source now says", async () => {
+    const all = await ok("GET", "/cards");
+    const card = all.find((item) => item.title === "會被改掉的來源");
+    // The card holds what the reader understood at the time. The source moving
+    // on is a thing to be told about, not a thing to be overwritten by.
+    assert.equal(card.title, "會被改掉的來源");
+    assert.equal(card.summary, "一張有來源連結的卡。");
+    assert.equal(card.source, "本地測試文件");
+  });
+
+  it("clears the mark when the reader says they have looked", async () => {
+    const all = await ok("GET", "/cards");
+    const card = all.find((item) => item.title === "會被改掉的來源");
+    const accepted = await ok("POST", "/sources/accept", { card_id: card.id });
+    assert.equal(accepted.status, "accepted");
+    assert.equal(accepted.card.source_stale_at, null);
+    assert.equal(accepted.card.title, "會被改掉的來源", "accepting the new version rewrote the card");
+    const after = await ok("POST", "/sources/check", { card_id: card.id });
+    assert.equal(after.status, "unchanged");
+  });
+
+  it("says it does not know, rather than saying it changed, when it cannot look", async () => {
+    const created = await ok("POST", "/cards", {
+      title: "連不到的來源",
+      source_url: `http://127.0.0.1:${origin.address().port}/gone`,
+    });
+    const result = await ok("POST", "/sources/check", { card_id: created.card.id });
+    assert.equal(result.status, "unreachable");
+    assert.equal(result.card.source_stale_at, null, "a failed look was reported as a change");
+  });
+
+  it("refuses a card with no link at all", async () => {
+    const created = await ok("POST", "/cards", { title: "沒有來源連結的卡" });
+    const refused = await call("POST", "/sources/check", { card_id: created.card.id });
+    assert.equal(refused.status, 422);
+  });
+
+  it("can be switched off entirely, like the update check", async () => {
+    const elsewhere = await mkdtemp(join(tmpdir(), "kcc-source-off-"));
+    try {
+      const quiet = await startLocalApi({
+        dataFile: join(elsewhere, "cards.json"),
+        modelsDir: join(elsewhere, "models"),
+        seedPath: "",
+        migrateFromUrl: "",
+        sourceCheckEnabled: false,
+      });
+      try {
+        const response = await fetch(`${quiet.baseUrl}/api/v1/sources/check`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${quiet.authToken}`, "content-type": "application/json" },
+          body: JSON.stringify({ card_id: "anything" }),
+        });
+        assert.equal(response.status, 409);
+      } finally {
+        await quiet.close();
+      }
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("cards that predate all of this", () => {
   it("reads an old card back with its source intact", async () => {
     const created = await ok("POST", "/cards", { id: "attention", number: "AI-001", title: "Attention 是什麼？", source: "Attention Is All You Need" });
@@ -191,7 +301,7 @@ describe("cards that predate all of this", () => {
       // Drop the columns back off, which is what an actual old file looks like.
       const { DatabaseSync } = await import("node:sqlite");
       const raw = new DatabaseSync(join(older, "cards.db"));
-      for (const column of ["source_type", "source_title", "source_url", "source_external_id", "source_updated_at", "source_content_hash", "source_checked_at"]) {
+      for (const column of ["source_type", "source_title", "source_url", "source_external_id", "source_updated_at", "source_content_hash", "source_checked_at", "source_stale_at", "last_opened_at", "resurface_muted_at"]) {
         raw.exec(`ALTER TABLE cards DROP COLUMN ${column}`);
       }
       raw.close();
@@ -227,6 +337,6 @@ describe("cards that predate all of this", () => {
   });
 
   it("says which schema it is on", () => {
-    assert.equal(STORE_VERSION, 3);
+    assert.equal(STORE_VERSION, 4);
   });
 });
