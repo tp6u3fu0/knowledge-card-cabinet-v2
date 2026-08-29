@@ -56,6 +56,7 @@
 .reading-related__item--coral,
 .table-card-button--coral,
 .relation-node--coral,
+.search-hit--coral,
 .relation-lane--coral {
   --domain-color: var(--accent-coral);
   --domain-soft: var(--accent-coral-soft);
@@ -65,6 +66,7 @@
 .reading-related__item--sky,
 .table-card-button--sky,
 .relation-node--sky,
+.search-hit--sky,
 .relation-lane--sky {
   --domain-color: var(--accent-sky);
   --domain-soft: var(--accent-sky-soft);
@@ -74,6 +76,7 @@
 .reading-related__item--lavender,
 .table-card-button--lavender,
 .relation-node--lavender,
+.search-hit--lavender,
 .relation-lane--lavender {
   --domain-color: var(--accent-lavender);
   --domain-soft: var(--accent-lavender-soft);
@@ -83,6 +86,7 @@
 .reading-related__item--mint,
 .table-card-button--mint,
 .relation-node--mint,
+.search-hit--mint,
 .relation-lane--mint {
   --domain-color: var(--accent-mint);
   --domain-soft: var(--accent-mint-soft);
@@ -92,6 +96,7 @@
 .reading-related__item--amber,
 .table-card-button--amber,
 .relation-node--amber,
+.search-hit--amber,
 .relation-lane--amber {
   --domain-color: var(--accent-amber);
   --domain-soft: var(--accent-amber-soft);
@@ -101,6 +106,7 @@
 .reading-related__item--rose,
 .table-card-button--rose,
 .relation-node--rose,
+.search-hit--rose,
 .relation-lane--rose {
   --domain-color: var(--accent-rose);
   --domain-soft: var(--accent-rose-soft);
@@ -110,6 +116,7 @@
 .reading-related__item--indigo,
 .table-card-button--indigo,
 .relation-node--indigo,
+.search-hit--indigo,
 .relation-lane--indigo {
   --domain-color: var(--accent-indigo);
   --domain-soft: var(--accent-indigo-soft);
@@ -119,6 +126,7 @@
 .reading-related__item--moss,
 .table-card-button--moss,
 .relation-node--moss,
+.search-hit--moss,
 .relation-lane--moss {
   --domain-color: var(--accent-moss);
   --domain-soft: var(--accent-moss-soft);
@@ -6184,4 +6192,232 @@ a:focus-visible {
 .duplicate-notice__more {
   color: var(--muted);
   font-size: 0.7rem;
+}
+
+/* ── Search results ───────────────────────────────────────────────────
+   A query gets rows, not the category wall. The row carries enough to
+   rebuild the idea without opening anything — title, question, and the one
+   sentence — because the cabinet's job is to hand back an understanding,
+   not to show you where it is filed. */
+.search-hits {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0;
+  max-width: 58rem;
+  padding: 0;
+}
+
+.search-hit {
+  align-items: start;
+  animation: search-hit-in var(--motion-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 22ms);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 1rem 0.9rem 1.15rem;
+  position: relative;
+  text-align: start;
+  transition: border-color var(--motion-base) var(--ease-out),
+    background var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
+  width: 100%;
+}
+
+.search-hit:hover,
+.search-hit:focus-visible {
+  background: color-mix(in srgb, var(--domain-soft) 22%, var(--paper));
+  border-color: color-mix(in srgb, var(--domain-color) 38%, var(--line));
+  transform: translateX(2px);
+}
+
+.search-hit.is-active {
+  border-color: color-mix(in srgb, var(--domain-color) 55%, var(--line));
+}
+
+/* The colour band is the only thing carrying the category visually, so it is
+   drawn rather than borrowed from a border that hover then overwrites. */
+.search-hit__rail {
+  background: var(--domain-color);
+  border-radius: 0.75rem 0 0 0.75rem;
+  inset: 0 auto 0 0;
+  position: absolute;
+  width: 3px;
+}
+
+.search-hit__head {
+  align-items: baseline;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  gap: 0.5rem;
+}
+
+.search-hit__number { font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+
+.search-hit__why {
+  color: var(--domain-color);
+  margin-inline-start: auto;
+}
+
+.search-hit__title { font-size: 1.02rem; line-height: 1.35; }
+.search-hit__question { color: var(--muted); font-size: 0.86rem; }
+.search-hit__summary { font-size: 0.92rem; line-height: 1.6; }
+
+@keyframes search-hit-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-hit { animation: none; }
+}
+
+/* ── Quick search overlay ─────────────────────────────────────────────
+   A frameless window that sits over whatever the reader was doing, so it
+   has to look like a panel rather than a page: its own edge, its own
+   shadow, and nothing that scrolls except the results. */
+.quick {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  box-shadow: 0 18px 48px rgba(33, 31, 39, 0.22);
+  display: grid;
+  gap: 0.7rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  overflow: hidden;
+  padding: 0.9rem 0.95rem 0.7rem;
+}
+
+.quick__field {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 0.6rem;
+  padding-bottom: 0.7rem;
+  /* The frameless window has no title bar, so the field's own margin is what
+     the reader can grab to move it. */
+  -webkit-app-region: drag;
+}
+
+.quick__glass { color: var(--muted); flex: none; height: 1.05rem; width: 1.05rem; }
+.quick__glass circle, .quick__glass path { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+
+.quick__input {
+  -webkit-app-region: no-drag;
+  background: none;
+  border: none;
+  color: var(--ink);
+  flex: 1;
+  font: inherit;
+  font-size: 1.15rem;
+  outline: none;
+}
+
+.quick__input::placeholder { color: var(--muted); }
+
+.quick__empty {
+  align-self: start;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0;
+  padding: 0.4rem 0.1rem;
+}
+
+.quick__hits {
+  display: grid;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.quick__hit {
+  background: none;
+  border: none;
+  border-radius: 0.55rem;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.5rem 0.6rem;
+  text-align: start;
+  transition: background var(--motion-quick) var(--ease-out);
+  width: 100%;
+}
+
+/* Selection is the cursor's, not the browser's: focus never leaves the input,
+   because that is what lets somebody keep typing while they steer. */
+.quick__hit.is-cursor { background: var(--paper-deep); }
+
+.quick__hit-head {
+  align-items: baseline;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.7rem;
+  gap: 0.45rem;
+}
+
+.quick__hit-why { margin-inline-start: auto; }
+.quick__hit strong { font-size: 0.96rem; line-height: 1.35; }
+.quick__hit-summary { font-size: 0.86rem; line-height: 1.55; }
+
+.quick__hit-more {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  margin-top: 0.35rem;
+  padding-top: 0.4rem;
+}
+
+.quick__hit-more em {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  margin-inline-end: 0.5rem;
+}
+
+.quick__keys {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.7rem;
+  gap: 0.3rem;
+  margin: 0;
+  padding-top: 0.55rem;
+}
+
+.quick__keys kbd {
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: 0.3rem;
+  font: inherit;
+  padding: 0.05rem 0.3rem;
+}
+
+.database-search__shortcut {
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: 0.3rem;
+  color: var(--muted);
+  flex: none;
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+}
+
+/* Said once, above the list, when no row can say why it is here — never
+   stamped on the rows themselves as a reason they do not have. */
+.search-hits__unsure {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  padding: 0 0.15rem 0.15rem;
 }

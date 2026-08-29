@@ -1045,3 +1045,65 @@ test("the app can tell you which build it is", async () => {
   assert.match(readme, /KCC_UPDATE_CHECK/u, "the one network call the app makes is undocumented");
 });
 
+
+test("a query gets an answer, not a shelf to look along", async () => {
+  // The category wall shows a title and a question and hides the one sentence
+  // behind a click. That is the right shape for browsing and the wrong shape
+  // for "did I ever write this down" — which is the question the cabinet
+  // exists to answer, and the one a search is always asking.
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+
+  const results = region(page, "function SearchResults(", "\n}\n", "the search result list");
+  for (const field of ["number", "category", "title", "question", "summary"]) {
+    assert.match(results, new RegExp(`card\\.${field}`, "u"), `a result does not carry its ${field}`);
+  }
+  assert.match(results, /reasons\.get\(card\.id\)/u, "a result does not say why it is here");
+  assert.doesNotMatch(results, /\bscore\b/u, "a score is on screen; the reason is what a reader can act on");
+
+  // And it has to actually be what a query renders.
+  const branch = region(page, `collectionView === "cards" && collectionQuery.trim()`, "collection-categories", "the cards view branch");
+  assert.match(branch, /<SearchResults/u, "a query still renders the browsing wall");
+});
+
+test("the quick search overlay is a client of the same search, and says which keys it takes", async () => {
+  // A second endpoint would grow a second ranking, and one of the two would
+  // rot. The overlay is another client of GET /search, nothing more.
+  const quick = await readFile(new URL("../app/quick/page.tsx", import.meta.url), "utf8");
+  assert.match(quick, /\/api\/search\?/u, "the overlay does not use the cabinet's own search");
+  assert.doesNotMatch(quick, /quick-search|\/api\/quick/u, "the overlay grew its own endpoint");
+
+  // Keyboard first: the mouse is the secondary way in, so every one of these
+  // has to be handled.
+  const keys = region(quick, "const onKeyDown = useCallback", "}, [close, cursor, results]);", "the overlay's key handling");
+  for (const key of ["Escape", "ArrowDown", "ArrowUp", "Enter"]) {
+    assert.match(keys, new RegExp(`"${key}"`, "u"), `${key} does nothing in the overlay`);
+  }
+  assert.match(keys, /metaKey \|\| event\.ctrlKey/u, "there is no way to send a card to the cabinet");
+
+  // Focus stays in the field, which is what lets somebody keep typing while
+  // they steer — so the rows must not be tab stops competing for it.
+  assert.match(quick, /tabIndex=\{-1\}/u, "the result rows take focus away from the field");
+});
+
+test("the quick search shortcut is claimed honestly or not claimed at all", async () => {
+  // A global accelerator is first-come-first-served across the machine, and
+  // Electron reports a refusal by returning false rather than by throwing.
+  // Ignoring that ships an app whose headline feature silently does nothing.
+  const main = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+
+  assert.match(main, /QUICK_ACCELERATORS = \[/u, "there is no accelerator list to fall back through");
+  const register = region(main, "function registerQuickShortcut()", "\n}\n", "shortcut registration");
+  assert.match(register, /if \(globalShortcut\.register\(/u, "the return value of register() is ignored");
+  assert.match(register, /quickAccelerator = null/u, "a machine where nothing could be claimed is not recorded");
+  assert.match(main, /ipcMain\.handle\("quick:shortcut"/u, "the interface cannot ask what was claimed");
+
+  // The window is kept, not rebuilt: creating one on demand takes long enough
+  // that the keystroke reads as having done nothing.
+  assert.match(main, /quickWindow\?\.hide\(\)/u, "the overlay is destroyed instead of hidden");
+  assert.match(main, /globalShortcut\.unregisterAll\(\)/u, "the accelerator is still claimed after the app quits");
+
+  // And the interface must print what was claimed rather than a guess.
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /bridge\.shortcut\(\)/u, "the hint does not ask which accelerator is live");
+  assert.doesNotMatch(page, /"(Ctrl|⌘)\+Shift\+K"/u, "the accelerator is hardcoded into the interface");
+});

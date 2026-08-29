@@ -159,6 +159,9 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
   };
 }
 
+/** Only ever decides whether to print ⌘ or Ctrl in a hint. */
+const isApple = typeof navigator !== "undefined" && /mac|iphone|ipad/iu.test(navigator.platform || navigator.userAgent);
+
 /** How long the two full-screen surfaces take to leave, in step with globals.css. */
 const VIEWER_EXIT_MS = 200;
 const PANEL_EXIT_MS = 200;
@@ -313,6 +316,82 @@ function KnowledgeCardSection({
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * What a query gets back.
+ *
+ * Searching is not browsing, so it does not get the browsing surface. The wall
+ * groups by category and shows a title and a question, which is the right shape
+ * for looking along a shelf and the wrong shape for "did I ever write this
+ * down" — answering that needs the one sentence, and on the wall the one
+ * sentence is behind a click.
+ *
+ * So a query gets rows: number, category, title, question, summary, and the
+ * reason the host returned this card. That is enough to rebuild the idea
+ * without opening anything, which is the whole point of the cabinet being a
+ * cache rather than a shelf.
+ *
+ * No score. "為什麼這張卡在這裡" is something a reader can act on; 0.78243 is
+ * not, and putting it on screen invites tuning by vibe.
+ */
+function SearchResults({
+  cards,
+  reasons,
+  selectedId,
+  onSelect,
+  onOpen,
+}: {
+  cards: KnowledgeCard[];
+  reasons: Map<string, string[]>;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onOpen: (id: string) => void;
+}) {
+  // Nothing on the page can say why it is here.
+  //
+  // That happens when the cabinet has too few cards to have a distribution:
+  // §3.3's floor and the 語意相似 label both withhold themselves rather than
+  // guess, which is correct — but it leaves a ranked list that quietly implies
+  // every row was chosen, when in truth nothing could be ruled out. Saying so
+  // once, here, is honest; stamping a made-up reason on each row would not be.
+  const silent = cards.length > 0 && cards.every((card) => !reasons.get(card.id)?.length);
+
+  return (
+    <ol className="search-hits" aria-label={`搜尋結果，${cards.length} 張`}>
+      {silent ? (
+        <li className="search-hits__unsure">
+          卡片還太少，只能照語意接近的順序排出來，還無法判斷哪一張真的答得上。
+        </li>
+      ) : null}
+      {cards.map((card, index) => (
+        // Capped like the category stagger: an uncapped one over fifty results
+        // is still arriving after the reader has finished reading.
+        <li key={card.id} style={{ "--i": Math.min(index, 9) } as CSSProperties}>
+          <button
+            className={`search-hit search-hit--${card.accent} ${card.id === selectedId ? "is-active" : ""}`}
+            type="button"
+            onClick={() => {
+              onSelect(card.id);
+              onOpen(card.id);
+            }}
+          >
+            <span className="search-hit__rail" aria-hidden="true" />
+            <span className="search-hit__head">
+              <span className="search-hit__number">{card.number}</span>
+              <span className="search-hit__category">{card.category}</span>
+              {reasons.get(card.id)?.length ? (
+                <span className="search-hit__why">{reasons.get(card.id)!.join(" · ")}</span>
+              ) : null}
+            </span>
+            <strong className="search-hit__title">{card.title}</strong>
+            {card.question ? <span className="search-hit__question">{card.question}</span> : null}
+            {card.summary ? <span className="search-hit__summary">{card.summary}</span> : null}
+          </button>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -510,6 +589,9 @@ export default function CollectionPage() {
   const [activeCategory, setActiveCategory] = useState("全部");
   const [activeTag, setActiveTag] = useState("全部");
   const [searchSort, setSearchSort] = useState<"relevance" | "updated" | "title">("relevance");
+  // The accelerator the desktop build actually claimed — null on the web, and
+  // null on a machine where something else already holds it.
+  const [quickShortcut, setQuickShortcut] = useState<string | null>(null);
   const [semanticSearchResult, setSemanticSearchResult] = useState<{ query: string; matches: Map<string, { score: number; reasons: string[] }> } | null>(null);
   const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
@@ -699,7 +781,16 @@ export default function CollectionPage() {
         if (cancelled) return;
         setCards(loadedCards);
         setRelationEdgesState(relationLoadFailed ? defaultRelationEdges : nextEdges);
-        setSelectedId(loadedCards[0]?.id ?? "");
+        // ?card= is how the quick search overlay hands a card over. It is read
+        // once, on load, and then taken out of the address bar so that a reload
+        // does not reopen a card the reader has since closed.
+        const requested = new URLSearchParams(window.location.search).get("card");
+        const opened = requested && loadedCards.some((card) => card.id === requested) ? requested : "";
+        setSelectedId(opened || loadedCards[0]?.id || "");
+        if (opened) {
+          setViewerCardId(opened);
+          window.history.replaceState(null, "", window.location.pathname);
+        }
         void loadDuplicates();
       } catch {
         if (!cancelled) setLoadError("目前無法載入本機資料，先顯示示範卡片。請重新啟動本機 API。");
@@ -713,6 +804,12 @@ export default function CollectionPage() {
       cancelled = true;
     };
   }, [cardsRefreshKey]);
+
+  useEffect(() => {
+    const bridge = (globalThis as unknown as { quickSearch?: { shortcut: () => Promise<string | null> } }).quickSearch;
+    if (!bridge) return;
+    void bridge.shortcut().then(setQuickShortcut).catch(() => setQuickShortcut(null));
+  }, []);
 
   useEffect(() => {
     const query = collectionQuery.trim();
@@ -1929,6 +2026,11 @@ export default function CollectionPage() {
               placeholder="搜尋卡片、主題或來源"
               aria-label="搜尋收藏卡片"
             />
+            {quickShortcut ? (
+              <kbd className="database-search__shortcut" title="在任何應用程式裡叫出快速搜尋">
+                {quickShortcut.replace("CommandOrControl", isApple ? "⌘" : "Ctrl").replace(/\+/gu, " ")}
+              </kbd>
+            ) : null}
           </label>
           <CardSelect
             className="database-filter-select database-category-filter"
@@ -2159,6 +2261,17 @@ export default function CollectionPage() {
             <strong>找不到符合的知識卡</strong>
             <span>試著換一個關鍵字，或清除目前的分類篩選。</span>
           </div>
+        ) : collectionView === "cards" && collectionQuery.trim() ? (
+          // A query switches the surface. Browsing and retrieving want opposite
+          // things from the same cards, and trying to serve both with one wall
+          // is what put the one-sentence summary behind a click.
+          <SearchResults
+            cards={filteredCards}
+            reasons={searchReasonsById}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onOpen={setViewerCardId}
+          />
         ) : collectionView === "cards" ? (
           <div className="collection-categories">
             {cardGroups.map((group, order) => (
@@ -2175,7 +2288,7 @@ export default function CollectionPage() {
             ))}
             {collectionQuery || activeCategory !== "全部" || activeTag !== "全部" ? (
               <p className="collection-search-reasons">目前篩選：{[
-                ...getSearchReasons(filteredCards[0] ?? cards[0] ?? knowledgeCards[0]),
+                activeCategory !== "全部" ? `分類「${activeCategory}」` : "",
                 activeTag !== "全部" ? `標籤「${activeTag}」` : "",
                 searchSort === "updated" ? "最近更新" : searchSort === "title" ? "標題排序" : "",
               ].filter(Boolean).join(" · ") || "篩選條件"}</p>

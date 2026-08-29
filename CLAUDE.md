@@ -120,7 +120,7 @@ Notion / 文件 / 論文 / 網頁 / 筆記
 | 階段 | 目標 | 內容 | 狀態 |
 | --- | --- | --- | --- |
 | 1 | 讓檢索**正確** | 前端不再用字面比對否決主機答案；字面搜尋與 embedding 解耦；混合排名；語意檢索測試；模型失敗的退路 | **已完成**（§3.14、§3.15、`tests/retrieval.test.mjs`） |
-| 2 | 讓檢索**快** | 搜尋結果直接顯示一句話摘要與命中理由；桌面全域快速搜尋（`Ctrl/Cmd + Shift + K`）；鍵盤優先操作（`↑`/`↓` 選、`Enter` 展開、`Esc` 關閉，滑鼠是次要） | 未開始 |
+| 2 | 讓檢索**快** | 有查詢時換成結果列（標題／問題／一句話／分類／命中理由）；桌面全域快速搜尋疊層；鍵盤優先操作 | **已完成**（§3.16、`app/quick/page.tsx`） |
 | 3 | 讓建立**便宜** | Card ID 與編號自動產生；Quick Capture：貼上 → AI 草稿 → 只確認標題／問題／摘要／分類，其餘收在進階編輯 | 未開始 |
 | 4 | 把 **Storage 和 Cache 接起來** | 結構化來源（`source_type` / `source_url` / `source_external_id` / `source_updated_at` / `source_content_hash` / `source_checked_at`，全部 nullable，原本的 `source` 字串保留給顯示用）；首頁定位改寫 | 未開始 |
 | 5 | 重新發現**忘掉的** | 偶爾把久未查看、或與最近閱讀／搜尋相關的卡浮出來；來源過期提示 | 未開始 |
@@ -330,12 +330,31 @@ Query
 
 `tests/retrieval.test.mjs` 用一個會對所有請求回 503 的假 embedding 服務守著搜尋這一塊。之後新增任何依賴模型的功能，請照同樣的方式加一題——不需要權重、不需要網路。
 
+### 3.16 快速搜尋疊層：預先建好、藏起來，而且只能有一套搜尋
+
+這個疊層是整個產品定位的兌現點——有人在 VS Code 裡忘了某個概念，取回它的成本必須是一個按鍵。所以有三件事不能動：
+
+**視窗是「藏起來」不是「關掉」。** `quickWindow` 在 `app.whenReady()` 就建好，前端一起來就把 `/quick` 載進去，之後永遠只 `show()` / `hide()`。改成用完就關、要用再開，按下快捷鍵到畫面出現會慢到讓人以為沒反應，而目標是 150ms。同理 `backgroundThrottling: false`：Chromium 會節流沒顯示的視窗，那正好會讓「叫出來之後的第一個按鍵」變鈍。
+
+**快捷鍵搶不到就要說出來。** `globalShortcut.register()` 搶不到時**回傳 false，不會 throw**。忽略它的下場是出一個招牌功能靜靜地什麼都不做。`registerQuickShortcut()` 會依序試 `QUICK_ACCELERATORS`，把真正拿到的那個記在 `quickAccelerator`，介面透過 `quick:shortcut` 問出來再顯示。**不要在前端寫死 `⌘⇧K`**——那是猜的，`tests/rendered-html.test.mjs` 會擋。
+
+**不要為快速搜尋開第二條 API。** 疊層是 `GET /search` 的另一個 client，不是另一種搜尋。開 `/quick-search` 會長出第二套排名，然後兩套裡總有一套會爛掉而沒人發現。
+
+另外兩個容易踩的：
+
+- 焦點永遠留在輸入框，結果列是「用游標選」不是「用 Tab 走」（所以 row 是 `tabIndex={-1}`）。這樣才能邊打字邊選。
+- 疊層不自己開卡片。`Cmd/Ctrl + Enter` 走 `quick:open-card`，把 id 交給主視窗的 `?card=`。在這裡複製一份 viewer 等於兩份都要維護，而讀者本來就到得了那個畫面。
+
 ---
 
 ## 4. 連動地圖：改這裡，就一定要改那裡
 
 | 你改了 | 就必須同時改 | 不改的後果 |
 | --- | --- | --- |
+| 新增一個 accent 色帶（`.search-hit--<色>` 之類） | 八組 `--domain-*` 選擇器每一組都要加；`--domain-*` 只設在列出來的選擇器上 | 色帶整條變透明，等於沒有分類顏色 |
+| 快速搜尋疊層的視窗生命週期或快捷鍵 | 見 §3.16：藏不是關、搶不到要說、不開第二條 API | `tests/rendered-html.test.mjs` 會失敗（刻意的）——招牌功能靜靜地不動作 |
+| `preload.cjs` 新增 bridge | 對應的 `ipcMain.handle` 要有，而且想清楚每個視窗都拿得到它 | 前端呼叫一個不存在的 handler，錯誤只會出現在 console |
+| 有查詢時的收藏頁畫面 | 走 `SearchResults`，不要退回分類牆；一句話摘要必須在列上（P-03） | 讀者又得點開卡片才知道自己以前寫了什麼 |
 | `/search` 的候選集或過濾條件 | 想清楚它擋掉的是哪一條管線；字面那條**永遠**要看到全部的卡（§3.14） | `tests/retrieval.test.mjs` 會失敗（刻意的）——模型一壞，整個搜尋跟著壞 |
 | `LEXICAL_MIN_COVERAGE` / `LEXICAL_FIELDS` / `LEXICAL_WEIGHT` | 先跑 `tests/retrieval.test.mjs`，特別是「搜不到的東西要回 0 筆」那題 | 放寬字面門檻＝「每個查詢都回整個卡冊」換一種形式回來 |
 | `/search` 回應欄位 | `app/collection/types.ts` 的 `ApiCard`；只增不改（手機端已發布，§8） | 舊版 App 讀不到新欄位，或型別對不上 |

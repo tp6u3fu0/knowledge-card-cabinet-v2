@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -11,6 +11,8 @@ const isMcpProcess = process.argv.includes("--mcp");
 if (isMcpProcess) app.disableHardwareAcceleration();
 
 let mainWindow;
+let quickWindow;
+let quickAccelerator = null;
 let startupPromise;
 let localApiRuntime;
 let webProcess;
@@ -217,6 +219,7 @@ async function startServices() {
     webBaseUrl = await startWebServer(localApiRuntime.baseUrl);
     sendStatus("ready", "準備完成");
     await mainWindow.loadURL(`${webBaseUrl}/collection`);
+    void loadQuickWindow().catch(() => undefined);
   })();
 
   try {
@@ -226,6 +229,108 @@ async function startServices() {
     startupPromise = undefined;
     sendStatus("error", error instanceof Error ? error.message : String(error));
   }
+}
+
+/* ── Quick search ─────────────────────────────────────────────────────
+   The overlay is the product's reason to exist: somebody in another
+   application remembers they understood a thing once, and the cost of
+   getting it back has to be a keystroke. Anything that makes them open the
+   cabinet first has already lost — they will use a search engine instead.
+
+   So the window is built once and then shown and hidden, never closed. A
+   window created on demand takes long enough that the keystroke feels like
+   it did nothing, and the target is 150ms. */
+
+const QUICK_ACCELERATORS = ["CommandOrControl+Shift+K", "CommandOrControl+Alt+K"];
+
+function createQuickWindow() {
+  quickWindow = new BrowserWindow({
+    width: 680,
+    height: 460,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: "#f3f0e9",
+    ...(app.isPackaged ? {} : { icon: developmentIconPath() }),
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
+      // The overlay spends nearly all its life hidden, and Chromium throttles
+      // timers in a window that is not on screen. That is normally the right
+      // trade; here it is the one thing that would make the first keystroke
+      // after the shortcut feel dead, which is the whole thing this window
+      // exists to avoid.
+      backgroundThrottling: false,
+    },
+  });
+
+  // Losing focus is a dismissal. Somebody who clicked back into their editor
+  // has already moved on, and an overlay left floating over their work is the
+  // opposite of getting out of the way.
+  quickWindow.on("blur", () => quickWindow?.hide());
+  quickWindow.on("closed", () => {
+    quickWindow = undefined;
+  });
+  return quickWindow;
+}
+
+/**
+ * Load the overlay's page as soon as the frontend is up.
+ *
+ * Separate from creating the window because the window exists long before
+ * there is a URL to put in it, and because a reader who presses the shortcut
+ * during startup should get the overlay a moment later rather than an error.
+ */
+async function loadQuickWindow() {
+  if (!webBaseUrl) return;
+  if (!quickWindow || quickWindow.isDestroyed()) createQuickWindow();
+  if (quickWindow.webContents.getURL().startsWith(`${webBaseUrl}/quick`)) return;
+  await quickWindow.loadURL(`${webBaseUrl}/quick`);
+}
+
+async function toggleQuickWindow() {
+  if (quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible()) {
+    quickWindow.hide();
+    return;
+  }
+  await loadQuickWindow();
+  if (!quickWindow || quickWindow.isDestroyed()) return;
+  // Follow the screen the cursor is on. A fixed position puts the overlay on
+  // the wrong monitor for anyone with two of them.
+  const cursor = screen.getCursorScreenPoint();
+  const area = screen.getDisplayNearestPoint(cursor).workArea;
+  const [width] = quickWindow.getSize();
+  quickWindow.setPosition(
+    Math.round(area.x + (area.width - width) / 2),
+    Math.round(area.y + Math.min(area.height * 0.22, 180)),
+  );
+  quickWindow.show();
+  quickWindow.focus();
+}
+
+/**
+ * Claim the accelerator, and be honest when it cannot be claimed.
+ *
+ * A global shortcut is first-come-first-served across the whole machine, so
+ * another application may already hold it. Electron reports that by returning
+ * false rather than by throwing, which is easy to ignore — and ignoring it
+ * ships an app whose headline feature silently does nothing. The fallback is
+ * tried next, and what actually got registered is what the interface is told.
+ */
+function registerQuickShortcut() {
+  for (const accelerator of QUICK_ACCELERATORS) {
+    if (globalShortcut.isRegistered(accelerator)) continue;
+    if (globalShortcut.register(accelerator, () => void toggleQuickWindow())) {
+      quickAccelerator = accelerator;
+      return accelerator;
+    }
+  }
+  quickAccelerator = null;
+  return null;
 }
 
 function createWindow() {
@@ -253,6 +358,25 @@ function createWindow() {
   });
 }
 
+ipcMain.handle("quick:close", () => quickWindow?.hide());
+ipcMain.handle("quick:shortcut", () => quickAccelerator);
+/**
+ * Hand a card to the cabinet.
+ *
+ * The overlay deliberately cannot open a card by itself: one window that reads
+ * and one that edits is the split, and duplicating the viewer here would mean
+ * two of everything for the sake of a case the reader can already reach.
+ */
+ipcMain.handle("quick:open-card", async (_event, id) => {
+  quickWindow?.hide();
+  if (!webBaseUrl) return;
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  await mainWindow.loadURL(`${webBaseUrl}/collection?card=${encodeURIComponent(id)}`);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 ipcMain.handle("desktop:retry", () => startServices());
 // The API's port is chosen at startup, so there is nothing sensible to open
 // before it is running.
@@ -265,6 +389,8 @@ if (isMcpProcess) {
 } else {
   app.whenReady().then(() => {
     createWindow();
+    createQuickWindow();
+    registerQuickShortcut();
     startServices();
 
     app.on("activate", () => {
@@ -273,10 +399,12 @@ if (isMcpProcess) {
   });
 
   app.on("window-all-closed", () => {
+    // The hidden overlay is a window, so this only fires once it is gone too.
     if (process.platform !== "darwin") app.quit();
   });
 
   app.on("before-quit", () => {
+    globalShortcut.unregisterAll();
     void stopServices();
   });
 }
