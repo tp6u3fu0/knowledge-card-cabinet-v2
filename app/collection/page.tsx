@@ -540,7 +540,7 @@ function CollectionCardViewer({
             */}
             {sourceState?.stale ? (
               <p className="reading-source-stale" role="status">
-                原始資料已經和你整理這張卡時不一樣了，這張卡可能需要重新整理。
+                來源內容可能已經更新。這張卡記的是你當時的理解，要不要重新整理由你決定。
                 <button type="button" onClick={() => void onAcceptSource?.()}>我看過了，以現在的版本為準</button>
               </p>
             ) : null}
@@ -777,7 +777,7 @@ export default function CollectionPage() {
       setSourceNote({
         recorded: "已經記下來源目前的樣子。下次再查就能看出它有沒有變。",
         unchanged: "來源和上次查的時候一樣。",
-        changed: "來源已經變了。",
+        changed: "來源內容和上次查的時候不一樣了。",
         accepted: "好，之後以現在這個版本為準。卡片的內容沒有被改動。",
         unreachable: "現在連不到這個來源，所以看不出來有沒有變。",
       }[result.status ?? ""] ?? result.detail ?? "查不到結果。");

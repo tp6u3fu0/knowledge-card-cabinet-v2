@@ -828,6 +828,60 @@ const SOURCE_CHECK_TIMEOUT_MS = 8000;
 /** Enough of a document to tell one version from another; a cap, not a download. */
 const SOURCE_CHECK_MAX_BYTES = 2 * 1024 * 1024;
 
+/**
+ * What a source says, with what it merely does stripped out.
+ *
+ * Hashing the raw response makes the check useless on the real web. A page
+ * whose article has not changed a word still arrives with a fresh CSP nonce, a
+ * new analytics id, a rebuilt script hash, a rendered timestamp, a block of
+ * hydration state — so the bytes differ, the digest differs, and the card is
+ * marked stale for reasons that have nothing to do with what the reader
+ * understood. A prompt that is wrong most times it appears is a prompt people
+ * stop reading.
+ *
+ * This is a fingerprint for change detection, not a renderer. Tags are removed
+ * by pattern, which is not a parser and is not trying to be: the failure mode
+ * of getting it slightly wrong is a slightly different fingerprint, compared
+ * consistently against itself.
+ */
+const HTML_HIDDEN = /<(script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/giu;
+const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
+
+function decodeEntities(text) {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/giu, (whole, name) => {
+    const key = name.toLowerCase();
+    if (HTML_ENTITIES[key]) return HTML_ENTITIES[key];
+    if (key.startsWith("#x")) return String.fromCodePoint(Number.parseInt(key.slice(2), 16) || 0) || whole;
+    if (key.startsWith("#")) return String.fromCodePoint(Number.parseInt(key.slice(1), 10) || 0) || whole;
+    return whole;
+  });
+}
+
+/** Line endings, runs of空白, and the edges — all the ways the same text differs from itself. */
+function canonicalText(text) {
+  return text.replace(/\r\n?/gu, "\n").replace(/\s+/gu, " ").trim();
+}
+
+function canonicalSource(bytes, contentType) {
+  const type = String(contentType || "").toLowerCase();
+  if (/^text\/html|^application\/xhtml/u.test(type)) {
+    const text = bytes.toString("utf8")
+      .replace(/<!--[\s\S]*?-->/gu, " ")
+      .replace(HTML_HIDDEN, " ")
+      .replace(/<[^>]*>/gu, " ");
+    return canonicalText(decodeEntities(text));
+  }
+  // JSON and plain text get whitespace normalised and nothing else. Reaching
+  // further — sorting keys, dropping fields — would be guessing at which parts
+  // of someone else's document carry meaning (spec §21).
+  if (/^text\/|^application\/json|^application\/xml/u.test(type)) {
+    return canonicalText(bytes.toString("utf8"));
+  }
+  // Anything else is bytes: a PDF or an image has no text form to normalise,
+  // and pretending otherwise would fingerprint the decoding, not the document.
+  return bytes;
+}
+
 async function fetchSourceDigest(url, fetchImpl = fetch) {
   const response = await fetchImpl(url, {
     redirect: "follow",
@@ -838,12 +892,12 @@ async function fetchSourceDigest(url, fetchImpl = fetch) {
     signal: AbortSignal.timeout(SOURCE_CHECK_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`來源回應 ${response.status}`);
-  const digest = crypto.createHash("sha256");
+  const contentType = response.headers?.get?.("content-type") || "";
   // A fetch stand-in may hand back a response with no stream. Those are small
   // by construction — they exist in tests — so the whole body is safe there.
   if (!response.body) {
-    digest.update(Buffer.from(await response.arrayBuffer()).subarray(0, SOURCE_CHECK_MAX_BYTES));
-    return digest.digest("hex");
+    const whole = Buffer.from(await response.arrayBuffer()).subarray(0, SOURCE_CHECK_MAX_BYTES);
+    return crypto.createHash("sha256").update(canonicalSource(whole, contentType)).digest("hex");
   }
 
   // Read as it arrives and stop at the cap.
@@ -857,13 +911,14 @@ async function fetchSourceDigest(url, fetchImpl = fetch) {
   // responses, wrong on compressed ones, and a second code path that is only
   // exercised by well-behaved servers is a second code path that rots.
   const reader = response.body.getReader();
+  const chunks = [];
   let read = 0;
   try {
     while (read < SOURCE_CHECK_MAX_BYTES) {
       const { done, value } = await reader.read();
       if (done) break;
       const take = Math.min(value.byteLength, SOURCE_CHECK_MAX_BYTES - read);
-      digest.update(take === value.byteLength ? value : value.subarray(0, take));
+      chunks.push(take === value.byteLength ? value : value.subarray(0, take));
       read += take;
     }
   } finally {
@@ -871,7 +926,12 @@ async function fetchSourceDigest(url, fetchImpl = fetch) {
     // the rest of it is thrown away after arriving.
     await reader.cancel().catch(() => {});
   }
-  return digest.digest("hex");
+  // Held rather than hashed chunk by chunk, because canonicalising needs the
+  // text and a tag can straddle two chunks. Bounded by the same cap, so this
+  // is at most SOURCE_CHECK_MAX_BYTES in memory regardless of the source size.
+  return crypto.createHash("sha256")
+    .update(canonicalSource(Buffer.concat(chunks), contentType))
+    .digest("hex");
 }
 
 function normalizeCard(input, previous = {}, canonicalTags = null) {
@@ -2868,4 +2928,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, refreshSemanticBaseline, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, refreshSemanticBaseline, generateCardId, nextCardNumber, normalizeSourceMetadata, fetchSourceDigest, canonicalSource, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES, RESURFACE_QUIET_DAYS, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };

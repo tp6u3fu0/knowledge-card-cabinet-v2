@@ -405,6 +405,9 @@ Query
 - **不看 `Content-Length`。** chunked 沒有、壓縮過的是錯的，而一條只有乖伺服器會走到的分支會爛掉。真正的限制在 reader 裡。
 - **裝置權杖一律 403。** `/sources` 在 `deviceMayReach()` 裡是第一條就擋掉的——一支被撿走的手機不可以叫主機去連只有主機連得到的位址。所以這兩條路由**不放在 `/cards` 底下**：`cards` 對裝置是全開的，掛在那裡就等於開了。
 - **連不到就是「不知道」，不是「變了」。** 回 `unreachable`，不寫 `source_stale_at`。跟更新檢查同一條紀律。
+- **比對的是正文，不是回應的 bytes。** `canonicalSource()` 按 Content-Type 處理：HTML 先拿掉 script／style／noscript／template／svg／iframe 與註解，再去標籤、解 entity、壓空白；text 與 JSON 只壓空白；其餘（PDF、圖片）維持 bytes。**不這樣做的話這個功能在真實網頁上是廢的**——文章一個字沒改，但 CSP nonce、analytics id、script hash、hydration state 每次都不一樣，於是每次都說「來源變了」。**一個大多數時候都在誤報的提示，人就不看了。**
+  它是變更偵測用的指紋，不是 renderer；標籤是用樣式拿掉的，不是 parser。弄錯的後果是指紋稍微不同，而它永遠只跟自己比。
+- **介面說的是「來源內容可能已經更新」，不是「你的知識已過期」。** 來源變了不等於理解變了——卡片記的是使用者當時讀懂的東西。
 
 **卡片本身永遠不會被覆寫。** 卡片記的是使用者當時的理解，那跟來源現在的文字是兩件事。`check` 只寫 hash 與時間戳；`accept` 也只寫 hash，意思是「我看過了，之後以現在這版為準」，不動標題、摘要或任何一個字。第一次檢查是記錄基準線（`recorded`），不是宣告有變。
 

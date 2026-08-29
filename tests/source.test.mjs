@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 const require = createRequire(import.meta.url);
-const { startLocalApi, normalizeSourceMetadata, fetchSourceDigest, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES } = require("../desktop/local-api.cjs");
+const { startLocalApi, normalizeSourceMetadata, fetchSourceDigest, canonicalSource, SOURCE_TYPES, SOURCE_CHECK_MAX_BYTES } = require("../desktop/local-api.cjs");
 const { openStore, STORE_VERSION } = require("../desktop/store.cjs");
 
 let runtime;
@@ -330,6 +330,75 @@ describe("going to look at whether a source moved on", () => {
     } finally {
       silent.close();
       silent.closeAllConnections?.();
+    }
+  });
+
+  it("does not call a page changed because its nonce changed", async () => {
+    // The acceptance case. A page whose article has not changed a word still
+    // arrives with a fresh CSP nonce, a new analytics id and a rendered
+    // timestamp. Hashing the raw response marks the card stale every time,
+    // and a prompt that is wrong most times it appears is one people stop
+    // reading.
+    const article = "<h1>AOP 是什麼？</h1><p>用代理物件包住方法&nbsp;&amp; 前後各留一個切入點。</p>";
+    const dressed = (nonce, at) => Buffer.from(
+      `<!doctype html><html><head><title>AOP</title>`
+      + `<script nonce="${nonce}">window.__HYDRATE={at:${at}}</script>`
+      + `<style>.a{color:#${nonce}}</style><meta name="csrf" content="${nonce}"></head>`
+      + `<body>${article}<!-- built ${at} --><script>track("${nonce}")</script></body></html>`, "utf8");
+
+    const first = canonicalSource(dressed("aaa111", 1), "text/html; charset=utf-8");
+    const second = canonicalSource(dressed("zzz999", 2), "text/html; charset=utf-8");
+    assert.equal(first, second, "the same article fingerprinted differently because its wrapper moved");
+    assert.match(first, /AOP 是什麼？/u, "the article itself was stripped out along with the wrapper");
+    assert.doesNotMatch(first, /nonce|track|__HYDRATE|csrf/u, "machinery survived into the fingerprint");
+    // Entities are resolved, so &amp; and & are the same document.
+    assert.match(first, /方法 & 前後/u);
+
+    // And a real change is still a change.
+    const rewritten = canonicalSource(
+      Buffer.from(`<html><body><h1>AOP 是什麼？</h1><p>完全改寫過的內文。</p></body></html>`, "utf8"),
+      "text/html",
+    );
+    assert.notEqual(rewritten, first, "rewriting the article did not change the fingerprint");
+  });
+
+  it("normalises text and leaves bytes alone", () => {
+    const text = (value) => canonicalSource(Buffer.from(value, "utf8"), "text/plain");
+    assert.equal(text("a\r\n  b\n\nc  "), "a b c", "the same text differed from itself over line endings");
+    assert.equal(text("  spaced   out  "), "spaced out");
+    assert.equal(canonicalSource(Buffer.from("{ \"a\": 1 }", "utf8"), "application/json"), '{ "a": 1 }');
+    // A PDF has no text form to normalise, and pretending otherwise would
+    // fingerprint the decoding rather than the document.
+    const pdf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01]);
+    assert.ok(Buffer.isBuffer(canonicalSource(pdf, "application/pdf")));
+    assert.equal(canonicalSource(pdf, "application/pdf").equals(pdf), true);
+  });
+
+  it("sees through a changed wrapper end to end", async () => {
+    // The same thing again, but through the route, so the canonicalisation is
+    // actually reached by a source check rather than only unit-tested.
+    const { createServer } = await import("node:http");
+    let nonce = "first";
+    const site = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<html><head><script nonce="${nonce}">var t=${Date.now()};</script></head>`
+        + `<body><h1>一篇沒有改過的文章</h1><p>內文從頭到尾都一樣。</p></body></html>`);
+    });
+    await new Promise((resolve) => site.listen(0, "127.0.0.1", resolve));
+    try {
+      const created = await ok("POST", "/cards", {
+        title: "指向一個會換 nonce 的頁面",
+        source_url: `http://127.0.0.1:${site.address().port}/article`,
+      });
+      const recorded = await ok("POST", "/sources/check", { card_id: created.card.id });
+      assert.equal(recorded.status, "recorded");
+      nonce = "second";
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const again = await ok("POST", "/sources/check", { card_id: created.card.id });
+      assert.equal(again.status, "unchanged", "a new nonce and timestamp read as the article changing");
+      assert.equal(again.card.source_stale_at, null);
+    } finally {
+      site.close();
     }
   });
 
