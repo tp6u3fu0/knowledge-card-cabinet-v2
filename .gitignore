@@ -35,6 +35,10 @@ yarn-debug.log*
 .pnpm-debug.log*
 release-dir/
 
+# Benchmark output. The checked-in baseline lives in tests/fixtures; these are
+# the results of a run, which belong to whoever ran it.
+/artifacts/
+
 # 產品規格書：外部交付的文件，不是這個 repo 的產物。
 # 內容吸收進 CLAUDE.md（定位與路線在第 1–2 節，工程約束在第 3 節）。
 # 用樣式而不是列檔名——第二份規格進來的時候，寫死的檔名擋不住它。

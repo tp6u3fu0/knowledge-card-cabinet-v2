@@ -1,0 +1,1121 @@
+[
+  {
+    "query": "Spring AOP",
+    "intent": "exact",
+    "expected": [
+      "spring-aop"
+    ],
+    "acceptable": [
+      "proxy-pattern"
+    ]
+  },
+  {
+    "query": "Spring AOP 怎麼運作",
+    "intent": "near-lexical",
+    "expected": [
+      "spring-aop"
+    ],
+    "acceptable": [
+      "proxy-pattern"
+    ]
+  },
+  {
+    "query": "不改原本 method 又能在前後執行邏輯",
+    "intent": "conceptual",
+    "expected": [
+      "spring-aop"
+    ],
+    "acceptable": [
+      "proxy-pattern"
+    ]
+  },
+  {
+    "query": "Spring 那個用代理物件插入功能的東西",
+    "intent": "forgotten-name",
+    "expected": [
+      "spring-aop"
+    ],
+    "acceptable": [
+      "proxy-pattern"
+    ]
+  },
+  {
+    "query": "之前那個 logging 不用寫進每個 function 的做法叫什麼",
+    "intent": "natural-recall",
+    "expected": [
+      "spring-aop"
+    ],
+    "acceptable": [
+      "proxy-pattern"
+    ]
+  },
+  {
+    "query": "RAG",
+    "intent": "exact",
+    "expected": [
+      "rag"
+    ],
+    "acceptable": [
+      "vector-database",
+      "embedding"
+    ]
+  },
+  {
+    "query": "RAG 為什麼需要檢索",
+    "intent": "near-lexical",
+    "expected": [
+      "rag"
+    ],
+    "acceptable": [
+      "vector-database",
+      "embedding"
+    ]
+  },
+  {
+    "query": "模型回答前先去查資料那個叫什麼",
+    "intent": "conceptual",
+    "expected": [
+      "rag"
+    ],
+    "acceptable": [
+      "vector-database",
+      "embedding"
+    ]
+  },
+  {
+    "query": "讓 AI 有根據的那個做法",
+    "intent": "forgotten-name",
+    "expected": [
+      "rag"
+    ],
+    "acceptable": [
+      "vector-database",
+      "embedding"
+    ]
+  },
+  {
+    "query": "之前看到一個方法可以讓模型不要亂編，會附出處的",
+    "intent": "natural-recall",
+    "expected": [
+      "rag"
+    ],
+    "acceptable": [
+      "vector-database",
+      "embedding"
+    ]
+  },
+  {
+    "query": "Attention",
+    "intent": "exact",
+    "expected": [
+      "attention"
+    ],
+    "acceptable": [
+      "transformer"
+    ]
+  },
+  {
+    "query": "Attention 機制是什麼",
+    "intent": "near-lexical",
+    "expected": [
+      "attention"
+    ],
+    "acceptable": [
+      "transformer"
+    ]
+  },
+  {
+    "query": "模型怎麼決定句子裡哪些字比較重要",
+    "intent": "conceptual",
+    "expected": [
+      "attention"
+    ],
+    "acceptable": [
+      "transformer"
+    ]
+  },
+  {
+    "query": "Transformer 裡面那個算權重的東西",
+    "intent": "forgotten-name",
+    "expected": [
+      "attention"
+    ],
+    "acceptable": [
+      "transformer"
+    ]
+  },
+  {
+    "query": "以前讀過一個東西在講模型不是每個字都平均看",
+    "intent": "natural-recall",
+    "expected": [
+      "attention"
+    ],
+    "acceptable": [
+      "transformer"
+    ]
+  },
+  {
+    "query": "B+ Tree",
+    "intent": "exact",
+    "expected": [
+      "btree-index"
+    ],
+    "acceptable": [
+      "query-plan"
+    ]
+  },
+  {
+    "query": "B+ Tree 索引原理",
+    "intent": "near-lexical",
+    "expected": [
+      "btree-index"
+    ],
+    "acceptable": [
+      "query-plan"
+    ]
+  },
+  {
+    "query": "為什麼資料庫索引不用二元樹",
+    "intent": "conceptual",
+    "expected": [
+      "btree-index"
+    ],
+    "acceptable": [
+      "query-plan"
+    ]
+  },
+  {
+    "query": "資料庫那個很矮的樹",
+    "intent": "forgotten-name",
+    "expected": [
+      "btree-index"
+    ],
+    "acceptable": [
+      "query-plan"
+    ]
+  },
+  {
+    "query": "之前查過為什麼索引可以少讀幾次硬碟",
+    "intent": "natural-recall",
+    "expected": [
+      "btree-index"
+    ],
+    "acceptable": [
+      "query-plan"
+    ]
+  },
+  {
+    "query": "Proxy Pattern",
+    "intent": "exact",
+    "expected": [
+      "proxy-pattern"
+    ],
+    "acceptable": [
+      "spring-aop"
+    ]
+  },
+  {
+    "query": "Proxy Pattern 解決什麼問題",
+    "intent": "near-lexical",
+    "expected": [
+      "proxy-pattern"
+    ],
+    "acceptable": [
+      "spring-aop"
+    ]
+  },
+  {
+    "query": "在真正的物件前面加一層來控制存取",
+    "intent": "conceptual",
+    "expected": [
+      "proxy-pattern"
+    ],
+    "acceptable": [
+      "spring-aop"
+    ]
+  },
+  {
+    "query": "那個像經紀人一樣的設計模式",
+    "intent": "forgotten-name",
+    "expected": [
+      "proxy-pattern"
+    ],
+    "acceptable": [
+      "spring-aop"
+    ]
+  },
+  {
+    "query": "有個模式可以延後建立很貴的物件，忘記叫什麼",
+    "intent": "natural-recall",
+    "expected": [
+      "proxy-pattern"
+    ],
+    "acceptable": [
+      "spring-aop"
+    ]
+  },
+  {
+    "query": "Embedding",
+    "intent": "exact",
+    "expected": [
+      "embedding"
+    ],
+    "acceptable": [
+      "vector-database"
+    ]
+  },
+  {
+    "query": "Embedding 是什麼意思",
+    "intent": "near-lexical",
+    "expected": [
+      "embedding"
+    ],
+    "acceptable": [
+      "vector-database"
+    ]
+  },
+  {
+    "query": "把文字變成可以算距離的數字",
+    "intent": "conceptual",
+    "expected": [
+      "embedding"
+    ],
+    "acceptable": [
+      "vector-database"
+    ]
+  },
+  {
+    "query": "意思接近的東西會落在附近的那個做法",
+    "intent": "forgotten-name",
+    "expected": [
+      "embedding"
+    ],
+    "acceptable": [
+      "vector-database"
+    ]
+  },
+  {
+    "query": "之前整理過為什麼換模型要整批重算",
+    "intent": "natural-recall",
+    "expected": [
+      "embedding"
+    ],
+    "acceptable": [
+      "vector-database"
+    ]
+  },
+  {
+    "query": "冪等",
+    "intent": "exact",
+    "expected": [
+      "idempotency"
+    ],
+    "acceptable": [
+      "saga"
+    ]
+  },
+  {
+    "query": "冪等性是什麼",
+    "intent": "near-lexical",
+    "expected": [
+      "idempotency"
+    ],
+    "acceptable": [
+      "saga"
+    ]
+  },
+  {
+    "query": "同一個請求送兩次結果要一樣",
+    "intent": "conceptual",
+    "expected": [
+      "idempotency"
+    ],
+    "acceptable": [
+      "saga"
+    ]
+  },
+  {
+    "query": "那個像電梯按鈕按幾次都一樣的性質",
+    "intent": "forgotten-name",
+    "expected": [
+      "idempotency"
+    ],
+    "acceptable": [
+      "saga"
+    ]
+  },
+  {
+    "query": "之前記過重試要安全需要什麼前提",
+    "intent": "natural-recall",
+    "expected": [
+      "idempotency"
+    ],
+    "acceptable": [
+      "saga"
+    ]
+  },
+  {
+    "query": "TLS",
+    "intent": "exact",
+    "expected": [
+      "tls"
+    ],
+    "acceptable": [
+      "dns"
+    ]
+  },
+  {
+    "query": "TLS 憑證怎麼驗證",
+    "intent": "near-lexical",
+    "expected": [
+      "tls"
+    ],
+    "acceptable": [
+      "dns"
+    ]
+  },
+  {
+    "query": "加密之後怎麼確認對面是本人",
+    "intent": "conceptual",
+    "expected": [
+      "tls"
+    ],
+    "acceptable": [
+      "dns"
+    ]
+  },
+  {
+    "query": "那個要一路追到根憑證的東西",
+    "intent": "forgotten-name",
+    "expected": [
+      "tls"
+    ],
+    "acceptable": [
+      "dns"
+    ]
+  },
+  {
+    "query": "之前搞懂過為什麼自簽憑證要比對指紋",
+    "intent": "natural-recall",
+    "expected": [
+      "tls"
+    ],
+    "acceptable": [
+      "dns"
+    ]
+  },
+  {
+    "query": "CORS",
+    "intent": "exact",
+    "expected": [
+      "cors"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "CORS 是什麼",
+    "intent": "near-lexical",
+    "expected": [
+      "cors"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "瀏覽器為什麼不讓我讀另一個網域的回應",
+    "intent": "conceptual",
+    "expected": [
+      "cors"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "那個會多送一次 OPTIONS 的機制",
+    "intent": "forgotten-name",
+    "expected": [
+      "cors"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "之前弄懂過那個限制只在瀏覽器裡發生的東西",
+    "intent": "natural-recall",
+    "expected": [
+      "cors"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "ACID",
+    "intent": "exact",
+    "expected": [
+      "transaction-acid"
+    ],
+    "acceptable": [
+      "isolation-levels",
+      "wal"
+    ]
+  },
+  {
+    "query": "ACID 四個特性",
+    "intent": "near-lexical",
+    "expected": [
+      "transaction-acid"
+    ],
+    "acceptable": [
+      "isolation-levels",
+      "wal"
+    ]
+  },
+  {
+    "query": "轉帳為什麼不會只扣款不入帳",
+    "intent": "conceptual",
+    "expected": [
+      "transaction-acid"
+    ],
+    "acceptable": [
+      "isolation-levels",
+      "wal"
+    ]
+  },
+  {
+    "query": "資料庫那個要嘛全做要嘛全不做的東西",
+    "intent": "forgotten-name",
+    "expected": [
+      "transaction-acid"
+    ],
+    "acceptable": [
+      "isolation-levels",
+      "wal"
+    ]
+  },
+  {
+    "query": "以前整理過交易當機之後為什麼不會半完成",
+    "intent": "natural-recall",
+    "expected": [
+      "transaction-acid"
+    ],
+    "acceptable": [
+      "isolation-levels",
+      "wal"
+    ]
+  },
+  {
+    "query": "斷路器",
+    "intent": "exact",
+    "expected": [
+      "circuit-breaker"
+    ],
+    "acceptable": [
+      "backpressure"
+    ]
+  },
+  {
+    "query": "Circuit Breaker 模式",
+    "intent": "near-lexical",
+    "expected": [
+      "circuit-breaker"
+    ],
+    "acceptable": [
+      "backpressure"
+    ]
+  },
+  {
+    "query": "下游掛掉時停止呼叫它避免被拖垮",
+    "intent": "conceptual",
+    "expected": [
+      "circuit-breaker"
+    ],
+    "acceptable": [
+      "backpressure"
+    ]
+  },
+  {
+    "query": "那個像保險絲一樣的東西",
+    "intent": "forgotten-name",
+    "expected": [
+      "circuit-breaker"
+    ],
+    "acceptable": [
+      "backpressure"
+    ]
+  },
+  {
+    "query": "之前讀過為什麼故障會沿著呼叫鏈往上蔓延",
+    "intent": "natural-recall",
+    "expected": [
+      "circuit-breaker"
+    ],
+    "acceptable": [
+      "backpressure"
+    ]
+  },
+  {
+    "query": "N+1 查詢",
+    "intent": "exact",
+    "expected": [
+      "orm-n-plus-one"
+    ],
+    "acceptable": [
+      "query-plan",
+      "connection-pool"
+    ]
+  },
+  {
+    "query": "N+1 query problem",
+    "intent": "near-lexical",
+    "expected": [
+      "orm-n-plus-one"
+    ],
+    "acceptable": [
+      "query-plan",
+      "connection-pool"
+    ]
+  },
+  {
+    "query": "一個迴圈裡每筆各查一次資料庫",
+    "intent": "conceptual",
+    "expected": [
+      "orm-n-plus-one"
+    ],
+    "acceptable": [
+      "query-plan",
+      "connection-pool"
+    ]
+  },
+  {
+    "query": "ORM 那個延遲載入造成的效能問題",
+    "intent": "forgotten-name",
+    "expected": [
+      "orm-n-plus-one"
+    ],
+    "acceptable": [
+      "query-plan",
+      "connection-pool"
+    ]
+  },
+  {
+    "query": "之前查過為什麼一頁會打出幾百次查詢",
+    "intent": "natural-recall",
+    "expected": [
+      "orm-n-plus-one"
+    ],
+    "acceptable": [
+      "query-plan",
+      "connection-pool"
+    ]
+  },
+  {
+    "query": "複利",
+    "intent": "exact",
+    "expected": [
+      "compound-interest"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "複利怎麼計算",
+    "intent": "near-lexical",
+    "expected": [
+      "compound-interest"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "利息本身也會生利息",
+    "intent": "conceptual",
+    "expected": [
+      "compound-interest"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "那個七十二法則在算的東西",
+    "intent": "forgotten-name",
+    "expected": [
+      "compound-interest"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "以前算過為什麼早點開始比投入多還重要",
+    "intent": "natural-recall",
+    "expected": [
+      "compound-interest"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "倖存者偏差",
+    "intent": "exact",
+    "expected": [
+      "survivorship-bias"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "倖存者偏差的意思",
+    "intent": "near-lexical",
+    "expected": [
+      "survivorship-bias"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "只看得到成功的樣本會得出錯的結論",
+    "intent": "conceptual",
+    "expected": [
+      "survivorship-bias"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "那個看飛機彈孔的故事在講什麼",
+    "intent": "forgotten-name",
+    "expected": [
+      "survivorship-bias"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "之前想通過為什麼成功者的建議常常沒用",
+    "intent": "natural-recall",
+    "expected": [
+      "survivorship-bias"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "依賴注入在做什麼",
+    "intent": "conceptual",
+    "expected": [
+      "dependency-injection"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "為什麼函式回傳之後還記得外面的變數",
+    "intent": "conceptual",
+    "expected": [
+      "closure"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "單執行緒為什麼不會被 IO 卡住",
+    "intent": "conceptual",
+    "expected": [
+      "event-loop"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "垃圾回收怎麼判斷物件還有沒有人用",
+    "intent": "near-lexical",
+    "expected": [
+      "garbage-collection"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "為什麼不可變資料在多執行緒比較安全",
+    "intent": "conceptual",
+    "expected": [
+      "immutability"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "MVC",
+    "intent": "exact",
+    "expected": [
+      "mvc"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "REST 為什麼要無狀態",
+    "intent": "near-lexical",
+    "expected": [
+      "rest"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "模型把訓練資料背起來了",
+    "intent": "conceptual",
+    "expected": [
+      "overfitting"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "模型為什麼會一本正經地編造",
+    "intent": "conceptual",
+    "expected": [
+      "hallucination"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "算 token 和算字數為什麼不一樣",
+    "intent": "near-lexical",
+    "expected": [
+      "tokenization"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "在濃霧裡下山那個比喻在講什麼",
+    "intent": "forgotten-name",
+    "expected": [
+      "gradient-descent"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "微調和寫 prompt 什麼時候該選哪個",
+    "intent": "conceptual",
+    "expected": [
+      "fine-tuning"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "兩筆交易互相卡住",
+    "intent": "conceptual",
+    "expected": [
+      "deadlock"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "隔離等級",
+    "intent": "exact",
+    "expected": [
+      "isolation-levels"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "先寫日誌再改資料",
+    "intent": "conceptual",
+    "expected": [
+      "wal"
+    ],
+    "acceptable": [
+      "transaction-acid"
+    ]
+  },
+  {
+    "query": "同一份資料放很多份和把資料切開放差在哪",
+    "intent": "conceptual",
+    "expected": [
+      "sharding"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "每次查詢都開新連線的成本",
+    "intent": "conceptual",
+    "expected": [
+      "connection-pool"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "網路斷掉的時候要選正確還是要選可用",
+    "intent": "conceptual",
+    "expected": [
+      "cap-theorem"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "把服務拆開之後為什麼反而更難",
+    "intent": "conceptual",
+    "expected": [
+      "microservices"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "讀跟寫用兩套模型",
+    "intent": "conceptual",
+    "expected": [
+      "cqrs"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "快取什麼時候該丟掉",
+    "intent": "near-lexical",
+    "expected": [
+      "cache-invalidation"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "上游比下游快會怎樣",
+    "intent": "conceptual",
+    "expected": [
+      "backpressure"
+    ],
+    "acceptable": [
+      "circuit-breaker"
+    ]
+  },
+  {
+    "query": "同一個名詞在兩個部門意思不一樣",
+    "intent": "conceptual",
+    "expected": [
+      "bounded-context"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "跨服務失敗要用補償而不是回滾",
+    "intent": "conceptual",
+    "expected": [
+      "saga"
+    ],
+    "acceptable": [
+      "idempotency"
+    ]
+  },
+  {
+    "query": "把部署和開給使用者看分開",
+    "intent": "conceptual",
+    "expected": [
+      "feature-flag"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "TCP 三次握手",
+    "intent": "exact",
+    "expected": [
+      "tcp-handshake"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "網址怎麼變成 IP",
+    "intent": "conceptual",
+    "expected": [
+      "dns"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "為什麼以前要開六條連線",
+    "intent": "forgotten-name",
+    "expected": [
+      "http2-multiplexing"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "家裡很多裝置只有一個對外 IP",
+    "intent": "conceptual",
+    "expected": [
+      "nat"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "不用一直去問伺服器有沒有新訊息",
+    "intent": "conceptual",
+    "expected": [
+      "websocket"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "把內容放到離使用者近的地方",
+    "intent": "conceptual",
+    "expected": [
+      "cdn"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "睡比較久為什麼反而更累",
+    "intent": "near-lexical",
+    "expected": [
+      "sleep-cycle"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "酸種麵包的酵頭在養什麼",
+    "intent": "near-lexical",
+    "expected": [
+      "sourdough"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "同樣的豆子為什麼有時候苦有時候酸",
+    "intent": "conceptual",
+    "expected": [
+      "coffee-extraction"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "選了一個就等於放棄另一個的代價",
+    "intent": "conceptual",
+    "expected": [
+      "opportunity-cost"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "煎過的跟煮過的味道差那麼多是什麼原因",
+    "intent": "conceptual",
+    "expected": [
+      "maillard"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "沒有成分的藥為什麼有效",
+    "intent": "conceptual",
+    "expected": [
+      "placebo"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "匯率短期波動主要來自什麼",
+    "intent": "near-lexical",
+    "expected": [
+      "exchange-rate"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "期望值是負的為什麼還要買保險",
+    "intent": "near-lexical",
+    "expected": [
+      "insurance"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "正規化在避免什麼",
+    "intent": "near-lexical",
+    "expected": [
+      "normalization"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "資料庫怎麼決定要不要走索引",
+    "intent": "near-lexical",
+    "expected": [
+      "query-plan"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "向量資料庫",
+    "intent": "exact",
+    "expected": [
+      "vector-database"
+    ],
+    "acceptable": [
+      "embedding"
+    ]
+  },
+  {
+    "query": "Transformer 為什麼比 RNN 好訓練",
+    "intent": "near-lexical",
+    "expected": [
+      "transformer"
+    ],
+    "acceptable": [
+      "attention"
+    ]
+  },
+  {
+    "query": "事件驅動之後為什麼追問題變難",
+    "intent": "conceptual",
+    "expected": [
+      "event-driven"
+    ],
+    "acceptable": []
+  },
+  {
+    "query": "橘子的種植與採收季節",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "怎麼幫貓咪剪指甲",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "明朝的科舉制度考什麼",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "小提琴的弓法有哪幾種",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "台北到高雄的高鐵票價",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "羽毛球發球的規則",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "多肉植物怎麼澆水",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "黑死病是怎麼傳播的",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "汽車的正時皮帶多久要換",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "鋼琴調音的原理是什麼",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "登山鞋要怎麼挑尺寸",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  },
+  {
+    "query": "水彩紙的磅數差在哪",
+    "intent": "no-result",
+    "expected": [],
+    "acceptable": []
+  }
+]

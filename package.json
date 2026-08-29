@@ -32,7 +32,8 @@
     "verify:runtime": "node tests/runtime-contract.mjs",
     "release:check": "node scripts/release-check.mjs",
     "check:packaging": "node scripts/check-packaging.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "benchmark:retrieval": "node scripts/benchmark-retrieval.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
