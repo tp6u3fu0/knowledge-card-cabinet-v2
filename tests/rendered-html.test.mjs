@@ -1141,3 +1141,46 @@ test("keeping an understanding asks for the understanding and nothing else", asy
   assert.match(api, /generateCardId\(\)/u, "the runtime does not mint an id of its own");
   assert.match(api, /nextCardNumber\(store\.cards\)/u, "the runtime does not number a card of its own");
 });
+
+test("a card can be followed back to what it was made from", async () => {
+  // Half of the positioning is that this is a cache and Notion is the storage.
+  // A cache entry that cannot name its origin is just a shorter copy.
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+  assert.match(panels, /onChange\("source_url"/u, "there is nowhere to put the link a card came from");
+
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  const footer = region(page, `<div className="reading-footer">`, "</div>", "the source line on the back of a card");
+  assert.match(footer, /card\.source_url \?/u, "the source is never a link, however much of one it is");
+  assert.match(footer, /rel="noreferrer noopener"/u, "an outgoing link hands the opener over");
+
+  // Followed in the browser, not in a window that carries the preload bridges
+  // and has no address bar to say where it went.
+  const main = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  const handler = region(main, "setWindowOpenHandler", "});", "the external link handler");
+  assert.match(handler, /https\?/u, "any scheme at all is opened outside the app");
+  assert.match(handler, /shell\.openExternal/u, "an external link opens inside the app window");
+
+  // And the runtime must refuse to store what a browser would execute.
+  const api = await readFile(new URL("../desktop/local-api.cjs", import.meta.url), "utf8");
+  assert.match(api, /protocol === "http:" \|\| .*protocol === "https:"/u, "the runtime stores any scheme as a source link");
+});
+
+test("the front page sells recall, not a shelf", async () => {
+  // Organising and carrying a collection around are both true and neither is a
+  // reason to install this instead of Notion. What it does that Notion does not
+  // is give an understanding back from a vague impression (CLAUDE.md §1).
+  const landing = await readFile(new URL("../site/landing.tsx", import.meta.url), "utf8");
+  assert.match(landing, /慢慢理解/u, "the front page does not say what the product is for");
+  assert.match(landing, /快速想起/u, "the front page does not say what the product is for");
+
+  // "On any device" is a cloud SaaS promise, and this product's security model
+  // is a paired channel between machines someone owns (P-05).
+  assert.doesNotMatch(landing, /任何裝置/u, "the front page promises anonymous access from anywhere");
+  const html = await readFile(new URL("../site/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /任何裝置/u, "the page metadata promises anonymous access from anywhere");
+  assert.match(html, /慢慢理解|想起/u, "the shared link says something the product no longer claims");
+
+  // The front page still lives in exactly one place.
+  const home = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(home, /慢慢理解/u, "the landing copy leaked back into the desktop bundle");
+});

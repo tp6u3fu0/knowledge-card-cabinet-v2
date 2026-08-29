@@ -116,6 +116,7 @@ function createEmptyDraft(): CardDraft {
     analogy: "",
     detail: "",
     source: "",
+    source_url: "",
     tags: "",
   };
 }
@@ -149,6 +150,8 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
     analogy: card.analogy ?? "",
     detail: card.detail ?? "",
     source: card.source ?? "",
+    source_url: card.source_url ?? null,
+    source_type: card.source_type ?? "manual",
     accent: cover?.accent ?? visualAccents[index % visualAccents.length],
     pattern: cover?.pattern ?? visualPatterns[index % visualPatterns.length],
     cover,
@@ -157,6 +160,19 @@ function mapApiCard(card: ApiCard, index: number, related: string[] = []): Knowl
     created_at: card.created_at,
     updated_at: card.updated_at,
   };
+}
+
+/**
+ * The host of a source link, for a card whose link was filled in but whose
+ * display text was not. "arxiv.org" is a worse label than a title and a much
+ * better one than the raw url, which would wrap across three lines.
+ */
+function sourceHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./u, "");
+  } catch {
+    return url;
+  }
 }
 
 /** Only ever decides whether to print ⌘ or Ctrl in a hint. */
@@ -506,9 +522,21 @@ function CollectionCardViewer({
                 </div>
               </section>
             ) : null}
+            {/*
+              The card is the cache, and this is the way back to the storage it
+              was made from. It only becomes a link when there is one to follow;
+              the rest of the time it stays the sentence someone wrote.
+            */}
             <div className="reading-footer">
               <span>來源</span>
-              <span>{card.source}</span>
+              {card.source_url ? (
+                <a className="reading-source-link" href={card.source_url} target="_blank" rel="noreferrer noopener">
+                  {card.source || sourceHost(card.source_url)}
+                  <span aria-hidden="true">↗</span>
+                </a>
+              ) : (
+                <span>{card.source}</span>
+              )}
             </div>
           </article>
         </div>
@@ -995,6 +1023,7 @@ export default function CollectionPage() {
       analogy: card.analogy,
       detail: card.detail,
       source: card.source,
+      source_url: card.source_url ?? "",
       tags: card.tags.join(", "),
     });
     setSourceText("");
@@ -1881,6 +1910,10 @@ export default function CollectionPage() {
         analogy: cardDraft.analogy.trim(),
         detail: cardDraft.detail.trim(),
         source: cardDraft.source.trim(),
+        // The type is read off the link by the runtime rather than asked for
+        // here: a dropdown of six words nobody can act on is a fifth decision
+        // in front of a card, and the answer is already in the url.
+        source_url: cardDraft.source_url.trim(),
         tags: cardDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
       };
       const response = await fetch(

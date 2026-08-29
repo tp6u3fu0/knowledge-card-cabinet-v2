@@ -18,13 +18,27 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const MAX_BACKUPS = 10;
+
+/**
+ * Where the understanding on a card came from.
+ *
+ * A card is a cache entry; these are its origin. The plain `source` string is
+ * kept and still shown, because it is what someone wrote and the point is not
+ * to make them rewrite it — these sit beside it, all nullable, all absent on
+ * every card that existed before them (CLAUDE.md §3.18).
+ */
+const SOURCE_COLUMNS = [
+  "source_type", "source_title", "source_url", "source_external_id",
+  "source_updated_at", "source_content_hash", "source_checked_at",
+];
 
 const CARD_COLUMNS = [
   "id", "number", "topic", "category", "title", "question", "summary",
   "analogy", "detail", "source", "tags", "cover", "embedding", "embedding_dims",
   "embedding_model_id", "embedding_source_hash", "created_at", "updated_at", "deleted_at",
+  ...SOURCE_COLUMNS,
 ];
 
 const SCHEMA = [
@@ -48,7 +62,14 @@ const SCHEMA = [
      embedding_source_hash TEXT,
      created_at TEXT,
      updated_at TEXT,
-     deleted_at TEXT
+     deleted_at TEXT,
+     source_type TEXT,
+     source_title TEXT,
+     source_url TEXT,
+     source_external_id TEXT,
+     source_updated_at TEXT,
+     source_content_hash TEXT,
+     source_checked_at TEXT
    )`,
   "CREATE INDEX IF NOT EXISTS cards_deleted_at_idx ON cards (deleted_at)",
   "CREATE INDEX IF NOT EXISTS cards_category_idx ON cards (category)",
@@ -120,6 +141,7 @@ function rowToCard(row) {
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
     deleted_at: row.deleted_at ?? null,
+    ...Object.fromEntries(SOURCE_COLUMNS.map((column) => [column, row[column] ?? null])),
   };
 }
 
@@ -145,6 +167,7 @@ function cardToRow(card) {
     card.created_at ?? null,
     card.updated_at ?? null,
     card.deleted_at ?? null,
+    ...SOURCE_COLUMNS.map((column) => card[column] ?? null),
   ];
 }
 
@@ -167,6 +190,15 @@ function openStore(dataFile) {
   database.exec("PRAGMA foreign_keys = ON");
   database.exec("PRAGMA synchronous = NORMAL");
   for (const statement of SCHEMA) database.exec(statement);
+  // CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so
+  // a store opened before these columns were added would keep answering
+  // "no such column" forever — a fresh install would work and every existing
+  // one would not. Adding a nullable column is the whole migration: SQLite
+  // rewrites no rows and every card that predates it reads back as null.
+  const present = new Set(database.prepare("PRAGMA table_info(cards)").all().map((row) => row.name));
+  for (const column of SOURCE_COLUMNS) {
+    if (!present.has(column)) database.exec(`ALTER TABLE cards ADD COLUMN ${column} TEXT`);
+  }
 
   const insertCard = database.prepare(
     `INSERT INTO cards (${CARD_COLUMNS.join(", ")}) VALUES (${CARD_COLUMNS.map(() => "?").join(", ")})

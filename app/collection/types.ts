@@ -1,5 +1,22 @@
 import type { CoverSpec } from "../card-face";
 
+/**
+ * Where a card came from, in fields rather than in prose. All optional and all
+ * absent on cards written before they existed; `source` remains the display
+ * string and is never replaced by these.
+ */
+export type SourceMetadata = {
+  source_type?: SourceType;
+  source_title?: string | null;
+  source_url?: string | null;
+  source_external_id?: string | null;
+  source_updated_at?: string | null;
+  source_content_hash?: string | null;
+  source_checked_at?: string | null;
+};
+
+export type SourceType = "manual" | "url" | "notion" | "markdown" | "document" | "other";
+
 export type KnowledgeCard = {
   id: string;
   number: string;
@@ -11,6 +28,8 @@ export type KnowledgeCard = {
   analogy: string;
   detail: string;
   source: string;
+  source_url?: string | null;
+  source_type?: SourceType;
   accent: string;
   pattern: string;
   cover?: CoverSpec;
@@ -20,7 +39,7 @@ export type KnowledgeCard = {
   created_at?: string;
 };
 
-export type ApiCard = {
+export type ApiCard = SourceMetadata & {
   id: string;
   number: string;
   topic: string;
@@ -97,6 +116,7 @@ export type CardDraft = {
   analogy: string;
   detail: string;
   source: string;
+  source_url: string;
   tags: string;
 };
 

@@ -351,6 +351,16 @@ function createWindow() {
     },
   });
 
+  // A card's source link points anywhere on the web. Opened in here it would
+  // load inside a window that has the preload bridges attached and no address
+  // bar to say where it went; opened in the browser it is just a link. Only
+  // http(s) is followed — the runtime already refuses to store anything else,
+  // and this is the second place that has to be true.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//iu.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.loadFile(path.join(__dirname, "splash.html"));
   mainWindow.on("closed", () => {

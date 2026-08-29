@@ -1694,6 +1694,22 @@ export function CreateCardForm({
                 placeholder="論文、書籍或研究筆記"
               />
             </label>
+            {/*
+              The card is the cache; this is the way back to the storage. The
+              kind of source is worked out from the link by the runtime rather
+              than asked for here — a dropdown of six words nobody can act on
+              would be one more decision in front of a card.
+            */}
+            <label className="create-card-field">
+              <span>來源連結</span>
+              <input
+                type="url"
+                inputMode="url"
+                value={draft.source_url}
+                onChange={(event) => onChange("source_url", event.target.value)}
+                placeholder="https://…（Notion 頁面、論文、網頁）"
+              />
+            </label>
             <label className="create-card-field">
               <span>標籤</span>
               <input

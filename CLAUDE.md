@@ -122,7 +122,7 @@ Notion / 文件 / 論文 / 網頁 / 筆記
 | 1 | 讓檢索**正確** | 前端不再用字面比對否決主機答案；字面搜尋與 embedding 解耦；混合排名；語意檢索測試；模型失敗的退路 | **已完成**（§3.14、§3.15、`tests/retrieval.test.mjs`） |
 | 2 | 讓檢索**快** | 有查詢時換成結果列（標題／問題／一句話／分類／命中理由）；桌面全域快速搜尋疊層；鍵盤優先操作 | **已完成**（§3.16、`app/quick/page.tsx`） |
 | 3 | 讓建立**便宜** | Card ID 與編號自動產生；Quick Capture：貼上 → AI 草稿 → 只確認標題／問題／摘要／分類，其餘收在進階編輯 | **已完成**（§3.17、`tests/capture.test.mjs`） |
-| 4 | 把 **Storage 和 Cache 接起來** | 結構化來源（`source_type` / `source_url` / `source_external_id` / `source_updated_at` / `source_content_hash` / `source_checked_at`，全部 nullable，原本的 `source` 字串保留給顯示用）；首頁定位改寫 | 未開始 |
+| 4 | 把 **Storage 和 Cache 接起來** | 結構化來源（`source_type` / `source_url` / `source_external_id` / `source_updated_at` / `source_content_hash` / `source_checked_at`，全部 nullable，原本的 `source` 字串保留給顯示用）；首頁定位改寫 | **已完成**（§3.18、`tests/source.test.mjs`） |
 | 5 | 重新發現**忘掉的** | 偶爾把久未查看、或與最近閱讀／搜尋相關的卡浮出來；來源過期提示 | 未開始 |
 
 **第 1 階段先做完才做後面的。** 搜尋不可信的話，後面每一個功能都只是把人更快地送到一個錯的答案。
@@ -359,6 +359,23 @@ Query
 
 介面那半在 `CreateCardForm`：上面固定四個欄位（標題／問題／一句話／分類），其餘收在「展開進階欄位」裡——**是收起來不是拿掉**，比喻、細節、來源、標籤、主題、編號全部還在，編輯既有卡片時預設展開。卡片 ID 只在編輯既有卡片時以唯讀顯示；新卡還沒有 id，開一個框請人取名字等於把 friction 原封不動放回去。
 
+### 3.18 來源是 cache origin，而它會變成一個可以點的連結
+
+卡片是 cache entry，來源就是 cache origin。一個字串「Spring AOP 的 Notion 筆記」回答不了它值得被問的問題：東西在哪、有沒有改過、這張卡過期了沒有。所以除了原本的 `source`（顯示用文字，**不動、不取代**），旁邊多了七個 nullable 欄位：`source_type` / `source_title` / `source_url` / `source_external_id` / `source_updated_at` / `source_content_hash` / `source_checked_at`。
+
+**這幾條是安全與正確性，不是便利：**
+
+- **`source_url` 只收 http/https。** 它會被 render 成 `<a href>`，而來源正是使用者貼上東西時不會看內容的欄位。`javascript:` 與 `data:` 一律**丟掉**（不是跳脫），而且**卡片照樣存下來**——一個壞連結不是弄丟別人理解的理由。
+- **外連在瀏覽器開，不在 app 裡開。** `mainWindow.webContents.setWindowOpenHandler` 一律 `deny`，只把 http(s) 交給 `shell.openExternal`。在 app 視窗裡開等於把一個任意網頁載進一個掛著 preload bridge、又沒有網址列的視窗。這是同一件事要成立的第二個地方。
+- **`source_type` 從連結讀，不做下拉選單。** 六個沒人能據此行動的字，只會變成擋在卡片前面的第五個決定，而答案本來就在網址裡。使用者自己指定的 type 仍然優先。
+- **連結一改，描述舊文件的欄位全部清掉**（title / external_id / updated_at / content_hash / checked_at）。把 hash 或 page id 帶過去，就是讓將來的過期偵測拿一張卡去比對一份它從來不是從那裡做出來的文件——安靜地、而且會給出看起來合理的答案。
+  注意 PATCH 是 `normalizeCard({ ...existing, ...changes })`，所以 `input` 裡本來就有舊值。判斷「caller 這次到底說了什麼」的方式是**跟卡片原本的值比**：不一樣就是這次講的（所以新連結配新 hash 會留下），一樣就是 merge 帶進來的（連結換了就丟）。
+- **這幾個欄位不進 `embeddingText()`。** 加一個連結沒有多說任何關於這張卡在講什麼的事；放進 embedding source hash 的話，第一個人填來源的那天整櫃卡片會重算向量。
+
+`source_content_hash` 與 `source_checked_at` **目前沒有任何東西會寫**，它們屬於過期偵測（第 5 階段）。現在就加是為了不要再做一次 schema migration，不是因為有人在填。接上任何東西之前先回來讀這一節。
+
+**schema 遷移**：`STORE_VERSION` 是 3。`CREATE TABLE IF NOT EXISTS` 對已存在的表什麼都不做，所以 `openStore()` 另外用 `PRAGMA table_info(cards)` 補 `ALTER TABLE ... ADD COLUMN`。漏掉這步的結果是全新安裝正常、所有既有使用者的資料庫一直回 "no such column"。加 nullable 欄位就是整個遷移：SQLite 不改寫任何 row，比它早的卡片讀回來就是 null。
+
 ---
 
 ## 4. 連動地圖：改這裡，就一定要改那裡
@@ -375,6 +392,9 @@ Query
 | `POST /cards` 的必要欄位 | 想清楚它擋掉的是誰；只有 `title` 是必要的（§3.17）。`desktop/mcp-server.cjs` 的 `create_card` 也要跟著鬆綁 | `tests/capture.test.mjs` 會失敗（刻意的）——記帳欄位又站回卡片前面 |
 | `generateCardId()` / `nextCardNumber()` | 兩者都不可以從卡片內容算出來；編號指派一次就不重算（§3.17、§3.5） | 改一個錯字就重畫封面；或復原一張卡撞到別人的號碼 |
 | `CreateCardForm` 的欄位 | 上面固定四個（標題／問題／一句話／分類），其餘進 `.create-card-advanced`——是收起來不是拿掉 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——建卡又變成填表單，或某個欄位被悄悄刪掉 |
+| `normalizeSourceUrl()` 允許的 scheme | `main.cjs` 的 `setWindowOpenHandler` 要一致；兩邊都只放行 http(s)（§3.18） | 來源欄位變成可執行的連結；`tests/source.test.mjs` 與 `tests/rendered-html.test.mjs` 會失敗（刻意的） |
+| 任何 `source_*` 欄位 | `store.cjs` 的 `SOURCE_COLUMNS`（含 `ALTER TABLE` 補欄位）、`publicCard`、`types.ts` 的 `SourceMetadata`；**不要**加進 `embeddingText()` | 舊資料庫開不起來；或第一個人填來源時整櫃卡片重算向量 |
+| 首頁的定位文案 | 不要寫「在任何裝置上存取」（§1 P-05）；`site/index.html` 的 title 與 og:description 一起改 | `tests/rendered-html.test.mjs` 會失敗（刻意的）——分享出去的連結講的是另一個產品 |
 | 前端決定「哪些卡符合查詢」的邏輯 | 不要加。有 query 時主機的答案就是結果集，本地只保留「主機還沒回答」的墊檔（§3.14） | `tests/rendered-html.test.mjs` 會失敗（刻意的）——本地 includes() 會把主機刻意丟掉的卡放回來 |
 | `MOTIF_SHAPES`（local-api.cjs） | `app/cover-art.tsx` 的 `CoverGlyph` union + `glyphLibrary` | 封面靜默退回單一圖案 |
 | `PALETTES`（local-api.cjs） | `globals.css` 的 `--accent-*` 與 `.collection-card--*` 規則、`types.ts` 的 `visualAccents` | 卡片沒有顏色樣式 |
@@ -434,6 +454,7 @@ Query
 | `api-contract.test.mjs` | 認證、卡片生命週期、搜尋、關聯上限與去重、備份完整性 |
 | `retrieval.test.mjs` | 換句話說也搜得到；沒有向量的卡用標題搜得到；模型壞掉時文字搜尋照常；搜不到的東西要回 0 筆 |
 | `capture.test.mjs` | 只給標題也能建卡；沒有標題要擋下；編號連號、不重用垃圾桶裡的號；自帶的 id／編號照用；改卡不換號；id 可排序、不重複、沒有會看錯的字母 |
+| `source.test.mjs` | 來源連結只收 http(s)、壞連結不會弄丟卡片；種類從連結讀出來；連結一改描述舊文件的欄位全部清掉；舊卡的 source 讀得回來；缺欄位的舊資料庫會補上 |
 | `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
 | `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |

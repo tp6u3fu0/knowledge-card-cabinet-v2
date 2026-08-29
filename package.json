@@ -28,7 +28,7 @@
     "serve": "node desktop/server.cjs",
     "test": "npm run test:unit && npm run test:api && npm run build && node --test tests/rendered-html.test.mjs",
     "test:unit": "node --test --experimental-strip-types tests/flip-math.test.mjs",
-    "test:api": "node --test tests/api-contract.test.mjs tests/retrieval.test.mjs tests/capture.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs tests/cover-art.test.mjs tests/model-migration.test.mjs tests/model-catalogue.test.mjs tests/category-colour.test.mjs tests/lan-certificate.test.mjs tests/update-check.test.mjs",
+    "test:api": "node --test tests/api-contract.test.mjs tests/retrieval.test.mjs tests/capture.test.mjs tests/source.test.mjs tests/embedding-safety.test.mjs tests/embedding-dimensions.test.mjs tests/store-migration.test.mjs tests/cover-art.test.mjs tests/model-migration.test.mjs tests/model-catalogue.test.mjs tests/category-colour.test.mjs tests/lan-certificate.test.mjs tests/update-check.test.mjs",
     "verify:runtime": "node tests/runtime-contract.mjs",
     "release:check": "node scripts/release-check.mjs",
     "check:packaging": "node scripts/check-packaging.mjs",

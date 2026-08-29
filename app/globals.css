@@ -2807,6 +2807,26 @@ a:focus-visible {
  * a handle rather than a panel: the four fields above are the card, and this
  * has to read as the rest of the same form, not as a second form to fill in.
  */
+/*
+ * The source line on the back of a card, when there is somewhere to go. It has
+ * to read as part of the card rather than as a button — following it is a
+ * choice the reader makes after the card has already done its job.
+ */
+.reading-source-link {
+  align-items: baseline;
+  color: inherit;
+  display: inline-flex;
+  gap: 5px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--motion-base) var(--ease-out);
+}
+
+.reading-source-link:hover {
+  text-decoration-color: currentColor;
+}
+
 .create-card-advanced {
   border-top: 1px solid rgba(33, 31, 39, 0.1);
   margin-top: 24px;

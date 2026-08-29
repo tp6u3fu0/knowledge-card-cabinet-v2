@@ -159,6 +159,7 @@ function registerTools(server) {
       analogy: z.string().min(1).optional().describe("生活化類比"),
       detail: z.string().min(1).optional().describe("詳細說明"),
       source: z.string().default("").describe("來源，可留空"),
+      source_url: z.string().optional().describe("來源連結（http/https）；種類由 runtime 從連結判斷"),
       tags: z.array(z.string()).default([]).describe("標籤列表"),
       id: z.string().min(1).optional().describe("自有的卡片 ID；留空由 runtime 產生"),
       number: z.string().min(1).optional().describe("自有的卡片編號；留空由 runtime 產生 KC-000123"),
@@ -185,6 +186,7 @@ function registerTools(server) {
       analogy: z.string().min(1).optional(),
       detail: z.string().min(1).optional(),
       source: z.string().optional(),
+      source_url: z.string().optional(),
       tags: z.array(z.string()).optional(),
     },
   }, async ({ id, ...changes }) => {

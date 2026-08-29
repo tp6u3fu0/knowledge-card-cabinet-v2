@@ -215,6 +215,16 @@ function CardViewer({
   );
 }
 
+/*
+ * The shortcut is named, so it has to be named correctly. The app itself asks
+ * the main process which accelerator it actually claimed (CLAUDE.md §3.16);
+ * a static page has nobody to ask, and the least it can do is not print ⌘ to
+ * someone on Windows. This page is client-rendered, so navigator is here.
+ */
+const quickKeys = typeof navigator !== "undefined" && /mac|iphone|ipad/iu.test(navigator.platform || navigator.userAgent)
+  ? "⌘⇧K"
+  : "Ctrl⇧K";
+
 export function LandingPage() {
   const [selectedId, setSelectedId] = useState("attention");
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -279,12 +289,19 @@ export function LandingPage() {
 
         <div className="intro-copy">
           <p className="eyebrow">KNOWLEDGE CARD CABINET / DESKTOP APP</p>
+          {/*
+            The old headline sold organising and carrying a collection around.
+            Both are true and neither is the reason to install this rather than
+            Notion — Notion keeps things better. What this does is give an
+            understanding back when only a vague impression is left, so that is
+            what the front page has to say (CLAUDE.md §1).
+          */}
           <h1>
-            把知識整理好，
-            <em>帶著自己的收藏走。</em>
+            慢慢理解，
+            <em>快速想起。</em>
           </h1>
           <p className="intro-lede">
-            知識卡冊把筆記整理成可閱讀、可搜尋、可連結的知識卡，資料留在自己的裝置裡。
+            把曾經理解過的內容整理成容易辨識的知識卡。即使只剩模糊印象，也能快速搜尋並找回自己的知識。
           </p>
           <div className="intro-actions">
             {downloadUrl ? (
@@ -310,12 +327,12 @@ export function LandingPage() {
             <span>資料留在本機</span>
           </div>
           <div>
-            <strong>AI</strong>
-            <span>整理與關聯</span>
+            <strong>5s</strong>
+            <span>想起一件事的時間</span>
           </div>
           <div>
-            <strong>∞</strong>
-            <span>持續累積收藏</span>
+            <strong>{quickKeys}</strong>
+            <span>不必先打開卡冊</span>
           </div>
         </div>
       </section>
@@ -324,10 +341,10 @@ export function LandingPage() {
         <div className="section-heading">
           <div>
             <p className="eyebrow">A KNOWLEDGE CARD IS A READING PATH</p>
-            <h2>先回答問題，再慢慢展開。</h2>
+            <h2>先一句話，需要時再往下讀。</h2>
           </div>
           <span className="section-note">
-            問題、直覺、核心運作與來源，集中在同一個閱讀入口。
+            標題、問題、一句話、白話說明、完整細節、原始來源——逐層展開，大部分時候讀到第三層就夠了。
           </span>
         </div>
 
@@ -401,10 +418,16 @@ export function LandingPage() {
 
       <section className="download-section" id="download">
         <div className="download-section__intro">
-          <p className="eyebrow">TAKE YOUR COLLECTION WITH YOU</p>
-          <h2>把知識卡冊，變成一個可以帶走的應用程式。</h2>
+          {/*
+            Not "on any device". The security model here is a paired TLS channel
+            between machines someone owns, not an anonymous cloud login, and
+            promising the latter would be describing a different product
+            (CLAUDE.md §1 P-05).
+          */}
+          <p className="eyebrow">YOUR KNOWLEDGE STAYS YOURS</p>
+          <h2>在自己的裝置上，隨時找回以前理解過的知識。</h2>
           <p className="download-section__copy">
-            公開網站會持續介紹產品與版本；桌面版則把收藏、搜尋與關聯留在你的裝置裡。
+            公開網站會持續介紹產品與版本；桌面版把卡片、搜尋與模型都留在你的電腦上，不需要帳號，也不必先交給任何服務。
           </p>
           <div className="download-actions">
             {downloadUrl ? (
@@ -438,13 +461,13 @@ export function LandingPage() {
           </div>
           <div className="download-spec">
             <span>02</span>
-            <strong>AI 整理</strong>
-            <p>把原始筆記整理成問題、摘要、例子與核心運作。</p>
+            <strong>換句話說也搜得到</strong>
+            <p>文字比對與語意搜尋兩條路一起跑。想不起正確名稱也找得到；模型壞掉時文字搜尋照常。</p>
           </div>
           <div className="download-spec">
             <span>03</span>
-            <strong>語意關聯</strong>
-            <p>讓卡片之間的相似概念變成可以繼續探索的路徑。</p>
+            <strong>回得去原始資料</strong>
+            <p>卡片記的是你當時的理解，來源連結留著，需要重讀原文的時候一步就到。</p>
           </div>
         </div>
       </section>
@@ -453,9 +476,9 @@ export function LandingPage() {
         <div className="about-mark">◎</div>
         <div>
           <p className="eyebrow">A QUIET TOOL FOR UNDERSTANDING</p>
-          <h2>讓每次讀懂，都有地方留下來。</h2>
+          <h2>Notion 負責保存，這裡負責想起來。</h2>
           <p>
-            知識卡冊不是把資料堆得更多，而是替每個主題留下清楚的入口。從一個問題開始，慢慢整理成自己真的說得出來的理解。
+            知識卡冊不打算取代筆記工具。文件、論文、網頁負責完整保存；這裡放的是已經讀懂、壓縮成一張卡的版本，好讓你在只剩模糊印象的時候，幾秒內把它拿回來。
           </p>
         </div>
         <span className="about-signature">made for slow understanding / built to be yours</span>

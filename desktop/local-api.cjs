@@ -695,6 +695,103 @@ function nextCardNumber(cards) {
   return `KC-${String(highest + 1).padStart(6, "0")}`;
 }
 
+/**
+ * Where a card came from, in fields rather than in prose.
+ *
+ * If a card is a cache entry then its source is the cache origin, and a string
+ * saying "Spring AOP 的 Notion 筆記" cannot answer the questions that makes
+ * worth asking: where is it, has it changed, is this card stale. The plain
+ * `source` string stays exactly as it was — it is what someone wrote, and the
+ * point is not to make them write it again — and these sit beside it.
+ *
+ * All nullable, and null on every card that existed before them. Two of them
+ * (`source_content_hash`, `source_checked_at`) have no writer yet: they belong
+ * to staleness detection, which is a later phase. They are here now because
+ * the cost being avoided is a second schema migration, not because anything
+ * fills them in — see CLAUDE.md §3.18 before wiring them to anything.
+ */
+const SOURCE_TYPES = ["manual", "url", "notion", "markdown", "document", "other"];
+
+/** A source url only ever becomes a link, so only what a browser may follow. */
+function normalizeSourceUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  // `javascript:` and `data:` in a field that is rendered as an anchor is the
+  // oldest hole there is, and a source is exactly the field someone pastes
+  // into without reading. Anything else is dropped rather than escaped.
+  return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
+}
+
+function isNotionHost(host) {
+  return host === "notion.so" || host.endsWith(".notion.so") || host.endsWith(".notion.site");
+}
+
+/** The 32-hex page id Notion puts at the end of every page url. */
+function notionPageId(url) {
+  const match = /([0-9a-f]{32})(?:[?#]|$)/i.exec(String(url || ""));
+  return match ? match[1].toLowerCase() : "";
+}
+
+function inferSourceType(url) {
+  if (!url) return "";
+  try {
+    return isNotionHost(new URL(url).hostname.toLowerCase()) ? "notion" : "url";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSourceMetadata(input, previous = {}) {
+  const url = normalizeSourceUrl(input.source_url ?? previous.source_url);
+  const requested = String(input.source_type ?? "").trim().toLowerCase();
+  const carried = String(previous.source_type ?? "").trim().toLowerCase();
+  // A type the caller changes to wins. Otherwise it is read off the url — but
+  // only when the type the card already had was itself read off a url. That is
+  // what stops a card from staying labelled `notion` after its link was moved
+  // somewhere else, without overruling a type someone chose by hand.
+  const inferredBefore = inferSourceType(normalizeSourceUrl(previous.source_url));
+  const chosenByHand = SOURCE_TYPES.includes(carried) && carried !== inferredBefore;
+  const type = requested !== carried && SOURCE_TYPES.includes(requested) ? requested
+    : chosenByHand ? carried
+      : (inferSourceType(url) || "manual");
+  const text = (value) => {
+    const trimmed = String(value ?? "").trim();
+    return trimmed || null;
+  };
+  // Everything below describes the document at that url, so pointing the card
+  // somewhere else invalidates all of it. Carrying a hash or a page id across a
+  // changed link is how staleness detection would end up comparing a card
+  // against a document it was never made from — quietly, and with a plausible
+  // answer.
+  const sameDocument = url === normalizeSourceUrl(previous.source_url);
+  // A PATCH hands this function the card's current values merged with the
+  // changes, so `input` alone cannot say what the caller actually asked for.
+  // "Different from what the card already held" can, and that is the one
+  // distinction needed here: a fresh hash arriving alongside a new link is
+  // kept, an old hash riding along in the merge is not.
+  const field = (key) => {
+    const stated = text(input[key]);
+    const held = text(previous[key]);
+    if (stated !== held) return stated;
+    return sameDocument ? held : null;
+  };
+  return {
+    source_type: type,
+    source_title: field("source_title"),
+    source_url: url,
+    source_external_id: field("source_external_id") || (type === "notion" ? (notionPageId(url) || null) : null),
+    source_updated_at: field("source_updated_at"),
+    source_content_hash: field("source_content_hash"),
+    source_checked_at: field("source_checked_at"),
+  };
+}
+
 function normalizeCard(input, previous = {}, canonicalTags = null) {
   const requestedTopic = String(input.topic ?? previous.topic ?? "").trim();
   const category = String(input.category ?? previous.category ?? requestedTopic).trim() || requestedTopic || "待分類";
@@ -714,6 +811,11 @@ function normalizeCard(input, previous = {}, canonicalTags = null) {
     analogy: String(input.analogy ?? previous.analogy ?? "").trim(),
     detail: String(input.detail ?? previous.detail ?? "").trim(),
     source: String(input.source ?? previous.source ?? "").trim(),
+    // Deliberately not part of embeddingText(): adding a link to a card says
+    // nothing new about what the card means, and folding it into the embedding
+    // source hash would re-embed the whole cabinet the first time someone
+    // filled these in.
+    ...normalizeSourceMetadata(input, previous),
     // Deduplicated case-insensitively, and spelled the way this cabinet
     // already spells them when the caller knows what that is.
     tags: normalizedTags(Array.isArray(input.tags) ? input.tags : (previous.tags || []))
@@ -761,6 +863,13 @@ function publicCard(card, ranking = null) {
     analogy: card.analogy,
     detail: card.detail,
     source: card.source,
+    source_type: card.source_type ?? "manual",
+    source_title: card.source_title ?? null,
+    source_url: card.source_url ?? null,
+    source_external_id: card.source_external_id ?? null,
+    source_updated_at: card.source_updated_at ?? null,
+    source_content_hash: card.source_content_hash ?? null,
+    source_checked_at: card.source_checked_at ?? null,
     tags: card.tags,
     score: ranking?.score ?? 0,
     lexical_score: ranking?.lexical_score ?? 0,
@@ -1454,7 +1563,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "cards.auto_identity", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "cards.auto_identity", "cards.source_metadata", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
       return;
     }
 
@@ -2478,4 +2587,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, generateCardId, nextCardNumber, normalizeSourceMetadata, SOURCE_TYPES, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };
