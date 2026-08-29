@@ -752,11 +752,29 @@ export default function CollectionPage() {
   const tags = ["全部", ...Array.from(new Set(cards.flatMap((card) => card.tags)))];
   const filteredCards = cards.filter((card) => {
     const searchText = `${card.title} ${card.topic} ${card.category} ${card.question} ${card.summary} ${card.analogy} ${card.detail} ${card.source} ${card.tags.join(" ")}`.toLowerCase();
-    const matchesQuery = searchText.includes(collectionQuery.trim().toLowerCase());
+    const query = collectionQuery.trim().toLowerCase();
+    // When there is a query, the host's answer *is* the result set — not a
+    // set to be intersected with, nor even unioned with, a local includes().
+    //
+    // Intersecting was the original bug: semantic search could only ever narrow
+    // the literal matches and never add one, so a card that meant the question
+    // in different words was computed and then thrown away at the last step.
+    // Unioning fixed that and introduced a quieter one — the host deliberately
+    // drops cards that are merely the closest thing on the shelf, and a local
+    // includes() put them straight back, which is how a search for one word
+    // fills the screen again.
+    //
+    // The host now runs the lexical half itself, over every card, including the
+    // ones with no usable vector. So there is nothing left here that it does
+    // not already do better, and the only local matching left is the stopgap
+    // for the 250ms before the first answer arrives (or for a host that is not
+    // answering at all) — narrower than the real thing, but never wrong about
+    // what it is doing.
+    const matchesQuery = !query
+      || (semanticSearchMatches ? semanticSearchMatches.has(card.id) : searchText.includes(query));
     const matchesCategory = activeCategory === "全部" || card.category === activeCategory;
     const matchesTag = activeTag === "全部" || card.tags.some((tag) => tag.toLocaleLowerCase() === activeTag.toLocaleLowerCase());
-    const matchesSemanticSearch = !collectionQuery.trim() || !semanticSearchMatches || semanticSearchMatches.has(card.id);
-    return matchesQuery && matchesCategory && matchesTag && matchesSemanticSearch;
+    return matchesQuery && matchesCategory && matchesTag;
   }).sort((first, second) => searchSort === "updated" ? String(second.updated_at ?? second.number).localeCompare(String(first.updated_at ?? first.number)) : searchSort === "title" ? first.title.localeCompare(second.title) : semanticSearchMatches ? (semanticSearchMatches.get(second.id)?.score ?? 0) - (semanticSearchMatches.get(first.id)?.score ?? 0) : first.number.localeCompare(second.number));
   const getSearchReasons = (card: KnowledgeCard) => {
     const reasons: string[] = [];
@@ -2061,6 +2079,7 @@ export default function CollectionPage() {
           >
             <ModelSettingsPanel
               catalog={modelCatalog}
+              cardCount={cards.length}
               runtimeSettings={runtimeSettings}
               settingsDraft={settingsDraft}
               settingsTab={settingsTab}

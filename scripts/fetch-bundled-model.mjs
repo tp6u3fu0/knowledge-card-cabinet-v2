@@ -16,17 +16,30 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 /**
- * 384 dimensions and ~135 MB. The 1024-dim BGE-M3 is the better model, but at
- * 570 MB it belongs behind a deliberate download rather than inside every
- * installer — see DIMENSION_GUIDE in desktop/model-runtime.cjs.
+ * 768 dimensions and ~320 MB: EmbeddingGemma at q8.
+ *
+ * It costs the installer about 180 MB more than the 384-dim MiniLM that used to
+ * ship here, and it is worth it — the whole point of a bundled model is that a
+ * fresh cabinet has real semantics on day one, and MiniLM's day-one semantics
+ * were the weakest of anything in the catalogue. Measured on this project's own
+ * runtime: "汽車" and "轎車" score 0.96 despite sharing no character, which is
+ * the case that separates a language model from word overlap.
+ *
+ * 570 MB BGE-M3 remains behind a deliberate download; 320 MB is the line.
+ *
+ * Note the paired files. This export keeps its weights in a `.onnx_data`
+ * sidecar, so fetching only the `.onnx` produces a directory that looks
+ * complete and fails to load.
  */
-const MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+const MODEL_ID = "onnx-community/embeddinggemma-300m-ONNX";
 const FILES = [
   "config.json",
   "tokenizer.json",
   "tokenizer_config.json",
   "special_tokens_map.json",
+  "added_tokens.json",
   "onnx/model_quantized.onnx",
+  "onnx/model_quantized.onnx_data",
 ];
 
 const target = new URL(`../build/models/${MODEL_ID}/`, import.meta.url);

@@ -35,6 +35,12 @@ export type ApiCard = {
   cover?: CoverSpec | null;
   search_reasons?: string[];
   score?: number;
+  // Both halves of the hybrid score, reported so a bad ranking can be measured
+  // rather than argued about. semantic_score is null when the card carries no
+  // vector the query could be compared against — which is not the same as a
+  // vector that scored zero.
+  lexical_score?: number;
+  semantic_score?: number | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -128,6 +134,12 @@ export type ModelOption = {
   languages: string;
   description: string;
   builtin: boolean;
+  /**
+   * Its weights ship inside the installer, so it is ready without a download.
+   * The API has always sent this; nothing displayed it, which meant the bundled
+   * model advertised a download size it did not need.
+   */
+  bundled?: boolean;
   /** Added by the user from a Hugging Face id rather than shipped with the app. */
   custom?: boolean;
   added_at?: string;

@@ -11,7 +11,7 @@ const BUILTIN_EMBEDDING_MODEL = "embedding-hash-384";
  * embedding when the files are not there (a plain `npm run build`, or a build
  * where scripts/fetch-bundled-model.mjs was skipped).
  */
-const BUNDLED_EMBEDDING_MODEL = "embedding-multilingual-384";
+const BUNDLED_EMBEDDING_MODEL = "embedding-gemma-300m-768";
 /** Width of the built-in hash embedding. Not the width of every model. */
 const HASH_EMBEDDING_DIMENSIONS = 384;
 const SETTINGS_VERSION = 1;
@@ -41,6 +41,19 @@ const DIMENSION_GUIDE = [
     per_card: "2 KB／張",
     strengths: ["專為中文訓練，短句判斷比多語言 384 維穩", "下載比任何其他選項都小", "CPU 推論負擔很低"],
     limits: ["英文內容的表現不如英文專用模型", "長文的區辨力仍不及 1024 維"],
+  },
+  {
+    dimensions: 768,
+    label: "768 維",
+    headline: "多語言，同義詞最強",
+    download: "約 320 MB",
+    per_card: "3 KB／張",
+    strengths: ["同義但用詞完全不同的卡片也抓得到", "支援 100 種以上語言，中英夾雜的收藏不用選邊", "體積只有 1024 維選項的一半多一點"],
+    // The floor is the honest caveat: this model's unrelated pairs sit around
+    // 0.67, so its numbers look higher across the board. That is a property of
+    // the model, not a sign that everything is related — which is why scores
+    // are read relative to each model's own band rather than a fixed cutoff.
+    limits: ["分數整體偏高，不能拿其他模型的門檻來看", "每張卡片的處理時間比輕量選項長", "建議 8 GB 以上記憶體"],
   },
   {
     dimensions: 1024,
@@ -244,6 +257,35 @@ const MODEL_CATALOG = [
     builtin: false,
   },
   {
+    id: "embedding-gemma-300m-768",
+    kind: "embedding",
+    language: "multi",
+    label: "EmbeddingGemma",
+    short_label: "多語最佳",
+    provider: "transformers.js",
+    model_id: "onnx-community/embeddinggemma-300m-ONNX",
+    task: "feature-extraction",
+    dtype: "q8",
+    dimensions: 768,
+    // Taught with an instruction in front of the text, and a different one for
+    // a question than for a card. Measured here: the same word embedded with
+    // and without the prefix lands at 0.79 similarity, so dropping them is not
+    // cosmetic — it aims queries at a different part of the space than the
+    // cards were filed in.
+    query_prefix: "task: search result | query: ",
+    document_prefix: "title: none | text: ",
+    size_label: "約 320 MB",
+    download_size_bytes: 320_000_000,
+    min_memory_gb: 8,
+    tier: "平衡硬體",
+    languages: "100 種以上語言",
+    // Measured on this project's own runtime at q8: ~118ms per card once warm,
+    // and "汽車"↔"轎車" at 0.96 with no character in common — the case that
+    // separates a language model from word overlap.
+    description: "768 維、支援 100 種以上語言，是 500M 以下品質最好的一批。同義詞辨識明顯較強，體積介於中文輕量與 BGE-M3 之間。",
+    builtin: false,
+  },
+  {
     id: "embedding-bge-m3-1024",
     kind: "embedding",
     language: "multi",
@@ -293,7 +335,7 @@ const SUMMARY_TIERS = [
  */
 const EMBEDDING_TIERS = [
   { tier: "light", tier_label: "輕量", dimensions: [384, 512] },
-  { tier: "precise", tier_label: "高精度", dimensions: [1024] },
+  { tier: "precise", tier_label: "高精度", dimensions: [768, 1024] },
 ];
 
 const EMBEDDING_LANGUAGES = [
@@ -394,7 +436,20 @@ const API_PROVIDERS = [
   },
 ];
 
-const BUNDLED_MODEL_REPOSITORY = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+/**
+ * Which repository the bundled weights come from.
+ *
+ * Derived from the catalogue rather than written out again: this and
+ * BUNDLED_EMBEDDING_MODEL are the same decision, and when they were two
+ * independent strings changing one left the app looking for a directory that
+ * belonged to the other. Nothing failed loudly — the app simply decided no
+ * weights were bundled, or found the *previous* model's files and started up on
+ * a model nobody had chosen.
+ *
+ * scripts/fetch-bundled-model.mjs downloads into this same path, so it has to
+ * agree with this too.
+ */
+const BUNDLED_MODEL_REPOSITORY = MODEL_CATALOG.find((model) => model.id === BUNDLED_EMBEDDING_MODEL)?.model_id || "";
 
 /**
  * Where the bundled weights live: beside the packaged resources in an installed
@@ -402,8 +457,17 @@ const BUNDLED_MODEL_REPOSITORY = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
  * which is what every code path treats as "behave exactly as before".
  */
 function bundledModelsDir() {
+  // An explicitly named directory is the answer, whether or not it has weights
+  // in it: saying where the bundle is and then being handed a different one is
+  // never what the caller meant. It is also the only way to describe "a build
+  // with no bundled weights" on a machine that happens to have some sitting in
+  // build/models — which is how two tests ended up passing or failing according
+  // to whether anyone had run `npm run models:bundle` lately.
+  const declared = process.env.KCC_BUNDLED_MODELS_DIR;
+  if (declared) {
+    return fs.existsSync(path.join(declared, BUNDLED_MODEL_REPOSITORY, "config.json")) ? declared : "";
+  }
   const candidates = [
-    process.env.KCC_BUNDLED_MODELS_DIR,
     process.resourcesPath ? path.join(process.resourcesPath, "kcc-models") : "",
     path.resolve(__dirname, "..", "build", "models"),
   ].filter(Boolean);
@@ -942,7 +1006,22 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     if (pipelinePromises.has(model.id)) return pipelinePromises.get(model.id);
 
     const pipelinePromise = getTransformers()
-      .then(({ pipeline }) => pipeline(model.task, model.model_id, { dtype: model.dtype || "q8" }))
+      .then(({ pipeline }) => pipeline(model.task, model.model_id, {
+        dtype: model.dtype || "q8",
+        // ONNX Runtime's BFC arena doubles its reservation every time it grows,
+        // so a few extensions in it asks for 2 GiB in one go. Node answers a
+        // failed allocation with null and the model simply errors; Chromium's
+        // allocator answers it with a trap, so the whole app disappears with no
+        // message at all — Electron 43.4.1 on macOS 26A5406e, 8 GB, embedding a
+        // card. EmbeddingGemma died on its first inference every time; BGE-M3
+        // died once in every few dozen, which is worse, because it looks random.
+        //
+        // Without the arena each tensor is allocated on its own, and the 2 GiB
+        // request never happens. Measured over thirty embeddings it costs
+        // nothing: 73 ms per card against 77 ms with the arena, and peak memory
+        // drops (BGE-M3 989 MB, EmbeddingGemma 698 MB).
+        session_options: { enableCpuMemArena: false },
+      }))
       .catch((error) => {
         pipelinePromises.delete(model.id);
         throw error;
@@ -1030,7 +1109,16 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     };
   }
 
-  async function select(kind, modelId) {
+  /**
+   * What selecting this model would do, without doing it.
+   *
+   * Switching the active model is the last step of a rebuild, not the first:
+   * the caller converts every card with the incoming model while the outgoing
+   * one still answers searches, and only then calls `apply`. Validation has to
+   * happen up front regardless, so that a model that is not installed fails
+   * before any work is done.
+   */
+  function planSelect(kind, modelId) {
     if (kind !== "summary" && kind !== "embedding") throw new Error("模型類型必須是 summary 或 embedding");
     const model = findModel(modelId);
     if (!model || model.kind !== kind) throw new Error("找不到符合類型的模型");
@@ -1041,19 +1129,27 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     }
     const previous = getActive(kind).id;
     const previousSource = settings.sources[kind];
-    // Switching to a local model retires whatever width the custom API used.
-    if (kind === "embedding") observedApiDimensions = 0;
-    settings.sources[kind] = "local";
-    if (kind === "summary") settings.summary_model_id = model.id;
-    else settings.embedding_model_id = model.id;
-    saveSettings();
+    const changed = previous !== model.id || previousSource !== "local";
     return {
-      previous,
-      current: model.id,
-      previous_source: previousSource,
-      current_source: "local",
-      changed: previous !== model.id || previousSource !== "local",
-      model: describeModel(model),
+      kind,
+      changed,
+      embedding_plan: kind === "embedding" ? { source: "local", model_id: model.id } : null,
+      apply() {
+        // Switching to a local model retires whatever width the custom API used.
+        if (kind === "embedding") observedApiDimensions = 0;
+        settings.sources[kind] = "local";
+        if (kind === "summary") settings.summary_model_id = model.id;
+        else settings.embedding_model_id = model.id;
+        saveSettings();
+        return {
+          previous,
+          current: model.id,
+          previous_source: previousSource,
+          current_source: "local",
+          changed,
+          model: describeModel(model),
+        };
+      },
     };
   }
 
@@ -1098,13 +1194,8 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     return JSON.parse(JSON.stringify({ sources: settings.sources, custom: settings.custom }));
   }
 
-  function restoreSettingsState(state) {
-    settings.sources = JSON.parse(JSON.stringify(state.sources));
-    settings.custom = JSON.parse(JSON.stringify(state.custom));
-    saveSettings();
-  }
-
-  function updateSettings(payload) {
+  /** What these settings would do, without doing it. See `planSelect`. */
+  function planSettings(payload) {
     const previous = settingsState();
     const nextCustom = {};
     for (const kind of ["summary", "embedding"]) {
@@ -1116,27 +1207,39 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       else if (!apiKey) apiKey = old.api_key;
       nextCustom[kind] = { ...validated, api_key: apiKey };
     }
-    settings.sources = {
+    const nextSources = {
       summary: payload.summary.source,
       embedding: payload.embedding.source,
     };
-    settings.custom = nextCustom;
     const previousEmbedding = { ...previous.custom.embedding };
-    const nextEmbedding = { ...settings.custom.embedding };
+    const nextEmbedding = { ...nextCustom.embedding };
     delete previousEmbedding.api_key;
     delete nextEmbedding.api_key;
-    const embeddingChanged = previous.sources.embedding !== settings.sources.embedding
+    const embeddingChanged = previous.sources.embedding !== nextSources.embedding
       || JSON.stringify(previousEmbedding) !== JSON.stringify(nextEmbedding);
-    // Pointing at a different embedding API means the width recorded from the
-    // old one no longer applies; the caller rebuilds every vector after this,
-    // so the next response is free to set a new one.
-    if (embeddingChanged) observedApiDimensions = 0;
-    saveSettings();
-    return { embedding_changed: embeddingChanged, settings: settingsView() };
+    return {
+      embedding_changed: embeddingChanged,
+      embedding_plan: nextSources.embedding === "api"
+        ? { source: "api", custom: nextCustom.embedding }
+        : { source: "local", model_id: getActive("embedding").id },
+      apply() {
+        settings.sources = nextSources;
+        settings.custom = nextCustom;
+        // Pointing at a different embedding API means the width recorded from
+        // the old one no longer applies; the caller has rebuilt every vector by
+        // now, so the next response is free to set a new one.
+        if (embeddingChanged) observedApiDimensions = 0;
+        saveSettings();
+        return { embedding_changed: embeddingChanged, settings: settingsView() };
+      },
+    };
   }
 
-  async function requestApi(kind, text) {
-    const config = settings.custom[kind];
+  function updateSettings(payload) {
+    return planSettings(payload).apply();
+  }
+
+  async function requestApi(kind, text, config = settings.custom[kind]) {
     const headers = { "Content-Type": "application/json" };
     if (config.api_key) headers.Authorization = `Bearer ${config.api_key}`;
     const body = kind === "embedding"
@@ -1187,7 +1290,36 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     throw error;
   }
 
-  async function embed(text, { allowFallback = true } = {}) {
+  /**
+   * Turn text into a vector.
+   *
+   * `kind` says whether this text is a card being filed or a question being
+   * asked. Most models treat both the same and the distinction costs nothing —
+   * but the retrieval-trained ones are taught with an instruction in front of
+   * the text, and a *different* instruction for queries than for documents.
+   * Getting that wrong does not fail: the two simply land in slightly different
+   * parts of the space and every score quietly gets worse.
+   *
+   * A catalogue entry declares its own prefixes. Models with none behave
+   * exactly as before, which is why adding this changed no existing vector —
+   * introducing a prefix for a model already in use would silently re-aim every
+   * query against a library that was embedded without one.
+   *
+   * Custom API models get no prefix: the cabinet does not know what is on the
+   * other end, and guessing an instruction would be worse than none.
+   */
+  /** One vector from one named model, whether or not that model is the active one. */
+  async function embedWithModel(model, text, kind) {
+    if (model.builtin) return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
+    const extractor = await loadPipeline(model);
+    const prefix = (kind === "query" ? model.query_prefix : model.document_prefix) || "";
+    const output = await extractor(prefix + String(text || ""), { pooling: "mean", normalize: true });
+    const vector = Array.from(output?.data || []);
+    if (vector.length !== model.dimensions) throw new Error(`embedding 維度不符：取得 ${vector.length}，預期 ${model.dimensions}`);
+    return vector;
+  }
+
+  async function embed(text, { allowFallback = true, kind = "document" } = {}) {
     if (settings.sources.embedding === "api") {
       try {
         const payload = await requestApi("embedding", String(text || ""));
@@ -1208,17 +1340,55 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
       }
     }
     const model = getActive("embedding");
-    if (model.builtin) return hashEmbedding(text, HASH_EMBEDDING_DIMENSIONS);
     try {
-      const extractor = await loadPipeline(model);
-      const output = await extractor(String(text || ""), { pooling: "mean", normalize: true });
-      const vector = Array.from(output?.data || []);
-      if (vector.length !== model.dimensions) throw new Error(`embedding 維度不符：取得 ${vector.length}，預期 ${model.dimensions}`);
-      return vector;
+      return await embedWithModel(model, text, kind);
     } catch (error) {
       modelErrors.set(model.id, error instanceof Error ? error.message : String(error));
       return fallbackOrThrow(text, error, allowFallback);
     }
+  }
+
+  /**
+   * An embedder aimed at a model that is not the active one.
+   *
+   * A rebuild used to switch first and convert afterwards, which left every
+   * card that had not been converted yet unsearchable — on a real cabinet,
+   * the first search after a switch returned one card out of ninety-one.
+   * Converting first needs the incoming model to run while the outgoing one is
+   * still answering searches. Pipelines are cached per model, so both being
+   * loaded at once is the only cost.
+   */
+  function embedderFor(plan) {
+    if (plan?.source === "api") {
+      const config = plan.custom;
+      let width = 0;
+      return {
+        modelId: `custom-api:${config.model}`,
+        async embed(text) {
+          const payload = await requestApi("embedding", String(text || ""), config);
+          const vector = config.api_format === "tei" ? payload?.[0] : payload?.data?.[0]?.embedding;
+          if (!Array.isArray(vector) || vector.length === 0) throw new Error("embedding API 沒有回傳向量");
+          const numeric = vector.map(Number);
+          if (numeric.some((value) => !Number.isFinite(value))) throw new Error("embedding 回傳了非數字內容");
+          // The width is unknown until the first answer, and every later answer
+          // has to agree with it, or one rebuild mixes two vector spaces.
+          if (width && numeric.length !== width) throw new Error(`embedding 維度不符：取得 ${numeric.length}，先前是 ${width}`);
+          width = numeric.length;
+          return numeric;
+        },
+      };
+    }
+    const model = findModel(plan?.model_id);
+    if (!model || model.kind !== "embedding") throw new Error("找不到符合類型的模型");
+    if (!isInstalled(model)) {
+      const error = new Error("請先下載模型，再啟用它");
+      error.code = "MODEL_NOT_INSTALLED";
+      throw error;
+    }
+    return {
+      modelId: model.id,
+      embed: (text, { kind = "document" } = {}) => embedWithModel(model, String(text || ""), kind),
+    };
   }
 
   function parseDraftOutput(generated, content, source) {
@@ -1325,13 +1495,14 @@ function createModelRuntime({ modelsDir, hashEmbedding, templateDraft, apiDimens
     probeApi,
     probeApiEmbedding,
     download,
-    select,
+    planSelect,
+    planSettings,
+    embedderFor,
     embed,
     draft,
     settings: settingsView,
     updateSettings,
     settingsState,
-    restoreSettingsState,
     health,
     expectedEmbeddingDimensions,
     getActive: (kind) => getActive(kind),
@@ -1348,6 +1519,11 @@ module.exports = {
   embeddingChoices,
   BUILTIN_EMBEDDING_MODEL,
   BUILTIN_SUMMARY_MODEL,
+  // Exported so tests can ask which model ships in the installer instead of
+  // naming one. A suite that hardcodes it keeps passing after the bundle
+  // changes, while quietly checking the model that used to be there.
+  BUNDLED_EMBEDDING_MODEL,
+  BUNDLED_MODEL_REPOSITORY,
   DIMENSION_GUIDE,
   MODEL_CATALOG,
   createModelRuntime,

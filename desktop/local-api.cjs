@@ -19,7 +19,7 @@ const HASH_EMBEDDING_DIMENSIONS = 384;
 /** Fixed so a paired device can be told one port once, rather than re-paired. */
 const LAN_PORT = 8443;
 const STORE_VERSION = 2;
-const COVER_VERSION = 12;
+const COVER_VERSION = 13;
 const MOTIF_COUNT = 12;
 const MOTIF_MIN_COUNT = 8;
 const MOTIF_SIZE = 13.5;
@@ -31,6 +31,8 @@ const MOTIF_SHAPES = [
   "triple-dot", "constellation", "folder", "stack", "arch", "lines",
   "corners", "diagonal", "pill", "brackets", "bars", "crosshair",
 ];
+/** Rail patterns, drawn by `.collection-card__art--<name>` in app/globals.css. */
+const MOTIF_PATTERNS = ["orbit", "grid", "ladder", "shelf"];
 /** Slots hug the border band; the middle of the cover stays clear for the mark. */
 const MOTIF_LAYOUT = [
   [12, 13], [38, 10], [64, 10],
@@ -70,7 +72,22 @@ const RELATION_MIN_SCORE = 0.42;
 // gap to put the line in.
 const DUPLICATE_MIN_OVERLAP = 0.5;
 const RELATION_KEYWORD_WEIGHT = 0.35;
-const KEYWORD_WEIGHT = 0.25;
+// Retrieval is two pieces of evidence — what someone typed, and what the model
+// understood — and neither is allowed to gate the other. The lexical half
+// carries less weight because it cannot find a card worded differently from the
+// question; it carries weight at all because it is the half that still answers
+// when the model is missing, broken, or halfway through a rebuild.
+const LEXICAL_WEIGHT = 0.4;
+// How much of what was typed has to appear on a card before spelling it out
+// counts as a hit. Chinese is matched by character bigram (see lexicalTerms),
+// and one shared bigram out of eleven is noise rather than a match — the same
+// trap §3.3 describes for cosine. Half is the line, because "at least half of
+// what you typed is on this card" is a claim the reader can check by eye.
+const LEXICAL_MIN_COVERAGE = 0.5;
+// A card whose title *is* the question is the answer, and nothing the semantic
+// side has to say should push it down the page. Added on top of the blend
+// rather than folded into it, so it cannot be averaged away.
+const EXACT_TITLE_BONUS = 0.5;
 
 function now() {
   return new Date().toISOString();
@@ -159,14 +176,73 @@ function hasUsableEmbedding(card, dimensions) {
   return !dimensions || card.embedding.length === dimensions;
 }
 
-function keywordScore(card, query) {
-  const text = [card.title, card.category, card.topic, card.question, card.summary, card.analogy, card.detail, card.source, ...(card.tags || [])]
-    .join(" ").toLocaleLowerCase();
-  const normalized = String(query || "").trim().toLocaleLowerCase();
-  if (!normalized) return 0;
-  if (text.includes(normalized)) return 1;
-  const tokens = normalized.split(/\s+/u).filter(Boolean);
-  return tokens.length > 0 ? tokens.filter((token) => text.includes(token)).length / tokens.length : 0;
+/**
+ * The units a query is matched by.
+ *
+ * Splitting on whitespace turns a Chinese query into one enormous term that
+ * only an exact substring can satisfy, which is why the literal test almost
+ * never fired: "為什麼需要多數決" and "為什麼共識需要過半數？" are the same
+ * question and share no whole word. Latin runs stay whole words — "aop" should
+ * not match "aopen" — while CJK runs become character bigrams, the same unit
+ * duplicate detection already counts in.
+ */
+function lexicalTerms(query) {
+  const normalized = String(query || "").normalize("NFKC").toLocaleLowerCase();
+  const terms = new Set();
+  for (const run of normalized.match(/[\u3040-\u30ff\u4e00-\u9fff]+|[\p{L}\p{N}_]+/gu) || []) {
+    if (!/[\u3040-\u30ff\u4e00-\u9fff]/u.test(run)) terms.add(run);
+    else if (run.length === 1) terms.add(run);
+    else for (const gram of bigrams(run)) terms.add(gram);
+  }
+  return [...terms];
+}
+
+/**
+ * Where a hit is worth more.
+ *
+ * A query answered by the title is a different quality of answer from one
+ * buried in the detail, and scoring them the same is how "here are fifty
+ * results" happens. The ordering is the product decision; nothing here is
+ * compared against a threshold, so these are weights and not thresholds.
+ */
+const LEXICAL_FIELDS = [
+  { weight: 1, text: (card) => card.title },
+  { weight: 0.85, text: (card) => card.question },
+  { weight: 0.7, text: (card) => card.summary },
+  { weight: 0.55, text: (card) => [card.category, card.topic, ...(card.tags || [])].join(" ") },
+  { weight: 0.4, text: (card) => [card.analogy, card.detail, card.source].join(" ") },
+];
+
+function searchable(value) {
+  return String(value ?? "").normalize("NFKC").toLocaleLowerCase();
+}
+
+/** What fraction of the query's terms this text spells out. */
+function termCoverage(text, terms) {
+  if (!text || terms.length === 0) return 0;
+  return terms.filter((term) => text.includes(term)).length / terms.length;
+}
+
+/**
+ * What a card says about a query in its own words. No vector is involved, and
+ * none is required — this is the half of retrieval that has to keep working
+ * when the model does not (§P-02).
+ *
+ * `found` is coverage across the whole card and answers "is this a hit at
+ * all"; `score` is the best weighted field and answers "how good a hit". They
+ * are deliberately separate: a full match down in the detail is still a match,
+ * while one incidental bigram in the title is not.
+ */
+function lexicalMatch(card, query) {
+  const terms = lexicalTerms(query);
+  if (terms.length === 0) return { score: 0, found: 0, title: 0, exact: false };
+
+  const key = titleKey(String(query));
+  const exact = key.length > 0 && titleKey(card.title) === key;
+  const fields = LEXICAL_FIELDS.map((field) => ({ weight: field.weight, text: searchable(field.text(card)) }));
+  const found = termCoverage(fields.map((field) => field.text).join(" "), terms);
+  const score = fields.reduce((best, field) => Math.max(best, field.weight * termCoverage(field.text, terms)), 0);
+  return { score: exact ? 1 : score, found: exact ? 1 : found, title: termCoverage(fields[0].text, terms), exact };
 }
 
 function relationKeywordScore(first, second) {
@@ -220,6 +296,43 @@ function semanticBaseline(cards) {
     }
   }
   return scoreRange(scores);
+}
+
+/**
+ * How far above the cabinet's ordinary similarity a card has to sit before it
+ * is *about* the query, rather than merely the closest thing on the shelf.
+ *
+ * Ranking alone cannot answer that. Every query has a top card, and the score
+ * shown is a position within the query's own range, so the best match scores
+ * 1.0 whether someone typed "為什麼需要多數決" or "asdfghjkl". Searching a
+ * ninety-seven card cabinet for "橘子" filled the screen with fifty results,
+ * every one of them about databases and distributed systems.
+ *
+ * Measured, not guessed. Over thirty queries against a real cabinet — eighteen
+ * it could answer, twelve it could not — the separating quantity was how far
+ * the best match rises above the median of that query's own scores, counted in
+ * units of `semantic_baseline` (the cabinet's own p99-minus-median spread,
+ * card against card):
+ *
+ *     answerable      0.98 – 3.08
+ *     unanswerable    0.31 – 0.85
+ *
+ * The line is drawn at 0.9, inside that gap and nearer the lower side: not
+ * finding a card you know you wrote is a worse failure than being shown one
+ * card too many, so the doubt is spent on keeping results rather than cutting
+ * them. Nothing here compares a cosine to a constant (§3.3) — the unit is the
+ * cabinet's own spread, so it moves when the model does.
+ *
+ * Null means "no opinion": too few cards to have a distribution, or a cabinet
+ * whose cards are all alike. The caller then filters nothing.
+ */
+const SEMANTIC_STANDOUT = 0.9;
+function standoutFloor(scores, baseline) {
+  if (!baseline || scores.length < 6) return null;
+  const spread = baseline.hi - baseline.lo;
+  if (!(spread > 0)) return null;
+  const sorted = [...scores].sort((first, second) => first - second);
+  return sorted[Math.floor(sorted.length * 0.5)] + SEMANTIC_STANDOUT * spread;
 }
 
 /** Where this pair sits in the collection's own range of similarity. */
@@ -341,7 +454,7 @@ function findDuplicates(store) {
       // Otherwise the evidence is the wording, and only the wording.
       //
       // Similarity was tried as a second condition and had to go: a cabinet
-      // measures similarity against its own spread (§1.3), and on a small one
+      // measures similarity against its own spread (§3.3), and on a small one
       // that spread is noise — measured on four cards, a card retyped under a
       // new title scored 0.29 while two unrelated cards scored 1.00. The model
       // also reads "檢索增強生成" and "RAG" as fairly different titles, so it
@@ -362,26 +475,25 @@ function findDuplicates(store) {
   return duplicates.sort((first, second) => second.score - first.score);
 }
 
-function unitValue(digest, offset) {
-  const start = offset % (digest.length - 8);
-  return Number.parseInt(digest.slice(start, start + 8), 16) / 0xffffffff;
-}
-
-function chunkAverage(values, index, count = 8) {
-  const start = Math.floor(index * values.length / count);
-  const end = Math.max(start + 1, Math.floor((index + 1) * values.length / count));
-  const chunk = values.slice(start, end);
-  return chunk.reduce((sum, value) => sum + value, 0) / chunk.length;
-}
-
-function chunkFeatures(values, index, count = MOTIF_LAYOUT.length) {
-  const start = Math.floor(index * values.length / count);
-  const end = Math.max(start + 1, Math.floor((index + 1) * values.length / count));
-  const chunk = values.slice(start, end);
-  const average = chunk.reduce((sum, value) => sum + value, 0) / chunk.length;
-  const energy = Math.sqrt(chunk.reduce((sum, value) => sum + value * value, 0) / chunk.length);
-  const variation = chunk.slice(1).reduce((sum, value, offset) => sum + Math.abs(value - chunk[offset]), 0) / Math.max(1, chunk.length - 1);
-  return { average, energy, variation };
+/**
+ * As many independent values in [0, 1) as a cover needs, from one string.
+ *
+ * Each SHA-256 block yields eight non-overlapping 32-bit words, and blocks are
+ * numbered so the stream can be as long as the drawing needs. The previous
+ * reader took overlapping eight-character windows out of a single digest, which
+ * correlates choices that are supposed to be independent — invisible while the
+ * embedding supplied most of a cover's variation, and not invisible now that it
+ * supplies none.
+ */
+function coverValues(identity, count) {
+  const values = [];
+  for (let block = 0; values.length < count; block += 1) {
+    const digest = crypto.createHash("sha256").update(`${identity}/${block}`, "utf8").digest("hex");
+    for (let offset = 0; offset < digest.length; offset += 8) {
+      values.push(Number.parseInt(digest.slice(offset, offset + 8), 16) / 0x100000000);
+    }
+  }
+  return values;
 }
 
 function categoryName(category) {
@@ -462,54 +574,66 @@ function assignCategoryAccents(store) {
   return changed;
 }
 
-function buildCover(embedding, category, accents = null) {
-  const norm = Math.sqrt(embedding.reduce((sum, value) => sum + value * value, 0)) || 1;
-  const stableValues = embedding.map((value) => value / norm);
-  const fingerprint = stableValues.map((value) => value.toFixed(8)).join(",");
-  const digest = crypto.createHash("sha256").update(fingerprint, "utf8").digest("hex");
-  const chunks = Array.from({ length: 8 }, (_, index) => chunkAverage(stableValues, index));
-  const features = MOTIF_LAYOUT.map((_, index) => chunkFeatures(stableValues, index));
-  const maxAverage = Math.max(...features.map(({ average }) => Math.abs(average))) || 1;
-  const maxEnergy = Math.max(...features.map(({ energy }) => energy)) || 1;
-  const maxVariation = Math.max(...features.map(({ variation }) => variation)) || 1;
-  const patternNames = ["orbit", "grid", "ladder", "shelf"];
-  const pattern = patternNames[Math.floor(unitValue(digest, 0) * patternNames.length) % patternNames.length];
-  // Colour comes from the category, not the vector: cards in one category have
-  // to read as one group. Everything else on the cover still comes from the
-  // embedding, so two cards in the same category are the same colour without
-  // being the same picture.
+/**
+ * A card's cover, drawn from the one thing about the card that never changes.
+ *
+ * It used to be drawn from the card's embedding, so that the art would "keep
+ * tracking meaning". Measured against this cabinet's own model, it never did:
+ * every choice on a cover passes through a SHA-256 of the vector, so two cards
+ * that say the same thing in different words (cosine 0.99) agree on about as
+ * many glyphs as two cards with nothing in common — 7%, against 6% for picking
+ * at random. The art was always a hash. It was simply hashing something that
+ * moves.
+ *
+ * And it moved in the way that costs most. The source hash spans title,
+ * question, summary, analogy, detail, topic, category, tags and source, so
+ * deleting one full stop redrew a card into a picture its owner had never seen
+ * — no glyph in common with the one they had learned to recognise. Finding a
+ * card by eye is what a cover is for, so it now hangs on the card's id: stable
+ * across an edit, across a model change, across a rewrite.
+ *
+ * Colour is the exception and comes from the category, so that cards in one
+ * category read as one group. Two cards in a category are then the same colour
+ * without being the same picture.
+ */
+function buildCover(identity, category, accents = null) {
+  const key = String(identity ?? "");
+  // Four values for the cover itself, one per slot to decide which slots are
+  // kept, then five per slot for the glyph drawn there.
+  const values = coverValues(key, 4 + MOTIF_COUNT * 6);
   const palette = categoryPalette(category, accents);
-  // 8–12 glyphs per cover: sparser cards read as calmer, denser ones as busier.
-  const motifCount = Math.min(MOTIF_COUNT, MOTIF_MIN_COUNT + Math.floor(unitValue(digest, 52) * (MOTIF_COUNT - MOTIF_MIN_COUNT + 1)));
+  // 8-12 glyphs per cover: sparser cards read as calmer, denser ones as busier.
+  const motifCount = MOTIF_MIN_COUNT + Math.floor(values[1] * (MOTIF_COUNT - MOTIF_MIN_COUNT + 1));
   const keptSlots = Array.from({ length: MOTIF_COUNT }, (_, index) => index)
-    .sort((left, right) => unitValue(digest, 60 + left * 3) - unitValue(digest, 60 + right * 3))
+    .sort((left, right) => values[4 + left] - values[4 + right])
     .slice(0, motifCount)
     .sort((left, right) => left - right);
 
   const motifs = keptSlots.map((index) => {
-    const { average, energy, variation } = features[index];
-    const averageRatio = (average / maxAverage + 1) / 2;
-    const energyRatio = energy / maxEnergy;
-    const variationRatio = variation / maxVariation;
     const [x, y] = MOTIF_LAYOUT[index];
-    const shapeIndex = Math.floor((averageRatio * 2.1 + energyRatio * 3.4 + variationRatio * 4.7 + unitValue(digest, 44 + index * 5)) * MOTIF_SHAPES.length) % MOTIF_SHAPES.length;
+    const at = 4 + MOTIF_COUNT + index * 5;
     return {
-      shape: MOTIF_SHAPES[shapeIndex],
-      x: Number((x + (variationRatio - 0.5) * 4).toFixed(2)),
-      y: Number((y + (averageRatio - 0.5) * 4).toFixed(2)),
+      shape: MOTIF_SHAPES[Math.floor(values[at] * MOTIF_SHAPES.length)],
+      x: Number((x + (values[at + 1] - 0.5) * 4).toFixed(2)),
+      y: Number((y + (values[at + 2] - 0.5) * 4).toFixed(2)),
       size: MOTIF_SIZE,
-      opacity: Number((0.42 + energyRatio * 0.38).toFixed(3)),
-      weight: Number(energyRatio.toFixed(3)),
+      opacity: Number((0.42 + values[at + 3] * 0.38).toFixed(3)),
+      weight: Number(values[at + 4].toFixed(3)),
     };
   });
 
   return {
     version: COVER_VERSION,
-    seed: digest.slice(0, 16),
-    pattern,
+    seed: crypto.createHash("sha256").update(key, "utf8").digest("hex").slice(0, 16),
+    pattern: MOTIF_PATTERNS[Math.floor(values[0] * MOTIF_PATTERNS.length)],
     ...palette,
-    density: Number((0.55 + Math.abs(chunks[3]) * 0.45).toFixed(3)),
-    orbit: Number((Math.abs(chunks[5]) * 0.9 + unitValue(digest, 36) * 0.1).toFixed(3)),
+    // These two place the gradient focus in app/card-face.tsx. Drawn from the
+    // vector they were dead: a chunk mean of a *normalised* vector sits at
+    // zero by construction, so density held four distinct values across two
+    // hundred cards and moved the focus by a fifth of a percent. The ranges
+    // here are the ones the consuming formulas were written for.
+    density: Number((0.55 + values[2] * 0.45).toFixed(3)),
+    orbit: Number(values[3].toFixed(3)),
     motifs,
   };
 }
@@ -545,7 +669,7 @@ function normalizeCard(input, previous = {}, canonicalTags = null) {
   // Provisional: the colour here is the hashed fallback, because a lone card
   // has no view of the cabinet's colour assignments. refreshStaleCovers runs
   // after every mutation and settles it.
-  card.cover = card.cover ?? buildCover(coverVector(card), card.category);
+  card.cover = card.cover ?? buildCover(card.id, card.category);
   return card;
 }
 
@@ -556,17 +680,14 @@ function coverIsCurrent(card, accents) {
 }
 
 /**
- * Covers are decoration, so they must render even when the card has no usable
- * vector yet; the model embedding is preferred so the art keeps tracking meaning.
+ * The shape a card leaves the runtime in.
+ *
+ * `ranking` is filled in only by search. Both halves of the hybrid score ride
+ * along even though the interface shows neither number: without them a search
+ * that ranks badly can only be argued about, never measured, and the weights
+ * are meant to be tuned against real cabinets rather than guessed at (CLAUDE.md §1).
  */
-function coverVector(card) {
-  return Array.isArray(card.embedding) && card.embedding.length > 0
-    ? card.embedding
-    : hashEmbedding(embeddingText(card), HASH_EMBEDDING_DIMENSIONS);
-}
-
-function publicCard(card, score = 0) {
-  const searchReasons = arguments[2] || [];
+function publicCard(card, ranking = null) {
   return {
     id: card.id,
     number: card.number,
@@ -579,8 +700,13 @@ function publicCard(card, score = 0) {
     detail: card.detail,
     source: card.source,
     tags: card.tags,
-    score,
-    search_reasons: searchReasons,
+    score: ranking?.score ?? 0,
+    lexical_score: ranking?.lexical_score ?? 0,
+    // Null, not zero: "this card carries no comparable vector" and "the model
+    // saw it and was unimpressed" are different answers, and only one of them
+    // means the search ran with both halves.
+    semantic_score: ranking?.semantic_score ?? null,
+    search_reasons: ranking?.reasons ?? [],
     created_at: card.created_at || null,
     updated_at: card.updated_at || null,
     cover: card.cover,
@@ -931,7 +1057,7 @@ async function loadStore({ dataFile, seedPath, migrateFromUrl, migrateFromToken 
  * real vectors as though the result meant something. Clearing the model id is
  * what lets reindexStore find the card and try again later.
  */
-async function applyEmbedding(card, modelRuntime, accents = null) {
+async function applyEmbedding(card, modelRuntime) {
   try {
     card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback: false });
     card.embedding_model_id = modelRuntime.activeEmbeddingModelId();
@@ -939,11 +1065,6 @@ async function applyEmbedding(card, modelRuntime, accents = null) {
     card.embedding = null;
     card.embedding_model_id = null;
   }
-  // The accents matter: rebuilding a vector redraws the cover, and without the
-  // cabinet's colour assignment that redraw silently reverts the card to the
-  // hashed fallback colour — which is what a model switch used to do to every
-  // card at once.
-  card.cover = buildCover(coverVector(card), card.category, accents);
   card.embedding_source_hash = embeddingSourceHash(card);
   return card;
 }
@@ -960,8 +1081,73 @@ function refreshStaleCovers(store) {
   // category ends here, so a card never keeps a colour it is not entitled to.
   assignCategoryAccents(store);
   const stale = store.cards.filter((card) => !coverIsCurrent(card, store.category_accents));
-  for (const card of stale) card.cover = buildCover(coverVector(card), card.category, store.category_accents);
+  for (const card of stale) card.cover = buildCover(card.id, card.category, store.category_accents);
   return stale.map((card) => card.id);
+}
+
+/** A cancelled task should stop working, not finish and then be ignored. */
+function abortIfCancelled(cancelled) {
+  if (!cancelled?.()) return;
+  throw Object.assign(new Error("已取消"), { name: "AbortError" });
+}
+
+/**
+ * Rebuild every vector with an incoming model, putting none of them into
+ * service.
+ *
+ * The new vectors land in `embedding_pending`, a field the store's schema does
+ * not know about and therefore never writes to disk. Meanwhile the vectors
+ * already on the cards keep answering searches, from the model that is still
+ * active. The cabinet stays whole for the entire rebuild.
+ *
+ * What this replaces: switching the active model first and converting
+ * afterwards. `/search` embeds the query with the active model and then drops
+ * every card whose vector is a different width, so each unconverted card was
+ * invisible. Measured on a 91-card cabinet moving from BGE-M3 to
+ * EmbeddingGemma, the first search after the switch returned **one** card, and
+ * it took fifteen seconds to come back — on a cabinet of two thousand it would
+ * be most of ten minutes of a cabinet that looks like it has been emptied.
+ *
+ * A crash in the middle is also better this way: nothing was applied, so the
+ * cabinet is still consistently on the old model. Switching first left half the
+ * cards on each side of a boundary nothing would have repaired on its own.
+ */
+async function stageEmbeddings(store, embedder, { progress, cancelled } = {}) {
+  const cards = store.cards.filter((card) => !card.deleted_at);
+  let completed = 0;
+  for (const card of cards) {
+    abortIfCancelled(cancelled);
+    card.embedding_pending = await embedder.embed(embeddingText(card));
+    // Recorded with the vector: a card edited during the rebuild must not end
+    // up claiming that this vector describes the new wording.
+    card.embedding_pending_hash = embeddingSourceHash(card);
+    completed += 1;
+    progress?.(5 + Math.floor(completed / Math.max(1, cards.length) * 75), `已重算 ${completed}/${cards.length} 張卡片向量`);
+  }
+  return cards.length;
+}
+
+/** Put every staged vector into service at once, so no search sees a half-built index. */
+function commitStagedEmbeddings(store, modelId) {
+  const committed = [];
+  for (const card of store.cards) {
+    if (!Array.isArray(card.embedding_pending)) continue;
+    card.embedding = card.embedding_pending;
+    card.embedding_model_id = modelId;
+    card.embedding_source_hash = card.embedding_pending_hash;
+    delete card.embedding_pending;
+    delete card.embedding_pending_hash;
+    committed.push(card.id);
+  }
+  store.embedding_model_id = modelId;
+  return committed;
+}
+
+function discardStagedEmbeddings(store) {
+  for (const card of store.cards) {
+    delete card.embedding_pending;
+    delete card.embedding_pending_hash;
+  }
 }
 
 async function reindexStore(store, modelRuntime, { allowFallback = false, progress } = {}) {
@@ -973,14 +1159,17 @@ async function reindexStore(store, modelRuntime, { allowFallback = false, progre
     if (allowFallback) {
       card.embedding = await modelRuntime.embed(embeddingText(card), { allowFallback });
       card.embedding_model_id = currentModel;
-      card.cover = buildCover(coverVector(card), card.category, store.category_accents);
       card.embedding_source_hash = embeddingSourceHash(card);
     } else {
       // One card the model chokes on must not abort the whole rebuild; it keeps
       // a null model id and gets picked up by the next pass.
-      await applyEmbedding(card, modelRuntime, store.category_accents);
+      await applyEmbedding(card, modelRuntime);
     }
-    card.updated_at = now();
+    // `updated_at` is deliberately not touched. It says when a person last
+    // changed the card; a reindex is the machine's work, not theirs. Stamping
+    // it here made a model switch mark the entire cabinet as just-edited, which
+    // silently reordered every "recently updated" view on both the desktop and
+    // the phone — the cabinet's history rewritten by a maintenance job.
     completed += 1;
     progress?.(10 + Math.floor(completed / Math.max(1, cardsToUpdate.length) * 70), `已建立 ${completed}/${cardsToUpdate.length} 張卡片向量`);
   }
@@ -1107,24 +1296,51 @@ function createApiServer(store, dataFile, modelRuntime, {
     }, { retryPayload: { model_id: modelId } });
   };
 
-  const startModelSelectTask = (kind, modelId, selection, previousEmbedding) => taskManager.start(
+  /**
+   * Rebuild with the incoming model, then switch — never the other way round.
+   *
+   * Because nothing is applied until every card is converted, there is no
+   * rollback to get wrong: a failure part-way through leaves the cabinet
+   * exactly as it was, still searchable, still on the model it was on.
+   */
+  const applyEmbeddingPlan = async (context, plan, label) => {
+    try {
+      const embedder = modelRuntime.embedderFor(plan.embedding_plan);
+      context.update(5, `正在以${label}重算向量，搜尋期間照常可用`);
+      await stageEmbeddings(store, embedder, {
+        progress: (progress, message) => context.update(progress, message),
+        cancelled: context.cancelled,
+      });
+      abortIfCancelled(context.cancelled);
+    } catch (error) {
+      discardStagedEmbeddings(store);
+      throw error;
+    }
+    const applied = plan.apply();
+    context.update(84, "正在切換到新的向量");
+    commitStagedEmbeddings(store, modelRuntime.activeEmbeddingModelId());
+    store.summary_model_id = modelRuntime.activeSummaryModelId();
+    context.update(88, "正在重建語意關聯");
+    rebuildSemanticRelations(store);
+    // A card written while the rebuild was running carries a vector from the
+    // model that has just been retired, and a card edited during it carries one
+    // that describes the old wording. Usually there are none of either.
+    context.update(95, "正在處理重建期間的異動");
+    await reindexStore(store, modelRuntime, { allowFallback: false });
+    save();
+    return applied;
+  };
+
+  const startModelSelectTask = (kind, modelId, plan) => taskManager.start(
     "model_select",
     `啟用 ${modelId} 並重建 embedding`,
     async (context) => {
-      try {
-        await reindexStore(store, modelRuntime, { allowFallback: false, progress: (progress, message) => context.update(progress, message) });
-        save();
-        return { status: "active", selection, reindexed_cards: store.cards.filter((card) => !card.deleted_at).length, models: modelRuntime.catalog() };
-      } catch (error) {
-        try {
-          await modelRuntime.select("embedding", previousEmbedding);
-        } catch {
-          // Preserve the last valid model selection if rollback fails.
-        }
-        throw error;
-      }
+      const selection = await applyEmbeddingPlan(context, plan, "新模型");
+      return { status: "active", selection, reindexed_cards: store.cards.filter((card) => !card.deleted_at).length, models: modelRuntime.catalog() };
     },
-    { retryPayload: { kind, model_id: modelId, previous_model_id: previousEmbedding } },
+    // No previous model to record: a failed switch never took effect, so
+    // retrying is just asking for the same switch again.
+    { retryPayload: { kind, model_id: modelId } },
   );
 
   async function handle(request, response) {
@@ -1176,7 +1392,7 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (segments.length === 0 && isVersioned) {
-      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
+      sendJson(response, 200, { name: "Knowledge Card Cabinet API", version: "v1", authentication: "bearer-local-and-device", intended_use: "local desktop runtime; remote transport disabled", docs: "/docs", openapi: "/openapi.json", capabilities: ["cards", "search", "search.hybrid", "related", "trash", "models", "models.inspect", "models.remove", "models.custom", "models.api.probe", "models.api.probe_embedding", "tasks", "tasks.cancel", "tasks.retry", "settings", "database.export", "database.import", "database.reset", "devices.pairing", "devices.revoke", "devices.host_status", "app.version"] });
       return;
     }
 
@@ -1288,27 +1504,23 @@ function createApiServer(store, dataFile, modelRuntime, {
 
     if (request.method === "PUT" && segments[0] === "settings" && segments.length === 1) {
       const body = await readBody(request);
-      const previous = modelRuntime.settingsState();
       try {
-        const result = modelRuntime.updateSettings(body);
-        if (!result.embedding_changed) {
+        const plan = modelRuntime.planSettings(body);
+        if (!plan.embedding_changed) {
+          plan.apply();
           save();
           sendJson(response, 200, { status: "saved", settings: modelRuntime.settings(), reindexed_cards: 0 });
           return;
         }
+        // Pointing at a different embedding API is a rebuild like any other, so
+        // it waits the same way. Nothing is applied until it succeeds, which is
+        // why there is no settings state to restore here any more.
         const task = taskManager.start("settings_update", "套用模型設定並重建 embedding", async (context) => {
-          try {
-            await reindexStore(store, modelRuntime, { allowFallback: false, progress: (progress, message) => context.update(progress, message) });
-            save();
-            return { status: "saved", settings: modelRuntime.settings(), reindexed_cards: store.cards.filter((card) => !card.deleted_at).length };
-          } catch (error) {
-            modelRuntime.restoreSettingsState(previous);
-            throw error;
-          }
+          await applyEmbeddingPlan(context, plan, "新設定");
+          return { status: "saved", settings: modelRuntime.settings(), reindexed_cards: store.cards.filter((card) => !card.deleted_at).length };
         });
-        sendJson(response, 202, { status: "accepted", task_id: task.task_id, settings: modelRuntime.settings() });
+        sendJson(response, 202, { status: "accepted", task_id: task.task_id });
       } catch (error) {
-        modelRuntime.restoreSettingsState(previous);
         const status = error instanceof Error && /必須|位址|格式/u.test(error.message) ? 400 : 502;
         sendJson(response, status, { detail: error.message || "套用設定失敗" });
       }
@@ -1352,7 +1564,7 @@ function createApiServer(store, dataFile, modelRuntime, {
           const usable = Array.isArray(rawCard.embedding) && rawCard.embedding.length > 0
             && (!width || rawCard.embedding.length === width);
           card.embedding = usable ? rawCard.embedding.map(Number) : null;
-          card.cover = rawCard.cover || rawCard.cover_data || buildCover(coverVector(card), card.category);
+          card.cover = rawCard.cover || rawCard.cover_data || buildCover(card.id, card.category);
           card.embedding_model_id = usable
             ? (rawCard.embedding_model_id || rawCard.embedding_model || modelRuntime.activeEmbeddingModelId())
             : null;
@@ -1446,8 +1658,7 @@ function createApiServer(store, dataFile, modelRuntime, {
         if (previousTask.operation === "model_download") {
           task = startDownloadTask(String(payload.model_id));
         } else if (previousTask.operation === "model_select") {
-          const selection = await modelRuntime.select(String(payload.kind), String(payload.model_id));
-          task = startModelSelectTask(String(payload.kind), String(payload.model_id), selection, String(payload.previous_model_id));
+          task = startModelSelectTask(String(payload.kind), String(payload.model_id), modelRuntime.planSelect(String(payload.kind), String(payload.model_id)));
         } else {
           throw new Error("這個任務目前無法自動重試，請重新提交設定");
         }
@@ -1560,16 +1771,19 @@ function createApiServer(store, dataFile, modelRuntime, {
       const body = await readBody(request);
       const kind = String(body.kind || "");
       const modelId = String(body.model_id || "");
-      const previousEmbedding = modelRuntime.activeEmbeddingModelId();
       try {
-        const selection = await modelRuntime.select(kind, modelId);
-        if (kind !== "embedding" || !selection.changed) {
+        // Planned, not applied: a switch that needs a rebuild must not take
+        // effect until the rebuild finishes, or every card not yet converted
+        // disappears from search while it runs.
+        const plan = modelRuntime.planSelect(kind, modelId);
+        if (kind !== "embedding" || !plan.changed) {
+          const selection = plan.apply();
           save();
           sendJson(response, 200, { status: "active", selection, reindexed_cards: 0, models: modelRuntime.catalog() });
           return;
         }
-        const task = startModelSelectTask(kind, modelId, selection, previousEmbedding);
-        sendJson(response, 202, { status: "accepted", task_id: task.task_id, selection, models: modelRuntime.catalog() });
+        const task = startModelSelectTask(kind, modelId, plan);
+        sendJson(response, 202, { status: "accepted", task_id: task.task_id, models: modelRuntime.catalog() });
       } catch (error) {
         const status = error?.code === "MODEL_NOT_INSTALLED" ? 409 : 500;
         sendJson(response, status, { detail: error instanceof Error ? error.message : String(error) });
@@ -1683,7 +1897,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = targetName;
-        await applyEmbedding(card, modelRuntime, store.category_accents);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         affected += 1;
       }
@@ -1715,7 +1929,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       let affected = 0;
       for (const card of store.cards.filter((item) => !item.deleted_at && item.category === sourceName)) {
         card.category = target;
-        await applyEmbedding(card, modelRuntime, store.category_accents);
+        await applyEmbedding(card, modelRuntime);
         card.updated_at = now();
         affected += 1;
       }
@@ -1737,38 +1951,111 @@ function createApiServer(store, dataFile, modelRuntime, {
     }
 
     if (request.method === "GET" && segments[0] === "search") {
-      const queryVector = await modelRuntime.embed(requestUrl.searchParams.get("q") || "");
-      const limit = Math.min(50, Math.max(1, Number(requestUrl.searchParams.get("limit") || 10)));
       const query = requestUrl.searchParams.get("q") || "";
+      const limit = Math.min(50, Math.max(1, Number(requestUrl.searchParams.get("limit") || 10)));
       const category = requestUrl.searchParams.get("category") || "";
       const tag = requestUrl.searchParams.get("tag") || "";
       const sort = requestUrl.searchParams.get("sort") || "relevance";
-      const results = store.cards.filter((card) => !card.deleted_at)
-        // Only cards carrying a vector of the query's own width can be scored
-        // against it; the rest are waiting on a reindex.
-        .filter((card) => hasUsableEmbedding(card, queryVector.length))
-        .filter((card) => !category || String(card.category).toLocaleLowerCase() === category.toLocaleLowerCase())
-        .filter((card) => !tag || (card.tags || []).some((item) => String(item).toLocaleLowerCase() === tag.toLocaleLowerCase()))
-        .map((card) => ({ card, semantic: cosine(queryVector, card.embedding), keyword: keywordScore(card, query) }));
 
+      const candidates = store.cards.filter((card) => !card.deleted_at)
+        .filter((card) => !category || String(card.category).toLocaleLowerCase() === category.toLocaleLowerCase())
+        .filter((card) => !tag || (card.tags || []).some((item) => String(item).toLocaleLowerCase() === tag.toLocaleLowerCase()));
+
+      const ordered = (entries, scoreOf) => [...entries].sort((first, second) => sort === "updated"
+        ? String(second.card.updated_at).localeCompare(String(first.card.updated_at))
+        : sort === "title"
+          ? first.card.title.localeCompare(second.card.title)
+          : scoreOf(second) - scoreOf(first)).slice(0, limit);
+
+      // Nothing was asked, so there is nothing to rank: the filters are the
+      // whole answer, and the cabinet in its own order is what a reader expects
+      // to get back.
+      if (!query.trim()) {
+        sendJson(response, 200, ordered(candidates.map((card) => ({ card })), () => 0)
+          .map(({ card }) => publicCard(card)));
+        return;
+      }
+
+      /*
+       * Two pipelines over one candidate set.
+       *
+       * The lexical one sees every card. The semantic one sees only cards
+       * carrying a vector of the query's own width. Neither may remove a card
+       * from the other's reach — that is the whole of "AI enhances retrieval,
+       * AI does not gate retrieval", and it is why the embed call sits inside a
+       * try. A model that is missing, broken, still downloading, or halfway
+       * through a rebuild costs the search its ability to match different
+       * wording. It must not cost the search its ability to find "Spring AOP"
+       * when somebody types "Spring AOP".
+       *
+       * This used to filter on hasUsableEmbedding *before* scoring anything, so
+       * a single failed embedding took a card out of every search including the
+       * ones that spelled its title out in full.
+       */
+      let queryVector = null;
+      try {
+        queryVector = await modelRuntime.embed(query, { kind: "query" });
+      } catch {
+        queryVector = null;
+      }
+
+      const measured = candidates.map((card) => ({
+        card,
+        lexical: lexicalMatch(card, query),
+        semantic: queryVector && hasUsableEmbedding(card, queryVector.length)
+          ? cosine(queryVector, card.embedding)
+          : null,
+      }));
+      const semanticScores = measured.filter((entry) => entry.semantic !== null).map((entry) => entry.semantic);
+
+      // How far above this query's own median a card has to sit before it is
+      // *about* the query rather than merely the nearest thing on the shelf.
+      // Without it every query returned the whole cabinet in ranked order.
+      const floor = standoutFloor(semanticScores, store.semantic_baseline);
       // A query's similarities sit in their own band — lower than card-to-card,
       // and narrower still for a strong model — so "語意相似" has to mean "high
       // for this query", not a fixed cosine. Against BGE-M3 a fixed 0.65 either
       // labelled every result or none of them.
-      const queryRange = scoreRange(results.map((entry) => entry.semantic));
+      const queryRange = scoreRange(semanticScores);
 
-      const scored = results.map(({ card, semantic, keyword }) => {
-        const relative = relativeSemantic(semantic, queryRange);
+      // Kept when either pipeline vouches for it. A card that spells the query
+      // out is never dropped for being semantically ordinary, and a card that
+      // means the query in different words is never dropped for not containing
+      // it — those two failures are the reason this endpoint was rewritten.
+      const results = measured.filter((entry) => entry.lexical.found >= LEXICAL_MIN_COVERAGE
+        || (entry.semantic !== null && (floor === null || entry.semantic >= floor)));
+
+      const scored = ordered(results.map((entry) => {
+        const relative = entry.semantic === null ? null : relativeSemantic(entry.semantic, queryRange);
         const reasons = [];
-        if (keyword > 0) reasons.push("關鍵字命中");
+        if (entry.lexical.found >= LEXICAL_MIN_COVERAGE) {
+          reasons.push(entry.lexical.exact || entry.lexical.title >= 1 ? "標題命中" : "關鍵字命中");
+        }
         // Too few results to have a distribution means there is no honest way
         // to say a card stands out, so the label is simply withheld.
-        if (queryRange && relative >= 0.5) reasons.push("語意相似");
+        if (queryRange && relative !== null && relative >= 0.5) reasons.push("語意相似");
         if (category) reasons.push("同分類");
         if (tag) reasons.push("共享標籤");
-        return { card, score: (1 - KEYWORD_WEIGHT) * relative + KEYWORD_WEIGHT * keyword, reasons };
-      }).sort((first, second) => sort === "updated" ? String(second.card.updated_at).localeCompare(String(first.card.updated_at)) : sort === "title" ? first.card.title.localeCompare(second.card.title) : second.score - first.score).slice(0, limit);
-      sendJson(response, 200, scored.map(({ card, score, reasons }) => publicCard(card, score, reasons)));
+
+        // With no vector there is nothing to blend, so what the card says
+        // stands for both halves instead of being halved. Halving it would rank
+        // a card the model failed on below cards it merely half-matches, which
+        // is the same bug in a different costume.
+        const blended = relative === null
+          ? entry.lexical.score
+          : (1 - LEXICAL_WEIGHT) * relative + LEXICAL_WEIGHT * entry.lexical.score;
+        return {
+          card: entry.card,
+          ranking: {
+            score: blended + (entry.lexical.exact ? EXACT_TITLE_BONUS : 0),
+            lexical_score: Math.round(entry.lexical.score * 10000) / 10000,
+            semantic_score: relative === null ? null : Math.round(relative * 10000) / 10000,
+            reasons,
+          },
+        };
+      }), (entry) => entry.ranking.score);
+
+      sendJson(response, 200, scored.map(({ card, ranking }) => publicCard(card, ranking)));
       return;
     }
 
@@ -1872,7 +2159,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const existing = store.cards.find((card) => card.id === String(body.id).trim());
       const card = normalizeCard(body, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at)));
-      await applyEmbedding(card, modelRuntime, store.category_accents);
+      await applyEmbedding(card, modelRuntime);
       // Reply with the object the store holds, not the local copy: save() can
       // still change it — repainting a card that introduced a new category —
       // and the caller must be told the colour it actually got.
@@ -1904,7 +2191,7 @@ function createApiServer(store, dataFile, modelRuntime, {
       }
       const changes = await readBody(request);
       const card = normalizeCard({ ...existing, ...changes, id: existing.id }, existing, canonicalTagMap(store.cards.filter((item) => !item.deleted_at && item.id !== existing.id)));
-      await applyEmbedding(card, modelRuntime, store.category_accents);
+      await applyEmbedding(card, modelRuntime);
       Object.assign(existing, card);
       rebuildSemanticRelationsFor(store, [existing.id]);
       save([existing.id]);
@@ -2119,4 +2406,4 @@ async function startLocalApi({ dataFile, seedPath, migrateFromUrl, migrateFromTo
 // The vector helpers are exported for tests: they carry the invariants that
 // keep incompatible embeddings out of the store, and those are worth checking
 // directly rather than only through an HTTP round trip.
-module.exports = { startLocalApi, deviceMayReach, cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, categoryPalette, assignCategoryAccents, COVER_VERSION };
+module.exports = { startLocalApi, deviceMayReach, cosine, lexicalMatch, lexicalTerms, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, buildCover, embeddingSourceHash, standoutFloor, categoryPalette, assignCategoryAccents, COVER_VERSION };

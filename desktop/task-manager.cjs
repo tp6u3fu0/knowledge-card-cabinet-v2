@@ -74,7 +74,14 @@ function createTaskManager({ storagePath = "" } = {}) {
 
   async function run(taskId, worker) {
     update(taskId, { status: "running", progress: 1, message: "開始執行" });
-    const context = { task_id: taskId, update: (progress, message = "") => update(taskId, { progress, message }) };
+    const context = {
+      task_id: taskId,
+      update: (progress, message = "") => update(taskId, { progress, message }),
+      // Cancelling only marks the task; the worker keeps running and its result
+      // is thrown away. A worker doing expensive or committing work has to ask,
+      // or "cancel" means "carry on and apply it anyway".
+      cancelled: () => tasks.get(taskId)?.status === "cancelled",
+    };
     try {
       const result = await worker(context);
       if (tasks.get(taskId)?.status === "cancelled") return;

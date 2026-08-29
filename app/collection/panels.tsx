@@ -110,7 +110,10 @@ export function modelGlyph(model: ModelOption): CoverMotif["shape"] {
 }
 
 function modelTags(model: ModelOption): string[] {
-  const tags = [model.size_label];
+  // A bundled model's size is a fact about the installer, not about anything
+  // the reader has to wait for, so it says "隨程式附帶" instead of a number
+  // that reads as a pending download.
+  const tags = [model.bundled ? "隨程式附帶" : model.size_label];
   if (model.kind === "embedding" && model.dimensions) tags.push(`${model.dimensions} 維`);
   if (model.custom) tags.push("自訂");
   return tags;
@@ -119,6 +122,7 @@ function modelTags(model: ModelOption): string[] {
 function modelState(model: ModelOption, isBusy: boolean): string {
   if (model.active) return "使用中";
   if (model.status === "downloading" || isBusy) return "準備中…";
+  if (model.bundled) return "已內建";
   if (model.installed) return "已下載";
   return model.size_label ? `下載 ${model.size_label}` : "未下載";
 }
@@ -648,6 +652,70 @@ function AddModelForm({
  * which made a model you added feel like it came from somewhere else. Opening
  * it from the back of the deck it will join says what it does without a label.
  */
+/**
+ * Rough on purpose: the point is "minutes, not seconds", not a countdown.
+ *
+ * A quarter of a second a card, measured on an eight-gigabyte laptop with the
+ * bundled model — ninety-one cards took twenty-one seconds.
+ */
+function rebuildEstimate(cardCount: number) {
+  const seconds = cardCount * 0.25;
+  return seconds < 90 ? "不到一分鐘" : `${Math.round(seconds / 60)} 分鐘`;
+}
+
+/**
+ * The one model choice that costs something to change.
+ *
+ * Sitting in the open next to the summary model, it read as the same kind of
+ * decision. It is not: the summary model can be swapped freely and never
+ * touches a stored card, while changing the embedding model recomputes every
+ * vector in the cabinet. There is no reason to do that unless something
+ * specific is wrong with the model already in use, so this does not recommend
+ * one — it just makes sure nobody arrives here by accident.
+ *
+ * Closed by default. What is behind the door is the picker; what stays outside
+ * is the slot naming the model in use, because that is information rather than
+ * a decision.
+ *
+ * The warning says what actually happens, which is less alarming than it used
+ * to be: the rebuild converts every card before switching, so search keeps
+ * working throughout, covers and category colours do not move, and cancelling
+ * leaves the cabinet exactly as it was. Overstating the risk would be its own
+ * bug — people stop reading warnings that cry wolf.
+ */
+function EmbeddingChangeGate({ cardCount, children }: { cardCount: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <div className="embedding-gate">
+        <button className="settings-danger-button" type="button" onClick={() => setOpen(true)}>
+          更改向量模型
+        </button>
+        <p>目前的模型隨程式附帶，沒有特別理由不需要更改。換一個模型會重新計算全部 {cardCount} 張卡片的向量。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="embedding-gate is-open">
+      <div className="embedding-gate__warning">
+        <strong>更改向量模型會重建整個卡片資料庫</strong>
+        <ul>
+          <li>全部 {cardCount} 張卡片的向量都會重新計算，大約 {rebuildEstimate(cardCount)}。</li>
+          <li>重建期間搜尋照常可用，全部算完之後才會一次換過去。</li>
+          <li>卡片的封面、分類顏色與修改時間都不會改變。</li>
+          <li>中途可以取消，取消之後卡冊維持原樣。</li>
+        </ul>
+      </div>
+      {children}
+      <button className="embedding-gate__close" type="button" onClick={() => setOpen(false)}>
+        收起，不更改
+      </button>
+    </div>
+  );
+}
+
 function AdvancedModelSection({
   kind,
   models,
@@ -660,6 +728,7 @@ function AdvancedModelSection({
   onRemoveCustom,
   onAdd,
   children,
+  gate,
   ...section
 }: {
   kind: ModelKind;
@@ -682,8 +751,11 @@ function AdvancedModelSection({
   onRemoveCustom: (id: string) => void;
   onAdd: (input: { kind: ModelKind; model_id: string; label: string; dimensions: string }) => Promise<boolean>;
   children?: ReactNode;
+  /** Wraps the choices — not the slot — when changing this model is costly. */
+  gate?: (content: ReactNode) => ReactNode;
 }) {
   const [isAdding, setAdding] = useState(false);
+  const wrap = gate ?? ((content: ReactNode) => content);
 
   return (
     <ModelSection
@@ -696,6 +768,7 @@ function AdvancedModelSection({
         </div>
       ) : null}
     >
+      {wrap(<>
       {children}
       <CardDeck kind={kind} hint="攤開這疊模型">
         {models.map((model) => (
@@ -719,6 +792,7 @@ function AdvancedModelSection({
           onClick={() => setAdding((open) => !open)}
         />
       </CardDeck>
+      </>)}
     </ModelSection>
   );
 }
@@ -741,6 +815,7 @@ function SimpleModelPicker({
   isTaskRunning,
   summarySlot,
   embeddingSlot,
+  cardCount,
   onChoose,
   onDownload,
   onSelect,
@@ -753,6 +828,7 @@ function SimpleModelPicker({
   isTaskRunning: boolean;
   summarySlot: ReactNode;
   embeddingSlot: ReactNode;
+  cardCount: number;
   onChoose: (modelId: string) => void;
   onDownload: (id: string) => void;
   onSelect: (kind: ModelKind, id: string) => void;
@@ -764,6 +840,17 @@ function SimpleModelPicker({
   const byId = new Map(models.map((model) => [model.id, model]));
   const selected = choices.embedding.find((choice) => choice.language === language && choice.tier === tier);
   const selectedModel = selected ? byId.get(selected.model_id) : undefined;
+  /**
+   * What goes in brackets after the chosen model's name.
+   *
+   * A bundled model's size is a fact about the installer, not something anyone
+   * waits for — the rule `modelTags` already follows. Printed here it sat two
+   * words away from "不需要下載", and read as a download that had not started.
+   */
+  const chosenDetails = [
+    selectedModel?.bundled ? null : selected?.size_label,
+    selected?.dimensions ? `${selected.dimensions} 維` : null,
+  ].filter(Boolean).join(" · ");
 
   /**
    * Picking an axis is the choice, so it applies itself.
@@ -814,8 +901,8 @@ function SimpleModelPicker({
       <ModelSection
         kind="embedding"
         kicker="02 / 搜尋與關聯"
-        title="你的筆記主要用什麼語言？"
-        description="每個語言與大小的組合都有專門訓練的模型。換模型會重建所有卡片的向量。"
+        title="搜尋與關聯的向量模型"
+        description="隨程式附帶，開箱就能用。"
         slotKicker="ACTIVE / 向量"
         slotLabel="向量卡槽"
         slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
@@ -823,6 +910,7 @@ function SimpleModelPicker({
         glossaryIds={["embedding", "dimensions"]}
         onDrop={onChoose}
       >
+        <EmbeddingChangeGate cardCount={cardCount}>
         <div className="simple-picker__axes">
           <div className="simple-axis" role="group" aria-label="語言">
             {[...new Map(choices.embedding.map((choice) => [choice.language, choice.language_label])).entries()].map(([value, label]) => (
@@ -846,8 +934,10 @@ function SimpleModelPicker({
           <div className="simple-picker__chosen">
             <p>
               這個組合用的是 <strong>{selected.model_label}</strong>
-              （{selected.size_label}{selected.dimensions ? ` · ${selected.dimensions} 維` : ""}）
-              {selectedModel?.installed ? "，已經放進左邊的卡槽。" : "，下載完成後就會放進左邊的卡槽。"}
+              {chosenDetails ? `（${chosenDetails}）` : ""}
+              {selectedModel?.bundled
+                ? "，隨程式附帶，不需要下載。"
+                : selectedModel?.installed ? "，已經放進左邊的卡槽。" : "，下載完成後就會放進左邊的卡槽。"}
             </p>
             {selected.note ? <p className="is-caveat">{selected.note}</p> : null}
             {selectedModel && !selectedModel.installed ? (
@@ -862,6 +952,7 @@ function SimpleModelPicker({
             ) : null}
           </div>
         ) : null}
+        </EmbeddingChangeGate>
       </ModelSection>
     </div>
   );
@@ -930,6 +1021,7 @@ function DimensionGuide({ entries, active }: { entries: DimensionGuideEntry[]; a
 
 export function ModelSettingsPanel({
   catalog,
+  cardCount,
   runtimeSettings,
   settingsDraft,
   settingsTab,
@@ -979,6 +1071,7 @@ export function ModelSettingsPanel({
   onDisableLan,
 }: {
   catalog: ModelCatalog | null;
+  cardCount: number;
   runtimeSettings: RuntimeSettings | null;
   settingsDraft: SettingsDraft;
   settingsTab: SettingsTab;
@@ -1381,6 +1474,7 @@ export function ModelSettingsPanel({
               isTaskRunning={isBackgroundTaskRunning}
               summarySlot={summarySlotCard}
               embeddingSlot={embeddingSlotCard}
+              cardCount={cardCount}
               onChoose={chooseModel}
               onDownload={onDownload}
               onSelect={onSelect}
@@ -1412,7 +1506,7 @@ export function ModelSettingsPanel({
             kind="embedding"
             kicker="02 / EMBEDDING"
             title="語意向量與關聯圖"
-            description="每個語言與大小的組合都有專門訓練的模型；維度的取捨在下面。"
+            description="隨程式附帶，開箱就能用。"
             slotKicker="ACTIVE / 向量"
             slotLabel="向量卡槽"
             slotHint="搜尋與關聯圖的語意距離由這張卡決定。"
@@ -1428,6 +1522,7 @@ export function ModelSettingsPanel({
             onRemove={onRemove}
             onRemoveCustom={onRemoveCustomModel}
             onAdd={onAddCustomModel}
+            gate={(content) => <EmbeddingChangeGate cardCount={cardCount}>{content}</EmbeddingChangeGate>}
           >
             <DimensionGuide entries={catalog.dimension_guide ?? []} active={runtimeSettings?.embedding.dimensions} />
           </AdvancedModelSection>

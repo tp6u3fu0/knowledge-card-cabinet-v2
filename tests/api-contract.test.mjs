@@ -622,7 +622,7 @@ describe("duplicates", () => {
     assert.ok(pair.source_title && pair.target_title, "the pair does not say which cards it means");
   });
 
-  // The first version of this compared a raw cosine against 0.9, which §1.3
+  // The first version of this compared a raw cosine against 0.9, which §3.3
   // says nothing useful about: on a strong multilingual model 0.9 is an
   // ordinary score for two cards that merely belong together, so a real
   // cabinet reported most of itself as duplicate. It now takes both a score at

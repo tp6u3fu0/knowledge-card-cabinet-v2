@@ -607,6 +607,73 @@
   opacity: 0.38;
 }
 
+/* The door in front of the embedding model. Same red as the reset zone: the
+   app should have one way of saying "this one costs something". */
+.embedding-gate {
+  display: grid;
+  gap: 11px;
+  justify-items: start;
+}
+
+.embedding-gate > p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.75;
+  margin: 0;
+  max-width: 560px;
+}
+
+.embedding-gate .settings-danger-button {
+  align-self: start;
+}
+
+.embedding-gate.is-open {
+  gap: 18px;
+  justify-items: stretch;
+}
+
+.embedding-gate__warning {
+  border: 1px solid rgba(163, 79, 72, 0.46);
+  border-radius: 12px;
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px;
+}
+
+.embedding-gate__warning strong {
+  color: #a34f48;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.embedding-gate__warning ul {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  gap: 5px;
+  line-height: 1.7;
+  margin: 0;
+  padding-left: 17px;
+}
+
+.embedding-gate__close {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  justify-self: start;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.embedding-gate__close:hover {
+  color: var(--ink);
+}
+
 @media (max-width: 720px) {
   .settings-modal-backdrop {
     padding: 10px;

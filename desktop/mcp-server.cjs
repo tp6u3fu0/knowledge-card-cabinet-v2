@@ -147,7 +147,7 @@ function registerTools(server) {
 
   server.registerTool("create_card", {
     title: "新增知識卡",
-    description: "建立一張知識卡；建立後會由桌面 runtime 重新產生 embedding、封面與語意關聯。",
+    description: "建立一張知識卡；建立後會由桌面 runtime 產生 embedding、封面與語意關聯。",
     inputSchema: {
       id: z.string().min(1).describe("穩定且唯一的卡片 ID"),
       number: z.string().min(1).describe("卡片編號"),
@@ -170,7 +170,7 @@ function registerTools(server) {
 
   server.registerTool("update_card", {
     title: "編輯知識卡",
-    description: "更新一張啟用中的知識卡；內容變更後會重新產生 embedding、封面與語意關聯。",
+    description: "更新一張啟用中的知識卡；內容變更後會重新產生 embedding 與語意關聯，封面不變。",
     inputSchema: {
       id: z.string().min(1).describe("知識卡 ID"),
       number: z.string().min(1).optional(),

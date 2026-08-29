@@ -11,8 +11,31 @@ import test from "node:test";
 const { startLocalApi } = await import("../desktop/local-api.cjs");
 const require = createRequire(import.meta.url);
 const { createTaskManager } = require("../desktop/task-manager.cjs");
+const { BUILTIN_EMBEDDING_MODEL, BUNDLED_EMBEDDING_MODEL, MODEL_CATALOG } = require("../desktop/model-runtime.cjs");
+const widthOf = (id) => MODEL_CATALOG.find((model) => model.id === id)?.dimensions;
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
+
+/**
+ * The text between two markers, with both ends checked.
+ *
+ * `slice(indexOf(a), indexOf(b))` reads fine and fails silently. A marker that
+ * no longer exists is -1, so the region becomes either one character or the
+ * entire rest of the file, and the assertions on it then pass or fail for a
+ * reason that has nothing to do with what the test is checking. Deleting one
+ * unrelated function did exactly that: a region meant to be forty lines long
+ * swallowed a thousand, and the failure named the wrong culprit.
+ *
+ * Prefer a marker inside the thing being read — its own closing brace — over
+ * the name of whatever happens to sit next to it in the file.
+ */
+function region(source, from, to, label) {
+  const start = source.indexOf(from);
+  assert.notEqual(start, -1, `${label}: cannot find "${from}"`);
+  const end = source.indexOf(to, start + from.length);
+  assert.notEqual(end, -1, `${label}: cannot find "${to}" after it`);
+  return source.slice(start, end);
+}
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -115,16 +138,18 @@ test("local API exposes separate summary and embedding model choices", async (co
 
   const health = await (await fetch(`${runtime.baseUrl}/health`)).json();
   // Which embedding a fresh cabinet starts on depends on whether this build
-  // bundled weights (see tests/model-catalogue.test.mjs); either way it is a
-  // 384-dim model, and summaries always start on the rule-based template.
-  assert.ok(["embedding-hash-384", "embedding-multilingual-384"].includes(health.embedding_model), health.embedding_model);
-  assert.equal(health.embedding_dimensions, 384);
+  // bundled weights (see tests/model-catalogue.test.mjs). The width follows
+  // from that choice — it used to be written out as 384, which was only ever
+  // true because both candidates happened to be that wide. Summaries always
+  // start on the rule-based template.
+  assert.ok([BUILTIN_EMBEDDING_MODEL, BUNDLED_EMBEDDING_MODEL].includes(health.embedding_model), health.embedding_model);
+  assert.equal(health.embedding_dimensions, widthOf(health.embedding_model));
   assert.equal(health.summary_model, "summary-template");
 
   const settingsResponse = await fetch(`${runtime.baseUrl}/settings`, { headers: auth });
   assert.equal(settingsResponse.status, 200);
   const settings = await settingsResponse.json();
-  assert.equal(settings.embedding.dimensions, 384);
+  assert.equal(settings.embedding.dimensions, widthOf(health.embedding_model));
   assert.equal(Object.hasOwn(settings.embedding, "api_key"), false);
 
   const invalidSettings = await fetch(`${runtime.baseUrl}/settings`, {
@@ -598,7 +623,7 @@ test("the dimension guide states the choice, not an essay per option", async () 
   const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  const guide = panels.slice(panels.indexOf("function DimensionGuide"), panels.indexOf("export function ModelSettingsPanel"));
+  const guide = region(panels, "function DimensionGuide", "export function ModelSettingsPanel", "dimension guide");
   assert.ok(guide.length > 200, "the dimension guide is gone");
   assert.match(guide, /const \[open, setOpen\] = useState<number \| null>\(null\)/u, "every dimension is open at once again");
   assert.match(guide, /aria-expanded=\{isOpen\}/u);
@@ -629,7 +654,10 @@ test("each explanation is given once, where it changes a decision", async () => 
   const rebuildOnCards = catalogue.match(/description: "[^"]*重建[^"]*"/gu) ?? [];
   assert.deepEqual(rebuildOnCards, [], `the rebuild warning is back on ${rebuildOnCards.length} model cards`);
   assert.match(panels, /若動到 embedding，儲存後會重建所有卡片的向量與關聯/u, "the save bar no longer says what saving costs");
-  assert.match(panels, /換模型會重建所有卡片的向量/u, "the simple picker applies a model immediately and no longer says so");
+  // The picker is behind a door now, so the door is where the cost is stated —
+  // once when closed, with the real number, and again in full when opened.
+  assert.match(panels, /重新計算全部 \{cardCount\} 張卡片的向量/u, "the closed gate no longer says how much work a change is");
+  assert.match(panels, /更改向量模型會重建整個卡片資料庫/u, "the opened gate no longer says what it costs to go through it");
 
   // Background that belongs to the glossary card, and is not also said inline
   // a few lines above it: `kept` is what the card must still explain, `gone` is
@@ -734,12 +762,126 @@ test("duplicates come to the reader instead of waiting in a panel", async () => 
 
   // Saying "duplicate" about two cards that merely belong together is worse
   // than saying nothing. The evidence is the wording — never a cosine against
-  // a constant (§1.3), and not the collection's own range either: on a small
+  // a constant (§3.3), and not the collection's own range either: on a small
   // cabinet that range is noise, and it voted against a retyped card while
   // giving two unrelated cards a perfect score.
-  const duplicateRule = api.slice(api.indexOf("function findDuplicates"), api.indexOf("function unitValue"));
+  const duplicateRule = region(api, "function findDuplicates", "\n}\n", "duplicate rule");
   assert.match(duplicateRule, /overlap < DUPLICATE_MIN_OVERLAP/u, "wording is not being checked at all");
   assert.doesNotMatch(duplicateRule, /cosine\(/u, "similarity is back in the duplicate rule");
+});
+
+/**
+ * Changing the embedding model is not the same kind of choice as the others.
+ *
+ * The summary model can be swapped freely and never touches a stored card.
+ * Changing the embedding model recomputes every vector in the cabinet, which is
+ * minutes of work for no gain unless something specific is wrong with the model
+ * in use. Side by side and equally reachable, the two read as the same
+ * decision, so the costly one now sits behind a door.
+ *
+ * The slot naming the model in use stays outside it: that is information, and
+ * hiding it would mean nobody could tell what their cabinet was built with.
+ */
+test("changing the embedding model is behind a door, in both views", async () => {
+  const panels = await readFile(new URL("../app/collection/panels.tsx", import.meta.url), "utf8");
+
+  const uses = panels.match(/<EmbeddingChangeGate/gu) ?? [];
+  assert.equal(uses.length, 2, `the gate is used ${uses.length} times; it belongs in the simple view and the advanced one`);
+
+  // In the simple view the axes are inside the gate and the slot is not.
+  const simple = region(panels, "function SimpleModelPicker", "\n}\n", "the simple picker");
+  const gateAt = simple.indexOf("<EmbeddingChangeGate");
+  assert.notEqual(gateAt, -1, "the simple view no longer gates the embedding choice");
+  assert.ok(gateAt < simple.indexOf("simple-picker__axes"), "the picker sits outside the gate");
+  assert.ok(simple.indexOf("slotCard={embeddingSlot}") < gateAt, "the active model is hidden behind the gate too");
+
+  // And the deck of every model in the advanced view is gated as well, or the
+  // door is a door in one view and a decoration in the other.
+  assert.match(panels, /gate=\{\(content\) => <EmbeddingChangeGate/u, "the advanced view no longer gates the embedding choice");
+});
+
+/**
+ * The semantic search has to be able to *add* a card, not only remove one.
+ *
+ * The collection filtered on "the card's text contains what was typed" AND
+ * "the host returned this card", so the vectors could only ever narrow the
+ * literal matches. That makes the whole embedding pipeline decorative, and
+ * invisibly so: the host scores a Chinese query — which has no spaces, and so
+ * is one term — against every card, but the literal test then rejects anything
+ * that does not spell the query out. Measured against the running cabinet,
+ * "為什麼需要多數決" hits "為什麼共識需要過半數？" at 0.750 and showed nothing,
+ * because those two share no character at all.
+ */
+test("a card the host matched is not thrown away for lacking the exact words", async () => {
+  const page = await readFile(new URL("../app/collection/page.tsx", import.meta.url), "utf8");
+  // Bounded by the filter's own end rather than by whatever is declared next.
+  const filter = region(page, "const filteredCards = cards.filter", "}).sort(", "the collection filter");
+
+  // Unioning the two was the first repair and it is no longer enough. The host
+  // deliberately drops cards that are merely the nearest thing on the shelf,
+  // and a local includes() puts exactly those back — which is how one word
+  // fills the screen again. The host now runs the lexical half itself, over
+  // every card including the ones carrying no vector at all (see
+  // tests/retrieval.test.mjs), so when it has answered, its answer is the
+  // result set.
+  assert.match(
+    filter,
+    /semanticSearchMatches\s*\?\s*semanticSearchMatches\.has\(card\.id\)/u,
+    "the host's answer is not what decides which cards a query matches",
+  );
+  assert.doesNotMatch(
+    filter,
+    /searchText\.includes\(query\)\s*\|\|\s*Boolean\(semanticSearchMatches/u,
+    "the local match is being unioned with the host's answer again",
+  );
+  assert.doesNotMatch(
+    filter,
+    /matchesSemanticSearch|searchText\.includes\(query\)\s*&&/u,
+    "the host's answer is back to being a second gate the literal match has to pass as well",
+  );
+  // The local match survives only as the stopgap for the moment before the
+  // first answer arrives, and for a host that is not answering at all.
+  assert.match(filter, /:\s*searchText\.includes\(query\)/u, "there is no longer anything to show before the host answers");
+  // An empty query still shows the whole cabinet.
+  assert.match(filter, /!query$/mu, "an empty query no longer matches everything");
+});
+
+/**
+ * A backend that cannot be reached has to arrive as a sentence.
+ *
+ * These routes only forward, so the failure they have to handle is the one
+ * where forwarding itself throws. Without a catch the framework answers with
+ * the plain text "Internal Server Error", and the caller — which quite
+ * reasonably expects JSON — shows the user
+ * `Unexpected token 'I', "Internal S"... is not valid JSON`. That is what the
+ * settings dialog showed, and it was the only place left in the app that could:
+ * thirty-six of thirty-eight routes already caught, settings and network/lan
+ * did not.
+ *
+ * Checked per file rather than per handler, because a file is free to share one
+ * catch between its handlers — network/lan does.
+ */
+test("every API proxy route answers a dead backend in words", async () => {
+  const root = new URL("../app/api/", import.meta.url);
+  const routes = [];
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const child = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dir);
+      if (entry.isDirectory()) await walk(child);
+      else if (entry.name === "route.ts") routes.push(child);
+    }
+  };
+  await walk(root);
+  assert.ok(routes.length >= 30, `only found ${routes.length} proxy routes`);
+
+  for (const route of routes) {
+    const source = await readFile(route, "utf8");
+    const name = route.pathname.slice(route.pathname.indexOf("/app/api/") + 9);
+    // health/ has no handlers to protect.
+    if (!/export async function (GET|POST|PUT|PATCH|DELETE)/u.test(source)) continue;
+    assert.match(source, /catch\s*(\([^)]*\))?\s*\{/u, `${name} forwards to the backend without catching a failure`);
+    assert.match(source, /status: 503/u, `${name} has no "backend unreachable" answer`);
+  }
 });
 
 test("the canvas can be arranged by colour", async () => {
@@ -841,11 +983,11 @@ test("the package leaves out only what it cannot reach", async () => {
   assert.match(builder, /electronLanguages:[\s\S]*zh-TW/u, "every Chromium locale is shipping again");
 
   // Each platform keeps its own onnxruntime binary and drops the others.
-  const windows = builder.slice(builder.indexOf("\nwin:"), builder.indexOf("\nmac:"));
+  const windows = region(builder, "\nwin:", "\nmac:", "the win: block");
   assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u);
   assert.match(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/linux\/\*\*/u);
   assert.doesNotMatch(windows, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u, "the Windows build excludes its own runtime");
-  const mac = builder.slice(builder.indexOf("\nmac:"), builder.indexOf("\nnsis:"));
+  const mac = region(builder, "\nmac:", "\nnsis:", "the mac: block");
   assert.match(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/win32\/\*\*/u);
   assert.doesNotMatch(mac, /!node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/\*\*/u, "the macOS build excludes its own runtime");
 
@@ -902,3 +1044,4 @@ test("the app can tell you which build it is", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   assert.match(readme, /KCC_UPDATE_CHECK/u, "the one network call the app makes is undocumented");
 });
+

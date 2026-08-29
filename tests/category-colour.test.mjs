@@ -7,19 +7,19 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { assignCategoryAccents, buildCover, categoryPalette, hashEmbedding } = require("../desktop/local-api.cjs");
+const { assignCategoryAccents, buildCover, categoryPalette } = require("../desktop/local-api.cjs");
 const { startLocalApi } = await import("../desktop/local-api.cjs");
 
 const projectRoot = new URL("../", import.meta.url);
 const seedPath = join(projectRoot.pathname.slice(1), "desktop", "seed.json");
 
 test("a category owns exactly one colour, whatever the card says", () => {
-  const cards = ["注意力機制", "向量資料庫", "反向傳播"];
-  const accents = cards.map((title) => buildCover(hashEmbedding(title, 384), "人工智慧").accent);
+  const cards = ["card-attention", "card-vector-db", "card-backprop"];
+  const accents = cards.map((id) => buildCover(id, "人工智慧").accent);
   assert.equal(new Set(accents).size, 1, `same category produced ${accents.join(", ")}`);
 
   // ...and the rest of the cover still varies, or every card would look alike.
-  const covers = cards.map((title) => buildCover(hashEmbedding(title, 384), "人工智慧"));
+  const covers = cards.map((id) => buildCover(id, "人工智慧"));
   assert.ok(new Set(covers.map((cover) => cover.seed)).size > 1);
   assert.ok(new Set(covers.map((cover) => JSON.stringify(cover.motifs))).size > 1);
 });

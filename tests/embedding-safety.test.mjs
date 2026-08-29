@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline } = require("../desktop/local-api.cjs");
+const { cosine, hashEmbedding, hasUsableEmbedding, relationScore, comparable, semanticBaseline, standoutFloor } = require("../desktop/local-api.cjs");
 
 const card = (embedding, overrides = {}) => ({
   id: "card", title: "標題", topic: "主題", category: "分類", tags: [], embedding, ...overrides,
@@ -139,4 +139,51 @@ test("relationScore blends semantic and lexical parts for a comparable pair", ()
   const apart = relationScore(card([1, 0], { category: "甲" }), card([1, 0], { id: "b", category: "乙" }));
   assert.ok(shared > apart, `sharing a category should score higher: ${shared} vs ${apart}`);
   assert.ok(shared <= 1 && apart >= 0);
+});
+
+/**
+ * "Nothing here is about that" has to be an answer the search can give.
+ *
+ * Ranking cannot give it: every query has a best match, and the score shown is
+ * a position inside the query's own range, so the top card reads 1.0 whatever
+ * was typed. Searching a ninety-seven card cabinet for "橘子" returned fifty
+ * cards about databases and distributed systems, each looking like a hit.
+ *
+ * The floor asks a different question — how far does the best match rise above
+ * this query's median, measured in the cabinet's own units? Nothing is compared
+ * against a constant cosine (§3.3): the unit is `semantic_baseline`, which is
+ * this cabinet measured with this model.
+ */
+const spread = (lo, hi) => ({ lo, hi });
+
+test("a query nothing in the cabinet answers clears no cards", () => {
+  // What an unanswerable query looks like: every card equally, mildly close.
+  const flat = [0.44, 0.45, 0.45, 0.46, 0.46, 0.46, 0.47, 0.47, 0.48, 0.50];
+  const floor = standoutFloor(flat, spread(0.68, 0.79));
+  assert.ok(floor !== null);
+  assert.equal(flat.filter((score) => score >= floor).length, 0, "a flat distribution let something through");
+});
+
+test("a query the cabinet answers clears the cards that answer it", () => {
+  // And what an answerable one looks like: the same crowd, plus a standout.
+  const peaked = [0.44, 0.45, 0.45, 0.46, 0.46, 0.46, 0.47, 0.47, 0.62, 0.74];
+  const floor = standoutFloor(peaked, spread(0.68, 0.79));
+  const kept = peaked.filter((score) => score >= floor);
+  assert.deepEqual(kept, [0.62, 0.74], `kept ${kept.join(", ")}`);
+});
+
+test("the floor is measured in the cabinet's units, not the query's", () => {
+  const scores = [0.44, 0.45, 0.45, 0.46, 0.46, 0.46, 0.47, 0.47, 0.62, 0.74];
+  // A cabinet whose own cards spread widely demands a bigger rise to stand out.
+  const narrow = standoutFloor(scores, spread(0.68, 0.73));
+  const wide = standoutFloor(scores, spread(0.60, 0.90));
+  assert.ok(wide > narrow, "a wider cabinet did not demand more");
+  assert.ok(scores.filter((s) => s >= wide).length < scores.filter((s) => s >= narrow).length);
+});
+
+test("the floor declines to have an opinion when it cannot have one", () => {
+  const scores = [0.44, 0.45, 0.45, 0.46, 0.46, 0.46, 0.47, 0.47, 0.62, 0.74];
+  assert.equal(standoutFloor(scores, null), null, "no baseline is still an opinion");
+  assert.equal(standoutFloor(scores.slice(0, 5), spread(0.68, 0.79)), null, "five scores are not a distribution");
+  assert.equal(standoutFloor(scores, spread(0.7, 0.7)), null, "a cabinet with no spread has no unit to measure in");
 });
