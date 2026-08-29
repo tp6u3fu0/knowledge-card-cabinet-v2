@@ -422,6 +422,35 @@ Query
 - **沒有查詢時不給整面收藏牆**，改成 `SearchResults` 列出最近整理的 12 張。這條在 `page.tsx` 用 `matchMedia` 判斷（在 effect 裡讀，桌面版 hydrate 前不可能知道）。
 - 那份列表**不帶命中理由**（`reasons={new Map()}`）。它沒有跟任何東西比對過，貼一個理由上去就是在回答沒人問的問題。
 
+### 3.22 改搜尋之前先跑 benchmark，改完再跑一次
+
+`npm run benchmark:retrieval`。58 張卡、126 個查詢、五種檢索意圖加上 12 個「卡冊裡真的沒有」的查詢，跑的是**真的內建模型**，不是測試用的替身。
+
+**單元測試和 benchmark 回答的是兩個不同的問題。** `tests/retrieval.test.mjs` 問「搜尋壞了沒」，用替身模型、不需要權重也不需要網路，所以它能進 `npm test`。benchmark 問「搜尋準不準」，那個問題只有真模型答得出來，而且一跑兩分鐘——所以它是一道指令，不是測試。
+
+**動到下面任何一個之前，先跑一次存成 baseline：**
+
+`LEXICAL_WEIGHT`、`LEXICAL_MIN_COVERAGE`、`EXACT_TITLE_BONUS`、`LEXICAL_FIELDS`、`SEMANTIC_STANDOUT`、`RELATION_MIN_SCORE`、`embeddingText()`、`/search` 的候選集或過濾條件、內建 embedding 模型。
+
+**`--gate` 是自動的那一半。** 它拿 `tests/fixtures/retrieval-benchmark/baseline.json` 比對這次的結果：Recall@3 掉超過 2 個百分點、或 no-result accuracy 掉超過 5 個百分點就 exit 1。
+
+**但 gate 失敗不等於「改回去」。** 有些交換是划算的——Recall@3 從 95 掉到 93、no-result 從 71 升到 96，那多半值得。規則是：**在 commit 訊息裡寫出前後數字與理由**，然後 `--update-baseline` 把基準線移下來。不准只寫「新模型比較好」。
+
+**不准為了讓分數回升去改 ground truth。** 新增查詢可以，改既有的 `expected` 必須有人工理由。同理，benchmark 的查詢不可以全部挑現在特別好命中的句子——它現在就有兩題答不出來，那是它有在量東西的證據。
+
+**實際用起來搜不到的句子，先加進 benchmark 再修搜尋。** 順序是「加查詢 → 確認現在真的失敗 → 修 → 確認不再失敗」，不是「憑感覺調權重」。這樣使用者的痛點會變成 regression test，而不是變成一次猜測。
+
+`--lexical` 把模型換成一台全部回 503 的服務，量的是 P-02 那條退路實際上剩下多少。實測（EmbeddingGemma 768d，58 張卡）：
+
+```
+                  hybrid    lexical-only
+Recall@1          92.1%     66.7%
+Recall@3          98.2%     67.5%
+MRR               0.951     0.670
+no-result acc.     0.0%    100.0%
+warm p50            77ms       4ms
+```
+
 ---
 
 ## 4. 連動地圖：改這裡，就一定要改那裡
@@ -433,7 +462,9 @@ Query
 | `preload.cjs` 新增 bridge | 對應的 `ipcMain.handle` 要有，而且想清楚每個視窗都拿得到它 | 前端呼叫一個不存在的 handler，錯誤只會出現在 console |
 | 有查詢時的收藏頁畫面 | 走 `SearchResults`，不要退回分類牆；一句話摘要必須在列上（P-03） | 讀者又得點開卡片才知道自己以前寫了什麼 |
 | `/search` 的候選集或過濾條件 | 想清楚它擋掉的是哪一條管線；字面那條**永遠**要看到全部的卡（§3.14） | `tests/retrieval.test.mjs` 會失敗（刻意的）——模型一壞，整個搜尋跟著壞 |
-| `LEXICAL_MIN_COVERAGE` / `LEXICAL_FIELDS` / `LEXICAL_WEIGHT` | 先跑 `tests/retrieval.test.mjs`，特別是「搜不到的東西要回 0 筆」那題 | 放寬字面門檻＝「每個查詢都回整個卡冊」換一種形式回來 |
+| `LEXICAL_MIN_COVERAGE` / `LEXICAL_FIELDS` / `LEXICAL_WEIGHT` | 先跑 `tests/retrieval.test.mjs`，特別是「搜不到的東西要回 0 筆」那題；再跑 `npm run benchmark:retrieval -- --gate`（§3.22） | 放寬字面門檻＝「每個查詢都回整個卡冊」換一種形式回來 |
+| `SEMANTIC_STANDOUT` / `EXACT_TITLE_BONUS` / `embeddingText()` / 內建 embedding 模型 | `npm run benchmark:retrieval` 前後各一次，數字寫進 commit 訊息（§3.22） | 搜尋品質變成主觀感覺，沒有人知道哪次改動讓它變差 |
+| `tests/fixtures/retrieval-benchmark/` 的 ground truth | 只增不改；要改既有的 `expected` 必須有人工理由，不可以為了讓分數回升而改（§3.22） | benchmark 開始測量自己，不再測量搜尋 |
 | `/search` 回應欄位 | `app/collection/types.ts` 的 `ApiCard`；只增不改（手機端已發布，§8） | 舊版 App 讀不到新欄位，或型別對不上 |
 | `POST /cards` 的必要欄位 | 想清楚它擋掉的是誰；只有 `title` 是必要的（§3.17）。`desktop/mcp-server.cjs` 的 `create_card` 也要跟著鬆綁 | `tests/capture.test.mjs` 會失敗（刻意的）——記帳欄位又站回卡片前面 |
 | `generateCardId()` / `nextCardNumber()` | 兩者都不可以從卡片內容算出來；編號指派一次就不重算（§3.17、§3.5） | 改一個錯字就重畫封面；或復原一張卡撞到別人的號碼 |
@@ -507,6 +538,7 @@ Query
 | `capture.test.mjs` | 只給標題也能建卡；沒有標題要擋下；編號連號、不重用垃圾桶裡的號；自帶的 id／編號照用；改卡不換號；id 可排序、不重複、沒有會看錯的字母 |
 | `source.test.mjs` | 來源連結只收 http(s)、壞連結不會弄丟卡片；種類從連結讀出來；連結一改描述舊文件的欄位全部清掉；舊卡的 source 讀得回來；缺欄位的舊資料庫會補上 |
 | `resurface.test.mjs` | 全新卡冊不亂推薦；推最久沒看的那張；讀過就不再推；一天一次而 force 例外；靜音永久有效；略過不等於靜音；payload 裡沒有分數與排程；手機拿得到推薦但碰不到 `/sources` |
+| `benchmark-retrieval.mjs`（不在 `npm test` 裡） | 搜尋準不準：Recall@1/3/5、MRR、no-result accuracy、五種意圖分別的命中率、冷熱延遲；`--gate` 擋品質退步 |
 | `embedding-safety.test.mjs` | 維度不符會丟例外、相對計分、排序不會反轉 |
 | `embedding-dimensions.test.mjs` | 寬度鎖定、fallback 不會偷換、目錄一致性 |
 | `store-migration.test.mjs` | JSON→SQLite 不掉資料、全新安裝是空的 |

@@ -1295,3 +1295,50 @@ test("looking something up does not throw away what was being written", async ()
   const quick = await readFile(new URL("../app/quick/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(quick, /card-viewer|CollectionCardViewer|FlipCard/u, "the overlay grew a second card viewer");
 });
+
+test("search quality has a recorded number to regress against", async () => {
+  // Ranking constants used to be tuned by hand against a cabinet nobody else
+  // could see, so every change was a claim rather than a measurement. The gate
+  // is what turns "search improved" into something that can be false.
+  const baseline = JSON.parse(await readFile(
+    new URL("../tests/fixtures/retrieval-benchmark/baseline.json", import.meta.url), "utf8"));
+  for (const field of ["mode", "model", "recall_at_1", "recall_at_3", "no_result_accuracy"]) {
+    assert.ok(field in baseline, `the recorded baseline has no ${field}`);
+  }
+  assert.equal(baseline.mode, "hybrid", "the baseline was recorded with the model switched off");
+
+  // The ground truth has to be big enough to mean anything, and has to include
+  // queries the cabinet should answer with nothing at all.
+  const queries = JSON.parse(await readFile(
+    new URL("../tests/fixtures/retrieval-benchmark/queries.json", import.meta.url), "utf8"));
+  const cards = JSON.parse(await readFile(
+    new URL("../tests/fixtures/retrieval-benchmark/cards.json", import.meta.url), "utf8"));
+  assert.ok(cards.length >= 30, `only ${cards.length} benchmark cards; too few to measure ranking`);
+  assert.ok(queries.length >= 60, `only ${queries.length} benchmark queries`);
+  assert.ok(queries.some((entry) => entry.expected.length === 0), "nothing checks that an absent subject returns nothing");
+
+  // Five intents, because an exact title and a half-remembered description fail
+  // for different reasons and one average hides that.
+  const intents = new Set(queries.map((entry) => entry.intent));
+  for (const intent of ["exact", "near-lexical", "conceptual", "forgotten-name", "natural-recall"]) {
+    assert.ok(intents.has(intent), `the benchmark has no ${intent} queries`);
+  }
+
+  // Every id in the ground truth has to name a card that exists, or the
+  // benchmark silently measures nothing.
+  const known = new Set(cards.map((card) => card.id));
+  for (const entry of queries) {
+    for (const id of [...entry.expected, ...entry.acceptable]) {
+      assert.ok(known.has(id), `query "${entry.query}" expects a card that does not exist: ${id}`);
+    }
+  }
+
+  // And the command exists, with the gate wired to the recorded file.
+  const runner = await readFile(new URL("../scripts/benchmark-retrieval.mjs", import.meta.url), "utf8");
+  assert.match(runner, /RECALL_AT_3_TOLERANCE/u, "the gate has no tolerance to compare against");
+  assert.match(runner, /process\.exitCode = 1/u, "a regression does not fail the command");
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.ok(pkg.scripts["benchmark:retrieval"], "there is no benchmark command to run");
+  // Deliberately not part of npm test: it needs the real weights and minutes.
+  assert.doesNotMatch(pkg.scripts.test, /benchmark/u, "the benchmark was wired into npm test");
+});

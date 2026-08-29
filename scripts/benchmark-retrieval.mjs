@@ -15,6 +15,8 @@
  *   npm run benchmark:retrieval -- --lexical    # the model broken, text only
  *   npm run benchmark:retrieval -- --json out.json
  *   npm run benchmark:retrieval -- --failures   # print every miss
+ *   npm run benchmark:retrieval -- --gate       # fail on a regression
+ *   npm run benchmark:retrieval -- --update-baseline
  *
  * A run against a cabinet of 58 cards costs one embedding pass over all of
  * them plus one per query, so it takes minutes rather than seconds. That is the
@@ -37,6 +39,21 @@ const fixtures = join(here, "..", "tests", "fixtures", "retrieval-benchmark");
 const argv = process.argv.slice(2);
 const lexicalOnly = argv.includes("--lexical");
 const showFailures = argv.includes("--failures");
+const gating = argv.includes("--gate");
+const updatingBaseline = argv.includes("--update-baseline");
+const baselineAt = join(fixtures, "baseline.json");
+/**
+ * How far Recall@3 may fall before a change has to argue for itself.
+ *
+ * Two points, from the spec: below that is inside the noise of a 114-query set
+ * (one query is 0.9 points), above it is a real loss of retrieval that has to
+ * be paid for with something — usually no-result accuracy, which is the metric
+ * most often traded against it.
+ */
+const RECALL_AT_3_TOLERANCE = 0.02;
+/** No-result accuracy is allowed less slack: it only moves when something real changed. */
+const NO_RESULT_TOLERANCE = 0.05;
+
 const jsonAt = argv.includes("--json")
   ? (argv[argv.indexOf("--json") + 1] || join(here, "..", "artifacts", "retrieval-benchmark.json"))
   : "";
@@ -191,19 +208,59 @@ async function main() {
       process.stdout.write("\n");
     }
 
+    const summary = {
+      generated_at: new Date().toISOString(),
+      mode: lexicalOnly ? "lexical-only" : "hybrid",
+      model: modelLabel,
+      cards: cards.length,
+      queries: rows.length,
+      recall_at_1: recallAt(1),
+      recall_at_3: recallAt(3),
+      recall_at_5: recallAt(5),
+      mrr,
+      no_result_accuracy: noResult,
+    };
+
+    if (updatingBaseline) {
+      await writeFile(baselineAt, `${JSON.stringify({
+        ...summary,
+        note: "Recorded by `npm run benchmark:retrieval -- --update-baseline`. "
+          + "Moving this file down is a product decision, not a chore: say in the commit what was bought with it.",
+      }, null, 2)}\n`, "utf8");
+      process.stderr.write(`基準線已更新：${baselineAt}\n`);
+    }
+
+    if (gating) {
+      const baseline = JSON.parse(await readFile(baselineAt, "utf8"));
+      if (baseline.mode !== summary.mode) {
+        throw new Error(`baseline is ${baseline.mode}, this run is ${summary.mode}; they are not comparable`);
+      }
+      const points = (value) => `${(value * 100).toFixed(1)}%`;
+      const checks = [
+        ["Recall@3", baseline.recall_at_3, summary.recall_at_3, RECALL_AT_3_TOLERANCE],
+        ["No-result accuracy", baseline.no_result_accuracy, summary.no_result_accuracy, NO_RESULT_TOLERANCE],
+      ];
+      const lost = checks.filter(([, before, after, tolerance]) => after < before - tolerance);
+      process.stdout.write("Gate\n");
+      for (const [name, before, after, tolerance] of checks) {
+        const verdict = after < before - tolerance ? "REGRESSION" : after < before ? "within tolerance" : "ok";
+        process.stdout.write(`  ${pad(name, 22)}${pad(points(before), 10)}→ ${pad(points(after), 10)}${verdict}\n`);
+      }
+      process.stdout.write("\n");
+      if (lost.length > 0) {
+        process.stderr.write(
+          "搜尋品質下降超過容許範圍。這不是自動失敗就該改回去——\n"
+          + "如果這個交換是划算的（例如 no-result 大幅提升），在 commit 訊息裡寫出前後數字與理由，\n"
+          + "再用 --update-baseline 把基準線移下來。\n",
+        );
+        process.exitCode = 1;
+      }
+    }
+
     if (jsonAt) {
       await mkdir(dirname(jsonAt), { recursive: true });
       await writeFile(jsonAt, `${JSON.stringify({
-        generated_at: new Date().toISOString(),
-        mode: lexicalOnly ? "lexical-only" : "hybrid",
-        model: modelLabel,
-        cards: cards.length,
-        queries: rows.length,
-        recall_at_1: recallAt(1),
-        recall_at_3: recallAt(3),
-        recall_at_5: recallAt(5),
-        mrr,
-        no_result_accuracy: noResult,
+        ...summary,
         latency_ms: { cold, warm_p50: percentile(warm, 0.5), warm_p95: percentile(warm, 0.95), warm_max: warm[warm.length - 1] ?? 0 },
         by_intent: Object.fromEntries([...byIntent].map(([intent, b]) => [intent, { recall_at_1: b.at1 / b.total, recall_at_3: b.at3 / b.total, queries: b.total }])),
         results: rows.map(({ query, intent, expected, rank, returned, ms }) => ({ query, intent, expected, rank, returned: returned.slice(0, 5), ms })),

@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-08-29T16:54:42.183Z",
+  "mode": "hybrid",
+  "model": "EmbeddingGemma · 768d",
+  "cards": 58,
+  "queries": 126,
+  "recall_at_1": 0.9210526315789473,
+  "recall_at_3": 0.9824561403508771,
+  "recall_at_5": 0.9912280701754386,
+  "mrr": 0.9505847953216375,
+  "no_result_accuracy": 0,
+  "note": "Recorded by `npm run benchmark:retrieval -- --update-baseline`. Moving this file down is a product decision, not a chore: say in the commit what was bought with it."
+}
