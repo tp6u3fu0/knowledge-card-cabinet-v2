@@ -100,6 +100,7 @@ xattr -dr com.apple.quarantine ~/Downloads/KnowledgeCardCabinet-*.dmg
 - **右鍵 →「打開」不再是解法。** macOS 15 之後那條路徑對已隔離的未公證 app 沒有效果；「系統設定 → 隱私權與安全性」的「仍要打開」按鈕也只會在訊息是「無法驗證開發者」時出現，「已損毀」通常沒有那顆按鈕。
 - **`.zip` 版本情況一樣**，解壓後對 `.app` 下同一道指令即可。
 - **想確認檔案真的沒壞**，用 `shasum -a 256` 比對 release 頁的檔案，或先看檔案大小是否與 release 頁一致。
+- **`codesign -dv` 看得到簽章，那不矛盾。** 建置有用 Apple Development 憑證簽過，但那是開發憑證：它不是 Developer ID，也沒有經過公證，所以 Gatekeeper 一樣不放行。「有沒有簽章」和「Gatekeeper 認不認」是兩個問題，上面那道指令回答的是第二個。
 - **官方只建置 Apple Silicon 版。** Intel Mac 請自行 `npm run desktop:dist` 從原始碼建置——本機建置出來的產物不帶 quarantine 屬性，不會有這個問題。
 
 ### 版本與更新
